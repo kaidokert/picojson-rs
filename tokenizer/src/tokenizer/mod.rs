@@ -62,13 +62,13 @@ impl<T: BitStack, D: BitStackCore> ParseContext<T, D> {
         if self.depth == 0u8.into() {
             return false;
         }
-        self.stack.top() == Some(true)
+        self.stack.top()
     }
     fn is_array(&self) -> bool {
         if self.depth == 0u8.into() {
             return false;
         }
-        self.stack.top() == Some(false)
+        !self.stack.top()
     }
 }
 

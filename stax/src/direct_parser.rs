@@ -403,8 +403,30 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 // End Unicode escape - process collected hex digits
                 return self.finish_unicode_escape();
             }
+            ujson::Event::End(EventToken::EscapeSequence) => {
+                // End of escape sequence - should not occur as individual event
+                // Escape sequences should end with specific escape types
+                return Err(ParseError::TokenizerError);
+            }
 
-            _ => EventResult::Continue, // Ignore other events for now
+            // Handle any unexpected Begin events defensively
+            ujson::Event::Begin(
+                EventToken::EscapeQuote
+                | EventToken::EscapeBackslash
+                | EventToken::EscapeSlash
+                | EventToken::EscapeBackspace
+                | EventToken::EscapeFormFeed
+                | EventToken::EscapeNewline
+                | EventToken::EscapeCarriageReturn
+                | EventToken::EscapeTab,
+            ) => {
+                // These should never have Begin events, only End events
+                return Err(ParseError::TokenizerError);
+            }
+            ujson::Event::Begin(EventToken::NumberAndArray | EventToken::NumberAndObject) => {
+                // These tokens should only appear as End events, not Begin events
+                return Err(ParseError::TokenizerError);
+            }
         })
     }
 

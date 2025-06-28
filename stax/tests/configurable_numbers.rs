@@ -6,9 +6,12 @@ use stax::{Event, NumberResult, ParseError, PullParser};
 #[test]
 #[cfg(feature = "int32")]
 fn test_int32_overflow() {
-    let input = "9999999999"; // Larger than i32::MAX (2,147,483,647)
+    let input = r#"{"value": 9999999999}"#; // Larger than i32::MAX (2,147,483,647)
     let mut scratch = [0u8; 1024];
     let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+
+    assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
+    assert!(matches!(parser.next_event(), Ok(Event::Key(_))));
 
     match parser.next_event() {
         Ok(Event::Number(num)) => {

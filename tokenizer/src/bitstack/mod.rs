@@ -6,9 +6,9 @@ pub trait BitStack {
     /// Pushes a bit (true for 1, false for 0) onto the stack.
     fn push(&mut self, bit: bool);
     /// Pops the top bit off the stack, returning it if the stack isn’t empty.
-    fn pop(&mut self) -> Option<bool>;
-    /// Returns the top bit without removing it, or None if empty.
-    fn top(&self) -> Option<bool>;
+    fn pop(&mut self) -> bool;
+    /// Returns the top bit without removing it.
+    fn top(&self) -> bool;
 }
 
 impl<T> BitStack for T
@@ -28,14 +28,14 @@ where
         *self = (self.clone() << 1u8) | T::from(bit as u8);
     }
 
-    fn pop(&mut self) -> Option<bool> {
+    fn pop(&mut self) -> bool {
         let bit = (self.clone() & T::from(1)) != T::from(0);
         *self = self.clone() >> 1u8;
-        Some(bit)
+        bit
     }
 
-    fn top(&self) -> Option<bool> {
-        Some((self.clone() & T::from(1)) != T::from(0))
+    fn top(&self) -> bool {
+        (self.clone() & T::from(1)) != T::from(0)
     }
 }
 
@@ -75,7 +75,7 @@ where
         // Note: carry from leftmost element is discarded (overflow)
     }
 
-    fn pop(&mut self) -> Option<bool> {
+    fn pop(&mut self) -> bool {
         // Extract rightmost bit from least significant element
         let bit = (self.0[N - 1].clone() & T::from(1)) != T::from(0);
 
@@ -91,12 +91,12 @@ where
             carry = old_lsb;
         }
 
-        Some(bit)
+        bit
     }
 
-    fn top(&self) -> Option<bool> {
+    fn top(&self) -> bool {
         // Return rightmost bit from least significant element without modifying
-        Some((self.0[N - 1].clone() & T::from(1)) != T::from(0))
+        (self.0[N - 1].clone() & T::from(1)) != T::from(0)
     }
 }
 
@@ -109,8 +109,8 @@ mod tests {
         let mut bitstack = 0;
         bitstack.push(true);
         bitstack.push(false);
-        assert_eq!(bitstack.pop(), Some(false));
-        assert_eq!(bitstack.pop(), Some(true));
+        assert_eq!(bitstack.pop(), false);
+        assert_eq!(bitstack.pop(), true);
     }
 
     #[test]
@@ -124,13 +124,13 @@ mod tests {
         bitstack.push(true);
 
         // Verify top() doesn't modify stack
-        assert_eq!(bitstack.top(), Some(true));
-        assert_eq!(bitstack.top(), Some(true));
+        assert_eq!(bitstack.top(), true);
+        assert_eq!(bitstack.top(), true);
 
         // Verify LIFO order
-        assert_eq!(bitstack.pop(), Some(true));
-        assert_eq!(bitstack.pop(), Some(false));
-        assert_eq!(bitstack.pop(), Some(true));
+        assert_eq!(bitstack.pop(), true);
+        assert_eq!(bitstack.pop(), false);
+        assert_eq!(bitstack.pop(), true);
     }
 
     #[test]
@@ -146,7 +146,7 @@ mod tests {
 
         // Pop and verify reverse order (LIFO)
         for &expected in pattern.iter().rev() {
-            assert_eq!(bitstack.pop(), Some(expected));
+            assert_eq!(bitstack.pop(), expected);
         }
     }
 
@@ -164,7 +164,7 @@ mod tests {
 
         // Verify we can retrieve all 8 bits in LIFO order
         for i in (0..8).rev() {
-            assert_eq!(bitstack_u8.pop(), Some(i % 2 == 0));
+            assert_eq!(bitstack_u8.pop(), i % 2 == 0);
         }
 
         // Test u32 elements (32-bit each)
@@ -177,7 +177,7 @@ mod tests {
 
         // Verify we can retrieve all 32 bits in LIFO order
         for i in (0..32).rev() {
-            assert_eq!(bitstack_u32.pop(), Some(i % 3 == 0));
+            assert_eq!(bitstack_u32.pop(), i % 3 == 0);
         }
     }
 }
