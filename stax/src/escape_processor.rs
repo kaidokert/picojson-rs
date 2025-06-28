@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::{shared::ParserErrorHandler, ParseError};
 
 /// Shared utilities for processing JSON escape sequences.

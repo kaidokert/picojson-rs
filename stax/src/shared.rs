@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Shared components for JSON parsers
 use crate::{JsonNumber, String};
 

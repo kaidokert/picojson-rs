@@ -1,4 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #![cfg_attr(not(test), no_std)]
+
+// Compile-time configuration validation
+mod config_check;
 
 mod copy_on_escape;
 

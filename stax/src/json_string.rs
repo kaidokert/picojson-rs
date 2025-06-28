@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use core::ops::Deref;
 
 /// Represents a JSON string.

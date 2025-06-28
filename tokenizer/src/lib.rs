@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #![cfg_attr(not(test), no_std)]
 
 pub mod bitstack;

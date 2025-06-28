@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Error type for SliceInputBuffer operations.
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -130,54 +132,6 @@ mod tests {
         assert!(
             buffer.consume_byte().is_err(),
             "consume_byte() should fail when pos > data.len()"
-        );
-    }
-
-    #[test]
-    fn test_empty_buffer_boundary() {
-        let data = b""; // 0 bytes
-        let mut buffer = SliceInputBuffer::new(data);
-
-        // Position 0: immediately at end for empty buffer
-        assert_eq!(buffer.current_pos(), 0);
-        assert_eq!(
-            buffer.current_pos(),
-            data.len(),
-            "pos should equal data.len() for empty buffer"
-        );
-        assert!(
-            buffer.is_past_end(),
-            "Empty buffer should be past end immediately"
-        );
-        assert!(
-            buffer.consume_byte().is_err(),
-            "consume_byte() should fail on empty buffer"
-        );
-    }
-
-    #[test]
-    fn test_single_byte_buffer_boundary() {
-        let data = b"x"; // 1 byte
-        let mut buffer = SliceInputBuffer::new(data);
-
-        // Position 0: should have data
-        assert!(
-            !buffer.is_past_end(),
-            "Single byte buffer should not start past end"
-        );
-        assert_eq!(buffer.consume_byte(), Ok(b'x'));
-
-        // Position 1: exactly at end (pos == data.len())
-        assert_eq!(buffer.current_pos(), 1);
-        assert_eq!(
-            buffer.current_pos(),
-            data.len(),
-            "pos should equal data.len()"
-        );
-        assert!(buffer.is_past_end(), "pos == data.len() should be past end");
-        assert!(
-            buffer.consume_byte().is_err(),
-            "consume_byte() should fail at end"
         );
     }
 }

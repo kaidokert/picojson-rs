@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use core::cmp::PartialEq;
 use core::ops::{BitAnd, Shl, Shr};
 

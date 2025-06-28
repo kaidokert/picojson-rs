@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::direct_buffer::DirectBuffer;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};

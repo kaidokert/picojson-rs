@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::{ParseError, String};
 
 /// A struct that encapsulates copy-on-escape string processing with full buffer ownership.

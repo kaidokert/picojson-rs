@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState, State};
