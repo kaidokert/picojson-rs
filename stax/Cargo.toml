@@ -21,10 +21,9 @@ defmt = ["dep:defmt"]
 defmt = { version = "1.0.1", optional = true }
 # TODO: Optional, should be swappable with defmt
 log = "0.4.26"
-# TODO: Not needed here
-test-env-log = "0.2.8"
 ujson = { path= "../tokenizer" }
 
 [dev-dependencies]
 test-log = "0.2"
 env_logger = "0.11.3"
+test-env-log = "0.2.8"

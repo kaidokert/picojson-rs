@@ -396,7 +396,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                     // Ignore in original parser since it uses slice-based parsing
                     None
                 }
-                // TODO: These events are possibly not needed at all ? Perhaps remove?
                 ujson::Event::End(
                     EventToken::EscapeQuote
                     | EventToken::EscapeBackslash
@@ -407,7 +406,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                     | EventToken::EscapeCarriageReturn
                     | EventToken::EscapeTab,
                 ) => {
-                    // End of escape sequence - just ignore for now
+                    // End of escape sequence - ignored here
                     None
                 }
             };

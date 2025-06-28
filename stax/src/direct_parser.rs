@@ -147,7 +147,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                             // Check if finish generated an event
                             if let Some(event) = self.parser_state.evts[0].take() {
                                 log::info!("Processing finish event: {:?}", event);
-                                match self._process_tokenizer_event(event)? {
+                                match self.process_tokenizer_event(event)? {
                                     EventResult::Complete(parsed_event) => return Ok(parsed_event),
                                     EventResult::ExtractString => {
                                         return self.extract_string_from_state();
@@ -212,7 +212,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                     if let Some(event) = self.parser_state.evts[0].take() {
                         log::info!("Processing tokenizer event: {:?}", event);
                         // Process the event and see what to do
-                        match self._process_tokenizer_event(event)? {
+                        match self.process_tokenizer_event(event)? {
                             EventResult::Complete(parsed_event) => return Ok(parsed_event),
                             EventResult::ExtractString => {
                                 // Extract string content after buffer operations are done
@@ -245,10 +245,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 }
             }
         }
-    }
-
-    fn _process_tokenizer_event(&mut self, event: ujson::Event) -> Result<EventResult, ParseError> {
-        self.process_tokenizer_event(event)
     }
 
     /// Process event and update state, but defer complex processing

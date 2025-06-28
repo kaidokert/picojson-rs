@@ -28,10 +28,3 @@ impl<T> BitStackCore for T where
         + core::fmt::Debug
 {
 }
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn it_works() {}
-}

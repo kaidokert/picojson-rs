@@ -172,7 +172,7 @@ fn main() -> Result<(), stax::ParseError> {
     println!();
 
     println!("ArrayBitStack Summary:");
-    println!("• ArrayBitStack<4, u32>: 128-bit depth (4 × 32 bits)");
+    println!("• ArrayBitStack<3, u32>: 96-bit depth (3 × 32 bits)");
     println!("• ArrayBitStack<8, u8>: 64-bit depth (8 × 8 bits) - memory efficient");
     println!("• ArrayBitStack<16, u32>: 512-bit depth (16 × 32 bits) - ultra deep");
     println!("• Configurable element type (u8, u16, u32, u64) and array size");
