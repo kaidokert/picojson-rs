@@ -100,7 +100,10 @@ impl<'a, 'b> JsonNumber<'a, 'b> {
         )
     }
 
-    /// Check if this number would be a float (has decimal point or exponent).
+    /// Returns true if this number is not an integer (i.e., has a decimal point or exponent).
+    ///
+    /// Note: This does not guarantee that float values are supported or enabled in this build.
+    /// It only indicates that the number is not an integer, regardless of float support.
     pub fn is_float(&self) -> bool {
         !self.is_integer()
     }

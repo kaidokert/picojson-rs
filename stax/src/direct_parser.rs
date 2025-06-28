@@ -1349,6 +1349,7 @@ mod tests {
             assert_eq!(num.as_str(), "3.14");
             // In no-float configuration, this should be FloatDisabled
             match num.parsed() {
+                #[cfg(not(feature = "float"))]
                 crate::NumberResult::FloatDisabled => {
                     // This is expected in no-float build
                 }
@@ -1376,6 +1377,7 @@ mod tests {
         if let Event::Number(num) = parser.next_event().unwrap() {
             assert_eq!(num.as_str(), "1e3");
             match num.parsed() {
+                #[cfg(not(feature = "float"))]
                 crate::NumberResult::FloatDisabled => {
                     // This is expected in no-float build - raw string preserved for manual parsing
                 }

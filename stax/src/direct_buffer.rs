@@ -165,7 +165,8 @@ impl<'a> DirectBuffer<'a> {
 
     /// Append a single byte to the unescaped content
     pub fn append_unescaped_byte(&mut self, byte: u8) -> Result<(), DirectBufferError> {
-        if self.unescaped_len >= self.buffer.len() {
+        let available_space = self.buffer.len().saturating_sub(self.escape_reserve);
+        if self.unescaped_len >= available_space {
             return Err(DirectBufferError::BufferFull);
         }
 
@@ -454,6 +455,59 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(db.unescaped_len, 4);
         assert_eq!(db.get_unescaped_slice().unwrap(), b"2345");
+    }
+
+    #[test]
+    fn test_append_unescaped_byte_respects_escape_reserve() {
+        let mut buffer = [0u8; 100]; // 100 byte buffer
+        let mut db = DirectBuffer::new(&mut buffer);
+
+        // Check escape reserve was set correctly (10% of 100, minimum 64)
+        let stats = db.stats();
+        assert_eq!(stats.escape_reserve, 64);
+
+        // Should be able to append up to (buffer_len - escape_reserve) bytes
+        let max_unescaped = 100 - db.escape_reserve; // 100 - 64 = 36
+
+        // Fill up to the limit - should succeed
+        for i in 0..max_unescaped {
+            let result = db.append_unescaped_byte(b'A');
+            assert!(result.is_ok(), "Failed at byte {}", i);
+        }
+
+        assert_eq!(db.unescaped_len, max_unescaped);
+
+        // One more byte should fail due to escape reserve constraint
+        let result = db.append_unescaped_byte(b'B');
+        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+
+        // Verify we didn't exceed the escape reserve boundary
+        assert_eq!(db.unescaped_len, max_unescaped);
+    }
+
+    #[test]
+    fn test_append_unescaped_byte_escape_reserve_larger_than_buffer() {
+        let mut buffer = [0u8; 10]; // Very small buffer
+        let mut db = DirectBuffer::new(&mut buffer);
+
+        // Even small buffers get minimum 64 byte escape reserve, but that's larger than buffer
+        let stats = db.stats();
+        assert_eq!(stats.escape_reserve, 64); // minimum
+
+        // Since escape_reserve (64) > buffer.len() (10), no bytes should be appendable
+        // This should not panic with underflow, but return BufferFull error
+        let result = db.append_unescaped_byte(b'A');
+        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+
+        // Test with even smaller buffer to ensure we handle underflow correctly
+        let mut tiny_buffer = [0u8; 3];
+        let mut tiny_db = DirectBuffer::new(&mut tiny_buffer);
+        let tiny_stats = tiny_db.stats();
+        assert_eq!(tiny_stats.escape_reserve, 64); // Still minimum 64
+
+        // Should handle this gracefully without panic
+        let result = tiny_db.append_unescaped_byte(b'B');
+        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
     }
 }
 

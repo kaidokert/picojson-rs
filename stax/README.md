@@ -56,4 +56,4 @@ This crate has a few configuration features relevant for embedded targets:
 
  Please see examples/no_float_demo.rs
 
- By default full float and int64 support is enabled.
+ By default, full float and int64 support is enabled.

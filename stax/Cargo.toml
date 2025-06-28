@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["int64"]     # Default to 64-bit integers for compatibility
+default = ["int64", "float"]     # Default to full support: 64-bit integers and floating point
 float = []              # Enable f64 parsing support
 
 # Integer width options (mutually exclusive)
