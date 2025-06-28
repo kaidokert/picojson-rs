@@ -1349,6 +1349,11 @@ mod tests {
                     // This is expected in float-enabled build
                     assert!((f - 3.14).abs() < f64::EPSILON);
                 }
+                #[cfg(feature = "float-truncate")]
+                crate::NumberResult::FloatTruncated(i) => {
+                    // This is expected in float-truncate build (3.14 -> 3)
+                    assert_eq!(*i, 3);
+                }
                 _ => panic!("Unexpected number parsing result for float"),
             }
         } else {

@@ -165,7 +165,7 @@ pub(super) fn parse_float(s: &str) -> NumberResult {
 
 /// Parses a float string when float feature is disabled - behavior depends on configuration.
 #[cfg(not(feature = "float"))]
-pub(super) fn parse_float(_s: &str) -> Result<NumberResult, ParseError> {
+pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
     #[cfg(feature = "float-error")]
     {
         Err(ParseError::FloatNotAllowed)
