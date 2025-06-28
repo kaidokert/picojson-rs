@@ -63,10 +63,12 @@ where
         // Shift all elements left, carrying overflow from right to left
         let bit_val = T::from(bit as u8);
         let mut carry = bit_val;
+        let element_bits = (core::mem::size_of::<T>() * 8) as u8;
+        let msb_shift = element_bits - 1;
 
         // Start from the rightmost (least significant) element and work left
         for i in (0..N).rev() {
-            let old_msb = (self.0[i].clone() >> 7u8) & T::from(1); // Extract MSB that will be lost
+            let old_msb = (self.0[i].clone() >> msb_shift) & T::from(1); // Extract MSB that will be lost
             self.0[i] = (self.0[i].clone() << 1u8) | carry;
             carry = old_msb;
         }
@@ -79,11 +81,13 @@ where
 
         // Shift all elements right, carrying underflow from left to right
         let mut carry = T::from(0);
+        let element_bits = (core::mem::size_of::<T>() * 8) as u8;
+        let msb_shift = element_bits - 1;
 
         // Start from the leftmost (most significant) element and work right
         for i in 0..N {
             let old_lsb = self.0[i].clone() & T::from(1); // Extract LSB that will be lost
-            self.0[i] = (self.0[i].clone() >> 1u8) | (carry << 7u8);
+            self.0[i] = (self.0[i].clone() >> 1u8) | (carry << msb_shift);
             carry = old_lsb;
         }
 
@@ -143,6 +147,37 @@ mod tests {
         // Pop and verify reverse order (LIFO)
         for &expected in pattern.iter().rev() {
             assert_eq!(bitstack.pop(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_element_size_handling() {
+        // Test that bitstack correctly handles different element sizes
+
+        // Test u8 elements (8-bit each)
+        let mut bitstack_u8: ArrayBitStack<1, u8> = ArrayBitStack::default();
+
+        // Fill all 8 bits of a u8 element
+        for i in 0..8 {
+            bitstack_u8.push(i % 2 == 0); // alternating pattern: true, false, true, false...
+        }
+
+        // Verify we can retrieve all 8 bits in LIFO order
+        for i in (0..8).rev() {
+            assert_eq!(bitstack_u8.pop(), Some(i % 2 == 0));
+        }
+
+        // Test u32 elements (32-bit each)
+        let mut bitstack_u32: ArrayBitStack<1, u32> = ArrayBitStack::default();
+
+        // Fill all 32 bits of a u32 element
+        for i in 0..32 {
+            bitstack_u32.push(i % 3 == 0); // pattern: true, false, false, true, false, false...
+        }
+
+        // Verify we can retrieve all 32 bits in LIFO order
+        for i in (0..32).rev() {
+            assert_eq!(bitstack_u32.pop(), Some(i % 3 == 0));
         }
     }
 }
