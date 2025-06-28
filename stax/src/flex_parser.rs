@@ -7,6 +7,20 @@ use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use ujson::BitStackCore;
 use ujson::{BitStack, EventToken, Tokenizer};
 
+/// Result of processing a tokenizer event
+enum EventResult<'a, 'b> {
+    /// Event processing complete, return this event
+    Complete(Event<'a, 'b>),
+    /// Continue processing, no event to return yet
+    Continue,
+    /// Extract string content from current state
+    ExtractString,
+    /// Extract key content from current state
+    ExtractKey,
+    /// Extract number content from current state,
+    ExtractNumber,
+}
+
 /// A flexible pull parser for JSON that yields events on demand.
 /// Generic over BitStack storage type for configurable nesting depth.
 // Lifetime 'a is the input buffer lifetime
@@ -202,225 +216,198 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
         if self.buffer.is_past_end() {
             return Ok(Event::EndDocument);
         }
-        while !self.have_events() {
-            self.pull_tokenizer_events()?;
-            if self.buffer.is_past_end() {
-                return Ok(Event::EndDocument);
-            }
-        }
-        log::info!("events, processing");
-        // Find and move out the first available event to avoid holding mutable borrow during processing
-        let taken_event = {
-            let mut found_event = None;
-            for evt in self.parser_state.evts.iter_mut() {
-                if evt.is_some() {
-                    found_event = evt.take();
-                    break;
+        loop {
+            while !self.have_events() {
+                self.pull_tokenizer_events()?;
+                if self.buffer.is_past_end() {
+                    return Ok(Event::EndDocument);
                 }
             }
-            found_event
-        };
-
-        if let Some(taken) = taken_event {
-            log::info!("taken: {:?}", taken);
-            let res = match taken {
-                // Container events
-                ujson::Event::ObjectStart => Some(Event::StartObject),
-                ujson::Event::ObjectEnd => {
-                    log::info!("end of object");
-                    Some(Event::EndObject)
-                }
-                ujson::Event::ArrayStart => Some(Event::StartArray),
-                ujson::Event::ArrayEnd => {
-                    log::info!("end of array");
-                    Some(Event::EndArray)
-                }
-
-                // String/Key events
-                ujson::Event::Begin(EventToken::Key) => {
-                    self.parser_state.state = State::Key(self.buffer.current_pos());
-                    self.copy_on_escape.begin_string(self.buffer.current_pos());
-                    None
-                }
-                ujson::Event::End(EventToken::Key) => {
-                    if let State::Key(_start) = self.parser_state.state {
-                        self.parser_state.state = State::None;
-                        // Use CopyOnEscape to get the final key result
-                        let end_pos = ContentRange::end_position_excluding_delimiter(
-                            self.buffer.current_pos(),
-                        );
-                        let key_result = self.copy_on_escape.end_string(end_pos)?;
-                        log::info!("key: {:?}", &*key_result);
-                        return Ok(Event::Key(key_result));
-                    } else {
-                        return Err(ParserErrorHandler::state_mismatch("key", "end"));
+            log::info!("events, processing");
+            // Find and move out the first available event to avoid holding mutable borrow during processing
+            let taken_event = {
+                let mut found_event = None;
+                for evt in self.parser_state.evts.iter_mut() {
+                    if evt.is_some() {
+                        found_event = evt.take();
+                        break;
                     }
                 }
-                ujson::Event::Begin(EventToken::String) => {
-                    self.parser_state.state = State::String(self.buffer.current_pos());
-                    self.copy_on_escape.begin_string(self.buffer.current_pos());
-                    None
-                }
-                ujson::Event::End(EventToken::String) => {
-                    if let State::String(_value) = self.parser_state.state {
-                        self.parser_state.state = State::None;
-                        // Use CopyOnEscape to get the final string result
-                        let end_pos = ContentRange::end_position_excluding_delimiter(
-                            self.buffer.current_pos(),
-                        );
-                        let value_result = self.copy_on_escape.end_string(end_pos)?;
-                        log::info!("value: {:?}", &*value_result);
-                        return Ok(Event::String(value_result));
-                    } else {
-                        return Err(ParserErrorHandler::state_mismatch("string", "end"));
-                    }
-                }
-
-                // Number events
-                ujson::Event::Begin(
-                    EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject,
-                ) => {
-                    log::debug!(
-                        "FlexParser: Begin Number event, current_pos={}, buffer_pos={}",
-                        self.buffer.current_pos(),
-                        self.buffer.current_pos() - 1
-                    );
-                    let number_start =
-                        ContentRange::number_start_from_current(self.buffer.current_pos());
-                    self.parser_state.state = State::Number(number_start);
-                    None
-                }
-                ujson::Event::End(EventToken::Number) => {
-                    log::debug!("FlexParser: End Number event");
-                    if let State::Number(start) = self.parser_state.state {
-                        log::debug!(
-                            "FlexParser: End Number, start={}, current_pos={}",
-                            start,
-                            self.buffer.current_pos()
-                        );
-                        // Reset state before parsing to stop selective copying
-                        self.parser_state.state = State::None;
-                        let event = self.parse_number_from_buffer(start)?;
-                        return Ok(event);
-                    } else {
-                        return Err(ParseError::UnexpectedState(
-                            "Number end without Number start",
-                        ));
-                    }
-                }
-                ujson::Event::End(EventToken::NumberAndArray) => {
-                    log::debug!("FlexParser: End NumberAndArray event");
-                    if let State::Number(start) = self.parser_state.state {
-                        log::debug!(
-                            "FlexParser: End NumberAndArray, start={}, current_pos={}",
-                            start,
-                            self.buffer.current_pos()
-                        );
-                        // Reset state before parsing to stop selective copying
-                        self.parser_state.state = State::None;
-                        let event = self.parse_number_from_buffer(start)?;
-                        return Ok(event);
-                    } else {
-                        return Err(ParseError::UnexpectedState(
-                            "Number end without Number start",
-                        ));
-                    }
-                }
-                ujson::Event::End(EventToken::NumberAndObject) => {
-                    log::debug!("FlexParser: End NumberAndObject event");
-                    if let State::Number(start) = self.parser_state.state {
-                        log::debug!(
-                            "FlexParser: End NumberAndObject, start={}, current_pos={}",
-                            start,
-                            self.buffer.current_pos()
-                        );
-                        // Reset state before parsing to stop selective copying
-                        self.parser_state.state = State::None;
-                        let event = self.parse_number_from_buffer(start)?;
-                        return Ok(event);
-                    } else {
-                        return Err(ParseError::UnexpectedState(
-                            "Number end without Number start",
-                        ));
-                    }
-                }
-                // Boolean and null values
-                ujson::Event::Begin(EventToken::True | EventToken::False | EventToken::Null) => {
-                    None
-                }
-                ujson::Event::End(EventToken::True) => Some(Event::Bool(true)),
-                ujson::Event::End(EventToken::False) => Some(Event::Bool(false)),
-                ujson::Event::End(EventToken::Null) => Some(Event::Null),
-                // Escape sequence handling
-                ujson::Event::Begin(
-                    escape_token @ (EventToken::EscapeQuote
-                    | EventToken::EscapeBackslash
-                    | EventToken::EscapeSlash
-                    | EventToken::EscapeBackspace
-                    | EventToken::EscapeFormFeed
-                    | EventToken::EscapeNewline
-                    | EventToken::EscapeCarriageReturn
-                    | EventToken::EscapeTab),
-                ) => {
-                    // Use EscapeProcessor for all simple escape sequences
-                    self.handle_simple_escape_token(&escape_token)?
-                }
-                ujson::Event::Begin(EventToken::UnicodeEscape) => {
-                    // Start Unicode escape collection - reset collector for new sequence
-                    // Only handle if we're inside a string or key
-                    match self.parser_state.state {
-                        State::String(_) | State::Key(_) => {
-                            self.unicode_escape_collector.reset();
-                        }
-                        _ => {} // Ignore if not in string/key
-                    }
-                    None
-                }
-                ujson::Event::End(EventToken::UnicodeEscape) => {
-                    // Handle end of Unicode escape sequence (\uXXXX) using shared collector
-                    match self.parser_state.state {
-                        State::String(_) | State::Key(_) => {
-                            // Process Unicode escape using shared collector logic
-                            self.process_unicode_escape_with_collector()?;
-                        }
-                        _ => {} // Ignore if not in string/key context
-                    }
-                    None
-                }
-                // EscapeSequence events (only emitted when flag is enabled, ignored in original parser)
-                ujson::Event::Begin(EventToken::EscapeSequence) => {
-                    // Ignore in original parser since it uses slice-based parsing
-                    None
-                }
-                ujson::Event::End(EventToken::EscapeSequence) => {
-                    // Ignore in original parser since it uses slice-based parsing
-                    None
-                }
-                ujson::Event::End(
-                    EventToken::EscapeQuote
-                    | EventToken::EscapeBackslash
-                    | EventToken::EscapeSlash
-                    | EventToken::EscapeBackspace
-                    | EventToken::EscapeFormFeed
-                    | EventToken::EscapeNewline
-                    | EventToken::EscapeCarriageReturn
-                    | EventToken::EscapeTab,
-                ) => {
-                    // End of escape sequence - ignored here
-                    None
-                }
+                found_event
             };
-            if let Some(event) = res {
-                return Ok(event);
+
+            if let Some(taken) = taken_event {
+                log::info!("taken: {:?}", taken);
+                let res = match taken {
+                    // Container events
+                    ujson::Event::ObjectStart => EventResult::Complete(Event::StartObject),
+                    ujson::Event::ObjectEnd => {
+                        log::info!("end of object");
+                        EventResult::Complete(Event::EndObject)
+                    }
+                    ujson::Event::ArrayStart => EventResult::Complete(Event::StartArray),
+                    ujson::Event::ArrayEnd => {
+                        log::info!("end of array");
+                        EventResult::Complete(Event::EndArray)
+                    }
+
+                    // String/Key events
+                    ujson::Event::Begin(EventToken::Key) => {
+                        self.parser_state.state = State::Key(self.buffer.current_pos());
+                        self.copy_on_escape.begin_string(self.buffer.current_pos());
+                        EventResult::Continue
+                    }
+                    ujson::Event::End(EventToken::Key) => EventResult::ExtractKey,
+                    ujson::Event::Begin(EventToken::String) => {
+                        self.parser_state.state = State::String(self.buffer.current_pos());
+                        self.copy_on_escape.begin_string(self.buffer.current_pos());
+                        EventResult::Continue
+                    }
+                    ujson::Event::End(EventToken::String) => EventResult::ExtractString,
+
+                    // Number events
+                    ujson::Event::Begin(
+                        EventToken::Number
+                        | EventToken::NumberAndArray
+                        | EventToken::NumberAndObject,
+                    ) => {
+                        log::debug!(
+                            "FlexParser: Begin Number event, current_pos={}, buffer_pos={}",
+                            self.buffer.current_pos(),
+                            self.buffer.current_pos() - 1
+                        );
+                        let number_start =
+                            ContentRange::number_start_from_current(self.buffer.current_pos());
+                        self.parser_state.state = State::Number(number_start);
+                        EventResult::Continue
+                    }
+                    ujson::Event::End(EventToken::Number) => EventResult::ExtractNumber,
+                    ujson::Event::End(EventToken::NumberAndArray) => EventResult::ExtractNumber,
+                    ujson::Event::End(EventToken::NumberAndObject) => EventResult::ExtractNumber,
+                    // Boolean and null values
+                    ujson::Event::Begin(
+                        EventToken::True | EventToken::False | EventToken::Null,
+                    ) => EventResult::Continue,
+                    ujson::Event::End(EventToken::True) => EventResult::Complete(Event::Bool(true)),
+                    ujson::Event::End(EventToken::False) => {
+                        EventResult::Complete(Event::Bool(false))
+                    }
+                    ujson::Event::End(EventToken::Null) => EventResult::Complete(Event::Null),
+                    // Escape sequence handling
+                    ujson::Event::Begin(
+                        escape_token @ (EventToken::EscapeQuote
+                        | EventToken::EscapeBackslash
+                        | EventToken::EscapeSlash
+                        | EventToken::EscapeBackspace
+                        | EventToken::EscapeFormFeed
+                        | EventToken::EscapeNewline
+                        | EventToken::EscapeCarriageReturn
+                        | EventToken::EscapeTab),
+                    ) => {
+                        // Use EscapeProcessor for all simple escape sequences
+                        self.handle_simple_escape_token(&escape_token)?;
+                        EventResult::Continue
+                    }
+                    ujson::Event::Begin(EventToken::UnicodeEscape) => {
+                        // Start Unicode escape collection - reset collector for new sequence
+                        // Only handle if we're inside a string or key
+                        match self.parser_state.state {
+                            State::String(_) | State::Key(_) => {
+                                self.unicode_escape_collector.reset();
+                            }
+                            _ => {} // Ignore if not in string/key
+                        }
+                        EventResult::Continue
+                    }
+                    ujson::Event::End(EventToken::UnicodeEscape) => {
+                        // Handle end of Unicode escape sequence (\uXXXX) using shared collector
+                        match self.parser_state.state {
+                            State::String(_) | State::Key(_) => {
+                                // Process Unicode escape using shared collector logic
+                                self.process_unicode_escape_with_collector()?;
+                            }
+                            _ => {} // Ignore if not in string/key context
+                        }
+                        EventResult::Continue
+                    }
+                    // EscapeSequence events (only emitted when flag is enabled, ignored in original parser)
+                    ujson::Event::Begin(EventToken::EscapeSequence) => {
+                        // Ignore in original parser since it uses slice-based parsing
+                        EventResult::Continue
+                    }
+                    ujson::Event::End(EventToken::EscapeSequence) => {
+                        // Ignore in original parser since it uses slice-based parsing
+                        EventResult::Continue
+                    }
+                    ujson::Event::End(
+                        EventToken::EscapeQuote
+                        | EventToken::EscapeBackslash
+                        | EventToken::EscapeSlash
+                        | EventToken::EscapeBackspace
+                        | EventToken::EscapeFormFeed
+                        | EventToken::EscapeNewline
+                        | EventToken::EscapeCarriageReturn
+                        | EventToken::EscapeTab,
+                    ) => {
+                        // End of escape sequence - ignored here
+                        EventResult::Continue
+                    }
+                };
+                match res {
+                    EventResult::Complete(event) => break Ok(event),
+                    EventResult::Continue => continue,
+                    EventResult::ExtractKey => {
+                        if let State::Key(_start) = self.parser_state.state {
+                            self.parser_state.state = State::None;
+                            // Use CopyOnEscape to get the final key result
+                            let end_pos = ContentRange::end_position_excluding_delimiter(
+                                self.buffer.current_pos(),
+                            );
+                            let key_result = self.copy_on_escape.end_string(end_pos)?;
+                            log::info!("key: {:?}", &*key_result);
+                            break Ok(Event::Key(key_result));
+                        } else {
+                            break Err(ParserErrorHandler::state_mismatch("key", "end"));
+                        }
+                    }
+                    EventResult::ExtractString => {
+                        if let State::String(_value) = self.parser_state.state {
+                            self.parser_state.state = State::None;
+                            // Use CopyOnEscape to get the final string result
+                            let end_pos = ContentRange::end_position_excluding_delimiter(
+                                self.buffer.current_pos(),
+                            );
+                            let value_result = self.copy_on_escape.end_string(end_pos)?;
+                            log::info!("value: {:?}", &*value_result);
+                            break Ok(Event::String(value_result));
+                        } else {
+                            break Err(ParserErrorHandler::state_mismatch("string", "end"));
+                        }
+                    }
+                    EventResult::ExtractNumber => {
+                        if let State::Number(start) = self.parser_state.state {
+                            log::debug!(
+                                "FlexParser: End Number, start={}, current_pos={}",
+                                start,
+                                self.buffer.current_pos()
+                            );
+                            // Reset state before parsing to stop selective copying
+                            self.parser_state.state = State::None;
+                            let event = self.parse_number_from_buffer(start)?;
+                            break Ok(event);
+                        } else {
+                            break Err(ParseError::UnexpectedState(
+                                "Number end without Number start",
+                            ));
+                        }
+                    }
+                }
             } else {
-                // No event was produced, need to call next_event recursively
-                return self.next_event();
+                // No event available - this shouldn't happen since we ensured have_events() above
+                break Err(ParseError::UnexpectedState(
+                    "No events available after ensuring events exist".into(),
+                ));
             }
-        } else {
-            // No event available - this shouldn't happen since we ensured have_events() above
-            return Err(ParseError::UnexpectedState(
-                "No events available after ensuring events exist",
-            ));
         }
     }
 }
