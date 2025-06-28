@@ -75,9 +75,9 @@ impl EscapeProcessor {
             b'\\' => Ok(b'\\'),
             b'"' => Ok(b'"'),
             b'/' => Ok(b'/'),
-            b'b' => Ok(0x08),                        // Backspace
-            b'f' => Ok(0x0C),                        // Form feed
-            _ => Err(ParseError::InvalidUnicodeHex), // Reusing this error for invalid escapes
+            b'b' => Ok(0x08), // Backspace
+            b'f' => Ok(0x0C), // Form feed
+            _ => Err(ParseError::InvalidEscapeSequence),
         }
     }
 

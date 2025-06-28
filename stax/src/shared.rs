@@ -45,6 +45,8 @@ pub enum ParseError {
     InvalidUnicodeHex,
     /// Valid hex but invalid Unicode codepoint.
     InvalidUnicodeCodepoint,
+    /// Invalid escape sequence character.
+    InvalidEscapeSequence,
     /// Float encountered but float support is disabled and float-error is configured
     #[cfg(all(not(feature = "float"), feature = "float-error"))]
     FloatNotAllowed,
