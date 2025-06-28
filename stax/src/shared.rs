@@ -234,31 +234,6 @@ impl ParserErrorHandler {
         }
     }
 
-    /// Validate buffer boundaries and create appropriate error
-    ///
-    /// # Arguments
-    /// * `start` - Start position
-    /// * `end` - End position
-    /// * `buffer_len` - Buffer length for validation
-    ///
-    /// # Returns
-    /// ParseError::UnexpectedState if boundaries are invalid
-    pub fn validate_buffer_bounds(
-        start: usize,
-        end: usize,
-        buffer_len: usize,
-    ) -> Result<(), ParseError> {
-        if start > end {
-            Err(ParseError::UnexpectedState(
-                "Start position after end position",
-            ))
-        } else if end > buffer_len {
-            Err(ParseError::UnexpectedState("End position beyond buffer"))
-        } else {
-            Ok(())
-        }
-    }
-
     /// Create error for invalid Unicode escape sequences
     pub fn invalid_unicode_escape() -> ParseError {
         ParseError::InvalidUnicodeHex
