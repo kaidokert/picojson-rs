@@ -153,7 +153,7 @@ More: In addition of taking just slice [u8] as input, we should accept an `impl 
 So that the input can come no-copy from any source with low buffering
 
 Note std::io has Read trait, but unfortunately that's not available in core::, so probably have to
-make our own, and auto-implent it for arrays and slices or for anything that looks like AsRef<[u8]>
+make our own, and auto-implement it for arrays and slices or for anything that looks like AsRef<[u8]>
 
 ## 7. TODO: Working with returned values
 

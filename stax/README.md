@@ -6,7 +6,7 @@ Note: For "document" style parsing where all or most of the document is fully
 built in memory, please use serde-json with no_std.
 
 However - pull parsing is useful when you need to process large streams within
-constained memory, without building the entire document, and just picking
+constrained memory, without building the entire document, and just picking
 elements from the dataset that the application needs.
 
 Example usage:

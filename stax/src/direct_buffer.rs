@@ -116,13 +116,18 @@ impl<'a> DirectBuffer<'a> {
 
         // Copy existing content if there is any
         if copy_end > copy_start && copy_start < self.data_end {
-            let copy_len = (copy_end - copy_start).min(self.buffer.len());
+            let span_len = copy_end - copy_start;
 
-            // Copy within the same buffer: move data from [copy_start..copy_end] to [0..copy_len]
+            // Ensure the span fits in the buffer - return error instead of silent truncation
+            if span_len > self.buffer.len() {
+                return Err(DirectBufferError::BufferFull);
+            }
+
+            // Copy within the same buffer: move data from [copy_start..copy_end] to [0..span_len]
             // Use copy_within to handle overlapping ranges safely
             self.buffer
-                .copy_within(copy_start..copy_start + copy_len, 0);
-            self.unescaped_len = copy_len;
+                .copy_within(copy_start..copy_start + span_len, 0);
+            self.unescaped_len = span_len;
         }
 
         Ok(())
@@ -414,6 +419,41 @@ mod tests {
         db.advance().unwrap();
 
         assert!(db.is_empty());
+    }
+
+    #[test]
+    fn test_start_unescaping_with_copy_span_too_large() {
+        let mut buffer = [0u8; 10]; // Small buffer
+        let mut db = DirectBuffer::new(&mut buffer);
+
+        // Fill buffer with some data
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice.copy_from_slice(b"0123456789");
+        }
+        db.mark_filled(10).unwrap();
+
+        // Try to copy a span that's larger than the entire buffer
+        let copy_start = 0;
+        let copy_end = 15; // This span (15 bytes) is larger than buffer (10 bytes)
+        let max_escaped_len = 5; // This is fine
+
+        // Should return BufferFull error instead of silently truncating
+        let result = db.start_unescaping_with_copy(max_escaped_len, copy_start, copy_end);
+        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+
+        // Test boundary case: span exactly equals buffer size should work
+        let copy_end_exact = 10; // Span of exactly 10 bytes (buffer size)
+        let result = db.start_unescaping_with_copy(max_escaped_len, 0, copy_end_exact);
+        assert!(result.is_ok());
+        assert_eq!(db.unescaped_len, 10);
+
+        // Test valid smaller span should work
+        db.clear_unescaped();
+        let result = db.start_unescaping_with_copy(max_escaped_len, 2, 6); // 4 byte span
+        assert!(result.is_ok());
+        assert_eq!(db.unescaped_len, 4);
+        assert_eq!(db.get_unescaped_slice().unwrap(), b"2345");
     }
 }
 

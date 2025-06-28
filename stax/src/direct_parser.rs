@@ -13,7 +13,11 @@ pub trait Reader {
 
     /// Read data into the provided buffer.
     /// Returns the number of bytes read, or an error.
-    /// A return value of 0 indicates end of stream.
+    ///
+    /// # Contract
+    /// - A return value of 0 **MUST** indicate true end of stream
+    /// - Implementations **MUST NOT** return 0 unless no more data will ever be available
+    /// - Returning 0 followed by non-zero reads in subsequent calls violates this contract
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
 }
 
@@ -501,8 +505,8 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             log::debug!("Read {} bytes from reader", bytes_read);
             self.direct_buffer.mark_filled(bytes_read)?;
 
-            // Note: bytes_read == 0 indicates end-of-stream, which is handled
-            // by the tokenizer when it detects no more data to process
+            // Note: bytes_read == 0 indicates end-of-stream per trait contract.
+            // The main loop will handle transitioning to Finished state when buffer is empty.
         }
         Ok(())
     }
