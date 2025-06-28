@@ -180,10 +180,8 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
             Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
         };
 
-        if res.is_err() {
-            return Err(ParseError::UnexpectedState(
-                "Failed to pull tokenizer events",
-            ));
+        if let Err(_tokenizer_error) = res {
+            return Err(ParseError::TokenizerError);
         }
         Ok(())
     }

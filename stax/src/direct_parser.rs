@@ -496,10 +496,13 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             let bytes_read = self
                 .reader
                 .read(fill_slice)
-                .map_err(|_| ParseError::EndOfData)?;
+                .map_err(|_| ParseError::ReaderError)?;
 
             log::debug!("Read {} bytes from reader", bytes_read);
             self.direct_buffer.mark_filled(bytes_read)?;
+
+            // Note: bytes_read == 0 indicates end-of-stream, which is handled
+            // by the tokenizer when it detects no more data to process
         }
         Ok(())
     }

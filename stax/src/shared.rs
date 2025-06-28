@@ -58,6 +58,8 @@ pub enum ParseError {
     },
     /// End of input stream was reached unexpectedly
     EndOfStream,
+    /// Error from the underlying reader (I/O error, not end-of-stream)
+    ReaderError,
 }
 
 impl From<core::str::Utf8Error> for ParseError {
