@@ -389,7 +389,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 | EventToken::EscapeTab),
             ) => {
                 // Process simple escape sequence
-                self.handle_simple_escape(&escape_token)
+                self.handle_simple_escape(&escape_token)?
             }
             ujson::Event::Begin(EventToken::UnicodeEscape) => {
                 // Start Unicode escape - initialize hex collection
@@ -586,7 +586,10 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
     }
 
     /// Handle simple escape sequence using unified EscapeProcessor
-    fn handle_simple_escape(&mut self, escape_token: &EventToken) -> EventResult {
+    fn handle_simple_escape(
+        &mut self,
+        escape_token: &EventToken,
+    ) -> Result<EventResult, ParseError> {
         // Update escape state in enum
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -598,12 +601,10 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 
         // Use unified escape token processing from EscapeProcessor
         if let Ok(unescaped_char) = EscapeProcessor::process_escape_token(escape_token) {
-            if let Err(_) = self.append_byte_to_escape_buffer(unescaped_char) {
-                // Handle error - for now just continue
-            }
+            self.append_byte_to_escape_buffer(unescaped_char)?;
         }
 
-        EventResult::Continue
+        Ok(EventResult::Continue)
     }
 
     /// Start Unicode escape sequence
