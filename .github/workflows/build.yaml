@@ -30,10 +30,31 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: Default
+          # Default configuration (int64 + float)
+          - name: Default (int64 + float)
             features: ""
+
+          # No features baseline
           - name: No features
             features: --no-default-features
+
+          # int32 configurations
+          - name: int32 + float
+            features: --no-default-features --features "int32,float"
+          - name: int32 + float-skip
+            features: --no-default-features --features "int32,float-skip"
+          - name: int32 + float-error
+            features: --no-default-features --features "int32,float-error"
+          - name: int32 + float-truncate
+            features: --no-default-features --features "int32,float-truncate"
+
+          # int64 configurations (beyond default)
+          - name: int64 + float-skip
+            features: --no-default-features --features "int64,float-skip"
+          - name: int64 + float-error
+            features: --no-default-features --features "int64,float-error"
+          - name: int64 + float-truncate
+            features: --no-default-features --features "int64,float-truncate"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
