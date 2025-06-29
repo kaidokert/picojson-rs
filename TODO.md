@@ -1,11 +1,11 @@
 ## TODO list
 - API cleanup, rename things
 - Constify what's possible
-- Remove .unwrap()'s
-- Remove a few unnecessary 'statics
+- Remove `.unwrap()` calls
+- Remove unnecessary `'static` lifetimes
 - Dependency cleanup
 - Clippy cleanup
-- Remove todo's
+- Address and remove `// TODO` comments
 - Put all shippable features in one crate ( tokenizer, pull + push parsers )
 - Clean up reference docs
 - Provide user guide docs
