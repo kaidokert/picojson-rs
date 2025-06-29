@@ -37,6 +37,9 @@ impl From<slice_input_buffer::Error> for ParseError {
     fn from(err: slice_input_buffer::Error) -> Self {
         match err {
             slice_input_buffer::Error::ReachedEnd => ParseError::EndOfData,
+            slice_input_buffer::Error::InvalidSliceBounds => {
+                ParseError::UnexpectedState("Invalid slice bounds in input buffer")
+            }
         }
     }
 }

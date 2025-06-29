@@ -144,7 +144,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
             ContentRange::unicode_escape_bounds(current_pos);
 
         // Extract the 4 hex digits from buffer
-        let hex_slice = self.buffer.slice(hex_start, hex_end);
+        let hex_slice = self.buffer.slice(hex_start, hex_end)?;
 
         if hex_slice.len() != 4 {
             return Err(ParserErrorHandler::invalid_unicode_length());
@@ -185,6 +185,11 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
         let res = match self.buffer.consume_byte() {
             Err(crate::slice_input_buffer::Error::ReachedEnd) => {
                 self.tokenizer.finish(&mut callback)
+            }
+            Err(crate::slice_input_buffer::Error::InvalidSliceBounds) => {
+                return Err(ParseError::UnexpectedState(
+                    "Invalid slice bounds in consume_byte",
+                ));
             }
             Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
         };

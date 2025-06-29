@@ -5,6 +5,8 @@
 pub enum Error {
     /// Reached the end of input data.
     ReachedEnd,
+    /// Invalid slice bounds provided.
+    InvalidSliceBounds,
 }
 
 /// A buffer that manages input data and current parsing position.
@@ -43,9 +45,12 @@ impl<'a> SliceInputBuffer<'a> {
         Self { data, pos: 0 }
     }
 
-    /// Gets a slice of the data from start to end positions.
-    pub fn slice(&self, start: usize, end: usize) -> &'a [u8] {
-        &self.data[start..end]
+    /// Gets a slice of the data from start to end positions, with bounds checking.
+    pub fn slice(&self, start: usize, end: usize) -> Result<&'a [u8], Error> {
+        if start > end || end > self.data.len() {
+            return Err(Error::InvalidSliceBounds);
+        }
+        Ok(&self.data[start..end])
     }
 }
 
