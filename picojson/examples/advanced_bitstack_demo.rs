@@ -10,7 +10,7 @@ fn main() -> Result<(), ParseError> {
     println!("1. Standard PullParser (u32 BitStack, ~32 levels max):");
     let json = r#"{"deeply": {"nested": {"object": {"with": {"data": "test"}}}}}"#;
     let mut scratch = [0u8; 512];
-    let mut parser = PullParser::new_with_buffer(json, &mut scratch);
+    let mut parser = PullParser::with_buffer(json, &mut scratch);
     let mut depth = 0;
     while let Some(event) = parser.next() {
         match event? {
@@ -34,7 +34,8 @@ fn main() -> Result<(), ParseError> {
     println!("2. Memory-efficient PullParserFlex (u8 BitStack, ~8 levels max):");
     let json = r#"{"shallow": {"data": [1, 2, 3]}}"#;
     let mut scratch = [0u8; 256];
-    let mut parser = PullParser::<BitStackStruct<u8, u8>>::with_config(json, &mut scratch);
+    let mut parser =
+        PullParser::<BitStackStruct<u8, u8>>::with_config_and_buffer(json, &mut scratch);
     let mut depth = 0;
     while let Some(event) = parser.next() {
         match event? {
@@ -66,7 +67,8 @@ fn main() -> Result<(), ParseError> {
     println!("3. Deep-nesting PullParserFlex (u64 BitStack, ~64 levels max):");
     let json = r#"{"very": {"deeply": {"nested": {"structure": {"with": {"many": {"levels": {"data": "deep"}}}}}}}}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::<BitStackStruct<u64, u16>>::with_config(json, &mut scratch);
+    let mut parser =
+        PullParser::<BitStackStruct<u64, u16>>::with_config_and_buffer(json, &mut scratch);
     let mut depth = 0;
     while let Some(event) = parser.next() {
         match event? {
