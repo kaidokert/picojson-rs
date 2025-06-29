@@ -101,8 +101,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         self.processing_state = ProcessingState::Finished;
 
                         // Clear events and try to finish tokenizer
-                        self.parser_state.evts[0] = None;
-                        self.parser_state.evts[1] = None;
+                        self.clear_events();
                         let mut callback = |event, _len| {
                             // Store events in the array, filling available slots (same as FlexParser)
                             for evt in self.parser_state.evts.iter_mut() {
@@ -128,8 +127,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                     self.direct_buffer.advance()?;
 
                     // Process byte through tokenizer
-                    self.parser_state.evts[0] = None;
-                    self.parser_state.evts[1] = None;
+                    self.clear_events();
                     let mut callback = |event, _len| {
                         // Store events in the array, filling available slots (same as FlexParser)
                         for evt in self.parser_state.evts.iter_mut() {
@@ -289,7 +287,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                                 log::trace!("DirectParser: Processing Unicode escape");
-                                self.process_unicode_escape_like_flexparser()?;
+                                self.process_unicode_escape_with_collector()?;
                             }
                             _ => {
                                 log::trace!(
@@ -414,6 +412,12 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
         // Use unified number parsing logic
         crate::number_parser::parse_number_event(&self.direct_buffer, start_pos, from_container_end)
     }
+    /// Clear event slots
+    fn clear_events(&mut self) {
+        self.parser_state.evts[0] = None;
+        self.parser_state.evts[1] = None;
+    }
+
     /// Fill buffer from reader
     fn fill_buffer_from_reader(&mut self) -> Result<(), ParseError> {
         if let Some(fill_slice) = self.direct_buffer.get_fill_slice() {
@@ -554,7 +558,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 
     /// Process Unicode escape sequence using FlexParser approach
     /// Extracts hex digits from buffer and processes them through the collector
-    fn process_unicode_escape_like_flexparser(&mut self) -> Result<(), ParseError> {
+    fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         // Update escape state in enum - Unicode escape processing is complete
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -1266,7 +1270,7 @@ mod tests {
                 result.is_err(),
                 "Expected error for float with float-error configuration"
             );
-            return; // Test ends here for float-error
+            // Test ends here for float-error - no more processing needed
         }
 
         #[cfg(not(feature = "float-error"))]
@@ -1298,52 +1302,180 @@ mod tests {
             } else {
                 panic!("Expected Number event");
             }
-        }
 
-        // Scientific notation handling varies by float configuration
-        assert_eq!(
-            parser.next_event().unwrap(),
-            Event::Key(crate::String::Borrowed("scientific"))
-        );
-
-        // float-truncate rejects scientific notation, so test should end early for that config
-        #[cfg(feature = "float-truncate")]
-        {
-            // float-truncate rejects scientific notation since it would require float math
-            let result = parser.next_event();
-            assert!(
-                result.is_err(),
-                "Expected error for scientific notation with float-truncate"
+            // Scientific notation handling varies by float configuration
+            assert_eq!(
+                parser.next_event().unwrap(),
+                Event::Key(crate::String::Borrowed("scientific"))
             );
-            return; // Test ends here for float-truncate
-        }
 
-        #[cfg(not(feature = "float-truncate"))]
-        {
-            if let Event::Number(num) = parser.next_event().unwrap() {
-                assert_eq!(num.as_str(), "1e3");
-                match num.parsed() {
-                    #[cfg(not(feature = "float"))]
-                    crate::NumberResult::FloatDisabled => {
-                        // This is expected in no-float build - raw string preserved for manual parsing
-                    }
-                    #[cfg(feature = "float-skip")]
-                    crate::NumberResult::FloatSkipped => {
-                        // This is expected in float-skip build
-                    }
-                    #[cfg(feature = "float")]
-                    crate::NumberResult::Float(f) => {
-                        // This is expected in float-enabled build
-                        assert!((f - 1000.0).abs() < f64::EPSILON);
-                    }
-                    _ => panic!("Unexpected number parsing result for scientific notation"),
-                }
-            } else {
-                panic!("Expected Number event");
+            // float-truncate rejects scientific notation, so test should end early for that config
+            #[cfg(feature = "float-truncate")]
+            {
+                // float-truncate rejects scientific notation since it would require float math
+                let result = parser.next_event();
+                assert!(
+                    result.is_err(),
+                    "Expected error for scientific notation with float-truncate"
+                );
+                // Test ends here for float-truncate - no more processing needed
             }
 
-            assert_eq!(parser.next_event().unwrap(), Event::EndObject);
-            assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+            #[cfg(not(feature = "float-truncate"))]
+            {
+                if let Event::Number(num) = parser.next_event().unwrap() {
+                    assert_eq!(num.as_str(), "1e3");
+                    match num.parsed() {
+                        #[cfg(not(feature = "float"))]
+                        crate::NumberResult::FloatDisabled => {
+                            // This is expected in no-float build - raw string preserved for manual parsing
+                        }
+                        #[cfg(feature = "float-skip")]
+                        crate::NumberResult::FloatSkipped => {
+                            // This is expected in float-skip build
+                        }
+                        #[cfg(feature = "float")]
+                        crate::NumberResult::Float(f) => {
+                            // This is expected in float-enabled build
+                            assert!((f - 1000.0).abs() < f64::EPSILON);
+                        }
+                        _ => panic!("Unexpected number parsing result for scientific notation"),
+                    }
+                } else {
+                    panic!("Expected Number event");
+                }
+
+                assert_eq!(parser.next_event().unwrap(), Event::EndObject);
+                assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+            }
+        }
+    }
+
+    #[test]
+    fn test_number_parsing_delimiter_exclusion() {
+        // Test that numbers don't include trailing delimiters in various contexts
+        
+        // Test 1: Number followed by array end
+        let json1 = b"[123]";
+        let reader1 = SliceReader::new(json1);
+        let mut buffer1 = [0u8; 256];
+        let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
+        
+        assert!(matches!(parser1.next_event().unwrap(), Event::StartArray));
+        if let Event::Number(num) = parser1.next_event().unwrap() {
+            assert_eq!(num.as_str(), "123", "Number should not include trailing delimiter ']'");
+        } else {
+            panic!("Expected Number event");
+        }
+        assert!(matches!(parser1.next_event().unwrap(), Event::EndArray));
+
+        // Test 2: Number followed by object end
+        let json2 = b"{\"key\":456}";
+        let reader2 = SliceReader::new(json2);
+        let mut buffer2 = [0u8; 256];
+        let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
+        
+        assert!(matches!(parser2.next_event().unwrap(), Event::StartObject));
+        assert!(matches!(parser2.next_event().unwrap(), Event::Key(_)));
+        if let Event::Number(num) = parser2.next_event().unwrap() {
+            assert_eq!(num.as_str(), "456", "Number should not include trailing delimiter '}}'");
+        } else {
+            panic!("Expected Number event");
+        }
+        assert!(matches!(parser2.next_event().unwrap(), Event::EndObject));
+
+        // Test 3: Number followed by comma in array
+        let json3 = b"[789,10]";
+        let reader3 = SliceReader::new(json3);
+        let mut buffer3 = [0u8; 256];
+        let mut parser3 = TestDirectParser::new(reader3, &mut buffer3);
+        
+        assert!(matches!(parser3.next_event().unwrap(), Event::StartArray));
+        if let Event::Number(num1) = parser3.next_event().unwrap() {
+            assert_eq!(num1.as_str(), "789", "First number should not include trailing delimiter ','");
+        } else {
+            panic!("Expected first Number event");
+        }
+        if let Event::Number(num2) = parser3.next_event().unwrap() {
+            assert_eq!(num2.as_str(), "10", "Second number should not include trailing delimiter ']'");
+        } else {
+            panic!("Expected second Number event");
+        }
+        assert!(matches!(parser3.next_event().unwrap(), Event::EndArray));
+
+        // Test 4: Number followed by comma in object
+        let json4 = b"{\"a\":11,\"b\":22}";
+        let reader4 = SliceReader::new(json4);
+        let mut buffer4 = [0u8; 256];
+        let mut parser4 = TestDirectParser::new(reader4, &mut buffer4);
+        
+        assert!(matches!(parser4.next_event().unwrap(), Event::StartObject));
+        assert!(matches!(parser4.next_event().unwrap(), Event::Key(_)));
+        if let Event::Number(num1) = parser4.next_event().unwrap() {
+            assert_eq!(num1.as_str(), "11", "First number should not include trailing delimiter ','");
+        } else {
+            panic!("Expected first Number event");
+        }
+        assert!(matches!(parser4.next_event().unwrap(), Event::Key(_)));
+        if let Event::Number(num2) = parser4.next_event().unwrap() {
+            assert_eq!(num2.as_str(), "22", "Second number should not include trailing delimiter '}}'");
+        } else {
+            panic!("Expected second Number event");
+        }
+        assert!(matches!(parser4.next_event().unwrap(), Event::EndObject));
+
+        // Test 5: Standalone number at end of document (should include full content)
+        let json5 = b"999";
+        let reader5 = SliceReader::new(json5);
+        let mut buffer5 = [0u8; 256];
+        let mut parser5 = TestDirectParser::new(reader5, &mut buffer5);
+        
+        if let Event::Number(num) = parser5.next_event().unwrap() {
+            assert_eq!(num.as_str(), "999", "Standalone number should include full content");
+        } else {
+            panic!("Expected Number event");
+        }
+        assert!(matches!(parser5.next_event().unwrap(), Event::EndDocument));
+
+        // Test 6: Negative numbers with delimiters
+        let json6 = b"[-42,33]";
+        let reader6 = SliceReader::new(json6);
+        let mut buffer6 = [0u8; 256];
+        let mut parser6 = TestDirectParser::new(reader6, &mut buffer6);
+        
+        assert!(matches!(parser6.next_event().unwrap(), Event::StartArray));
+        if let Event::Number(num1) = parser6.next_event().unwrap() {
+            assert_eq!(num1.as_str(), "-42", "Negative number should not include trailing delimiter ','");
+        } else {
+            panic!("Expected first Number event");
+        }
+        if let Event::Number(num2) = parser6.next_event().unwrap() {
+            assert_eq!(num2.as_str(), "33", "Second number should not include trailing delimiter ']'");
+        } else {
+            panic!("Expected second Number event");
+        }
+        assert!(matches!(parser6.next_event().unwrap(), Event::EndArray));
+
+        // Test 7: Decimal numbers with delimiters (if float enabled)
+        #[cfg(not(feature = "float-error"))]
+        {
+            let json7 = b"[3.14,2.71]";
+            let reader7 = SliceReader::new(json7);
+            let mut buffer7 = [0u8; 256];
+            let mut parser7 = TestDirectParser::new(reader7, &mut buffer7);
+            
+            assert!(matches!(parser7.next_event().unwrap(), Event::StartArray));
+            if let Event::Number(num1) = parser7.next_event().unwrap() {
+                assert_eq!(num1.as_str(), "3.14", "Decimal number should not include trailing delimiter ','");
+            } else {
+                panic!("Expected first Number event");
+            }
+            if let Event::Number(num2) = parser7.next_event().unwrap() {
+                assert_eq!(num2.as_str(), "2.71", "Second decimal number should not include trailing delimiter ']'");
+            } else {
+                panic!("Expected second Number event");
+            }
+            assert!(matches!(parser7.next_event().unwrap(), Event::EndArray));
         }
     }
 }
