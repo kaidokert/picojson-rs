@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// Trait that combines all the required trait bounds for depth counter types.
+///
 /// This is automatically implemented for any type that satisfies the individual bounds.
 pub trait BitStackCore:
     From<u8>

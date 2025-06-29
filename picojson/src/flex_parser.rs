@@ -38,11 +38,11 @@ pub struct PullParserFlex<'a, 'b, T: BitStack, D> {
 }
 
 /// Type alias for the standard pull parser with default BitStack configuration.
-/// Uses u32 BitStack (32-bit depth) and u8 depth counter.
+/// Uses `u32` BitStack (32-bit depth) and `u8` depth counter.
 pub type PullParser<'a, 'b> = PullParserFlex<'a, 'b, u32, u8>;
 
 /// Methods for the pull parser.
-impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
+impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
     /// Creates a new parser for the given JSON input.
     ///
     /// This parser assumes no string escapes will be encountered. If escapes are found,

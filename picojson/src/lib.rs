@@ -6,6 +6,7 @@
 mod config_check;
 
 mod tokenizer;
+// Temporary internal alias, not exported
 use tokenizer as ujson;
 pub use tokenizer::ArrayBitStack;
 pub use tokenizer::BitStack;

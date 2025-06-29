@@ -55,7 +55,7 @@ pub struct DirectParser<'b, T: BitStack, D, R: Reader> {
     unicode_escape_collector: UnicodeEscapeCollector,
 }
 
-impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
+impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
     /// Create a new DirectParser
     pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
         Self {
