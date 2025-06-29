@@ -12,6 +12,10 @@ type ConfiguredInt = i32;
 type ConfiguredInt = i64;
 
 /// Represents the parsed result of a JSON number.
+///
+/// Depending on crate configuration for float and integer support,
+/// variants like `FloatDisabled`, `FloatSkipped` and `FloatTruncated` are
+/// conditionally available.
 #[derive(Debug, PartialEq)]
 pub enum NumberResult {
     /// Integer that fits in the configured integer type

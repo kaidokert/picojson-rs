@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use core::cmp::PartialEq;
-use core::ops::{BitAnd, Shl, Shr};
+use core::ops::{BitAnd, BitOr, Shl, Shr};
 
+/// Trait for bit stacks.
+/// This trait is implemented for both integer and [T; N] types.
+///
+/// NOTE: BitStack implementations do NOT implement depth tracking.
+/// This is the responsibility of the caller.
 pub trait BitStack {
+    /// Returns a default-initialized bit stack.
     fn default() -> Self;
     /// Pushes a bit (true for 1, false for 0) onto the stack.
     fn push(&mut self, bit: bool);
@@ -13,12 +19,14 @@ pub trait BitStack {
     fn top(&self) -> bool;
 }
 
+/// Automatic implementation for builtin-types ( u8, u32 etc ).
+/// Any type that implements the required traits is automatically implemented for BitStack.
 impl<T> BitStack for T
 where
     T: Shl<u8, Output = T>
         + Shr<u8, Output = T>
         + BitAnd<T, Output = T>
-        + core::ops::BitOr<Output = T>
+        + BitOr<Output = T>
         + PartialEq
         + Clone,
     T: From<u8>, // To create 0 and 1 constants
@@ -41,8 +49,11 @@ where
     }
 }
 
-// Newtype wrapper for arrays to implement BitStack trait
-// Provides large BitStack storage using multiple elements
+// TODO: Can this be implemented for slices as well ?
+
+/// Wrapper for arrays to implement BitStack trait.
+/// Provides large BitStack storage using multiple elements.
+/// This can be used to parse very deeply nested JSON.
 #[derive(Debug)]
 pub struct ArrayBitStack<const N: usize, T>(pub [T; N]);
 

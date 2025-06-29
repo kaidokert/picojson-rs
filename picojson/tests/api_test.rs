@@ -1,6 +1,6 @@
 // Test the new API entry points
 
-use stax::{Event, ParseError, PullParser, String};
+use picojson::{Event, ParseError, PullParser, String};
 
 #[test]
 fn test_new_no_escapes() {

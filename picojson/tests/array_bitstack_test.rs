@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use ujson::bitstack::{ArrayBitStack, BitStack};
+use picojson::{ArrayBitStack, BitStack};
 
 #[test]
 fn test_array_bitstack_basic() {

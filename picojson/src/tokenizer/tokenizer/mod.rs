@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::bitstack::BitStack;
-use crate::BitStackCore;
+use super::BitStack;
+use super::BitStackCore;
 
 #[derive(Debug, Clone)]
 struct ParseContext<T: BitStack, D> {
@@ -244,7 +244,7 @@ impl Default for Tokenizer {
     }
 }
 
-impl<T: BitStack + core::fmt::Debug, D: BitStackCore> Tokenizer<T, D> {
+impl<T: BitStack, D: BitStackCore> Tokenizer<T, D> {
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,
@@ -267,6 +267,7 @@ impl<T: BitStack + core::fmt::Debug, D: BitStackCore> Tokenizer<T, D> {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn parse_full(
         &mut self,
         data: &[u8],

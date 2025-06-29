@@ -6,6 +6,8 @@ use crate::{shared::ParserErrorHandler, ParseError};
 /// This module contains pure functions for escape processing that can be used
 /// by both CopyOnEscape and StreamingBuffer components.
 pub(crate) struct EscapeProcessor;
+use crate::ujson;
+use ujson::EventToken;
 
 impl EscapeProcessor {
     /// Convert an escape token from the tokenizer to the corresponding escape character.
@@ -24,14 +26,14 @@ impl EscapeProcessor {
     /// ```
     pub fn token_to_escape_char(escape_token: &ujson::EventToken) -> Option<u8> {
         match escape_token {
-            ujson::EventToken::EscapeQuote => Some(b'"'),
-            ujson::EventToken::EscapeBackslash => Some(b'\\'),
-            ujson::EventToken::EscapeSlash => Some(b'/'),
-            ujson::EventToken::EscapeBackspace => Some(b'b'),
-            ujson::EventToken::EscapeFormFeed => Some(b'f'),
-            ujson::EventToken::EscapeNewline => Some(b'n'),
-            ujson::EventToken::EscapeCarriageReturn => Some(b'r'),
-            ujson::EventToken::EscapeTab => Some(b't'),
+            EventToken::EscapeQuote => Some(b'"'),
+            EventToken::EscapeBackslash => Some(b'\\'),
+            EventToken::EscapeSlash => Some(b'/'),
+            EventToken::EscapeBackspace => Some(b'b'),
+            EventToken::EscapeFormFeed => Some(b'f'),
+            EventToken::EscapeNewline => Some(b'n'),
+            EventToken::EscapeCarriageReturn => Some(b'r'),
+            EventToken::EscapeTab => Some(b't'),
             _ => None,
         }
     }
@@ -286,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_token_to_escape_char() {
-        use ujson::EventToken;
+        use crate::ujson::EventToken;
 
         // Test all valid escape tokens
         assert_eq!(
@@ -331,7 +333,7 @@ mod tests {
 
     #[test]
     fn test_process_escape_token() {
-        use ujson::EventToken;
+        use crate::ujson::EventToken;
 
         // Test valid escape tokens that produce correct unescaped bytes
         assert_eq!(
