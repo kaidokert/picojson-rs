@@ -95,6 +95,10 @@ fn parse_and_display(parser: &mut PullParser) {
                             num.as_str()
                         )
                     }
+                    #[cfg(feature = "float-skip")]
+                    NumberResult::FloatSkipped => {
+                        println!("  → Float skipped (use raw string): '{}'", num.as_str())
+                    }
                     #[cfg(not(feature = "float"))]
                     NumberResult::FloatDisabled => {
                         println!(

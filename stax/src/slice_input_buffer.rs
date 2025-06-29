@@ -47,12 +47,6 @@ impl<'a> SliceInputBuffer<'a> {
     pub fn slice(&self, start: usize, end: usize) -> &'a [u8] {
         &self.data[start..end]
     }
-
-    /// Gets a slice from start position to current position - 1.
-    /// Useful for extracting tokens that end at the current position.
-    pub fn slice_to_current(&self, start: usize) -> &'a [u8] {
-        &self.data[start..self.pos.saturating_sub(1)]
-    }
 }
 
 impl<'a> crate::number_parser::NumberExtractor for SliceInputBuffer<'a> {

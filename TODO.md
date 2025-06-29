@@ -1,6 +1,7 @@
 ## TODO list
 - API cleanup, rename things
 - Constify what's possible
+- Remove .unrwap()'s
 - Dependency cleanup
 - Clippy cleanup
 - Put all shippable features in one crate ( tokenizer, pull + push parsers )

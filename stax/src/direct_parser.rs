@@ -6,8 +6,6 @@ use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserS
 use ujson::BitStackCore;
 use ujson::{BitStack, EventToken, Tokenizer};
 
-use log;
-
 /// Trait for input sources that can provide data to the streaming parser
 pub trait Reader {
     /// The error type returned by read operations
@@ -116,7 +114,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 
     /// Get the next JSON event from the stream - very simple increment
     pub fn next_event(&mut self) -> Result<Event, ParseError> {
-        log::info!("next_event");
         // Apply any queued unescaped content reset from previous call
         self.apply_unescaped_reset_if_queued();
 
@@ -124,11 +121,9 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
         if let Some(pending) = self.pending_container_end.take() {
             match pending {
                 PendingContainerEnd::ArrayEnd => {
-                    log::debug!("DirectParser: Emitting pending ArrayEnd");
                     return Ok(Event::EndArray);
                 }
                 PendingContainerEnd::ObjectEnd => {
-                    log::debug!("DirectParser: Emitting pending ObjectEnd");
                     return Ok(Event::EndObject);
                 }
             }
@@ -152,7 +147,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         Ok(_) => {
                             // Check if finish generated an event
                             if let Some(event) = self.parser_state.evts[0].take() {
-                                log::info!("Processing finish event: {:?}", event);
                                 match self.process_tokenizer_event(event)? {
                                     EventResult::Complete(parsed_event) => return Ok(parsed_event),
                                     EventResult::ExtractString => {
@@ -216,7 +210,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 
                     // Check if we got an event
                     if let Some(event) = self.parser_state.evts[0].take() {
-                        log::info!("Processing tokenizer event: {:?}", event);
                         // Process the event and see what to do
                         match self.process_tokenizer_event(event)? {
                             EventResult::Complete(parsed_event) => return Ok(parsed_event),
@@ -261,9 +254,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             ujson::Event::ObjectEnd => {
                 // Check if we're in the middle of parsing a number - if so, extract it first
                 if matches!(self.parser_state.state, crate::shared::State::Number(_)) {
-                    log::debug!(
-                        "DirectParser: ObjectEnd while in Number state - extracting number first"
-                    );
                     // Extract the number first, then we'll emit EndObject on the next call
                     self.pending_container_end = Some(PendingContainerEnd::ObjectEnd);
                     EventResult::ExtractNumberFromContainer
@@ -275,9 +265,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             ujson::Event::ArrayEnd => {
                 // Check if we're in the middle of parsing a number - if so, extract it first
                 if matches!(self.parser_state.state, crate::shared::State::Number(_)) {
-                    log::debug!(
-                        "DirectParser: ArrayEnd while in Number state - extracting number first"
-                    );
                     // Extract the number first, then we'll emit EndArray on the next call
                     self.pending_container_end = Some(PendingContainerEnd::ArrayEnd);
                     EventResult::ExtractNumberFromContainer
@@ -323,51 +310,19 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 // Mark start position for number (current position is where number starts)
                 let current_pos = self.direct_buffer.current_position();
                 let number_start = ContentRange::number_start_from_current(current_pos);
-                log::debug!(
-                    "DirectParser: Begin Number event, current_pos={}, number_start={}",
-                    current_pos,
-                    number_start
-                );
                 self.parser_state.state = crate::shared::State::Number(number_start);
                 EventResult::Continue
             }
             ujson::Event::End(EventToken::Number) => {
                 // Extract number content after buffer operations are done (standalone number)
-                log::debug!("DirectParser: End Number event");
-                let current_pos = self.direct_buffer.current_position();
-                if let crate::shared::State::Number(start) = self.parser_state.state {
-                    log::debug!(
-                        "DirectParser: End Number, start={}, current_pos={}",
-                        start,
-                        current_pos
-                    );
-                }
                 EventResult::ExtractNumber
             }
             ujson::Event::End(EventToken::NumberAndArray) => {
                 // Extract number content, but the tokenizer will handle the array end separately
-                log::debug!("DirectParser: End NumberAndArray event");
-                let current_pos = self.direct_buffer.current_position();
-                if let crate::shared::State::Number(start) = self.parser_state.state {
-                    log::debug!(
-                        "DirectParser: End NumberAndArray, start={}, current_pos={}",
-                        start,
-                        current_pos
-                    );
-                }
                 EventResult::ExtractNumber
             }
             ujson::Event::End(EventToken::NumberAndObject) => {
                 // Extract number content, but the tokenizer will handle the object end separately
-                log::debug!("DirectParser: End NumberAndObject event");
-                let current_pos = self.direct_buffer.current_position();
-                if let crate::shared::State::Number(start) = self.parser_state.state {
-                    log::debug!(
-                        "DirectParser: End NumberAndObject, start={}, current_pos={}",
-                        start,
-                        current_pos
-                    );
-                }
                 EventResult::ExtractNumber
             }
 
@@ -526,7 +481,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 .read(fill_slice)
                 .map_err(|_| ParseError::ReaderError)?;
 
-            log::debug!("Read {} bytes from reader", bytes_read);
             self.direct_buffer.mark_filled(bytes_read)?;
 
             // Note: bytes_read == 0 indicates end-of-stream per trait contract.
@@ -1382,6 +1336,10 @@ mod tests {
                     // This is expected in float-enabled build
                     assert!((f - 3.14).abs() < f64::EPSILON);
                 }
+                #[cfg(feature = "float-skip")]
+                crate::NumberResult::FloatSkipped => {
+                    // This is expected in float-skip build
+                }
                 #[cfg(feature = "float-truncate")]
                 crate::NumberResult::FloatTruncated(i) => {
                     // This is expected in float-truncate build (3.14 -> 3)
@@ -1393,30 +1351,50 @@ mod tests {
             panic!("Expected Number event");
         }
 
-        // Scientific notation (should also be FloatDisabled in no-float build)
+        // Scientific notation handling varies by float configuration
         assert_eq!(
             parser.next_event().unwrap(),
             Event::Key(crate::String::Borrowed("scientific"))
         );
-        if let Event::Number(num) = parser.next_event().unwrap() {
-            assert_eq!(num.as_str(), "1e3");
-            match num.parsed() {
-                #[cfg(not(feature = "float"))]
-                crate::NumberResult::FloatDisabled => {
-                    // This is expected in no-float build - raw string preserved for manual parsing
-                }
-                #[cfg(feature = "float")]
-                crate::NumberResult::Float(f) => {
-                    // This is expected in float-enabled build
-                    assert!((f - 1000.0).abs() < f64::EPSILON);
-                }
-                _ => panic!("Unexpected number parsing result for scientific notation"),
-            }
-        } else {
-            panic!("Expected Number event");
+
+        // float-truncate rejects scientific notation, so test should end early for that config
+        #[cfg(feature = "float-truncate")]
+        {
+            // float-truncate rejects scientific notation since it would require float math
+            let result = parser.next_event();
+            assert!(
+                result.is_err(),
+                "Expected error for scientific notation with float-truncate"
+            );
+            return; // Test ends here for float-truncate
         }
 
-        assert_eq!(parser.next_event().unwrap(), Event::EndObject);
-        assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+        #[cfg(not(feature = "float-truncate"))]
+        {
+            if let Event::Number(num) = parser.next_event().unwrap() {
+                assert_eq!(num.as_str(), "1e3");
+                match num.parsed() {
+                    #[cfg(not(feature = "float"))]
+                    crate::NumberResult::FloatDisabled => {
+                        // This is expected in no-float build - raw string preserved for manual parsing
+                    }
+                    #[cfg(feature = "float-skip")]
+                    crate::NumberResult::FloatSkipped => {
+                        // This is expected in float-skip build
+                    }
+                    #[cfg(feature = "float")]
+                    crate::NumberResult::Float(f) => {
+                        // This is expected in float-enabled build
+                        assert!((f - 1000.0).abs() < f64::EPSILON);
+                    }
+                    _ => panic!("Unexpected number parsing result for scientific notation"),
+                }
+            } else {
+                panic!("Expected Number event");
+            }
+
+            assert_eq!(parser.next_event().unwrap(), Event::EndObject);
+            assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+        }
     }
 }

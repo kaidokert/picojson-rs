@@ -128,13 +128,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
         &mut self,
         escape_char: u8,
     ) -> Result<Option<Event<'a, 'b>>, ParseError> {
-        log::info!(
-            "Original parser handle_escape_event: escape_char={}, state={:?}",
-            escape_char,
-            self.parser_state.state
-        );
         if let State::String(_) | State::Key(_) = self.parser_state.state {
-            log::info!("Original parser in string/key state, calling copy_on_escape.handle_escape");
             self.copy_on_escape
                 .handle_escape(self.buffer.current_pos(), escape_char)?;
         }
@@ -179,7 +173,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
         if self.buffer.is_past_end() {
             return Err(ParseError::EndOfData);
         }
-        log::info!("no events, parsing");
         let mut callback = |event, _len| {
             for evt in self.parser_state.evts.iter_mut() {
                 if evt.is_none() {
@@ -212,7 +205,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
     /// Returns the next JSON event or an error if parsing fails.
     /// Parsing continues until `EndDocument` is returned or an error occurs.
     pub fn next_event(&mut self) -> Result<Event, ParseError> {
-        log::info!("next_event: {:?}", self.parser_state.state);
         if self.buffer.is_past_end() {
             return Ok(Event::EndDocument);
         }
@@ -223,7 +215,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                     return Ok(Event::EndDocument);
                 }
             }
-            log::info!("events, processing");
             // Find and move out the first available event to avoid holding mutable borrow during processing
             let taken_event = {
                 let mut found_event = None;
@@ -237,19 +228,12 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
             };
 
             if let Some(taken) = taken_event {
-                log::info!("taken: {:?}", taken);
                 let res = match taken {
                     // Container events
                     ujson::Event::ObjectStart => EventResult::Complete(Event::StartObject),
-                    ujson::Event::ObjectEnd => {
-                        log::info!("end of object");
-                        EventResult::Complete(Event::EndObject)
-                    }
+                    ujson::Event::ObjectEnd => EventResult::Complete(Event::EndObject),
                     ujson::Event::ArrayStart => EventResult::Complete(Event::StartArray),
-                    ujson::Event::ArrayEnd => {
-                        log::info!("end of array");
-                        EventResult::Complete(Event::EndArray)
-                    }
+                    ujson::Event::ArrayEnd => EventResult::Complete(Event::EndArray),
 
                     // String/Key events
                     ujson::Event::Begin(EventToken::Key) => {
@@ -271,11 +255,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                         | EventToken::NumberAndArray
                         | EventToken::NumberAndObject,
                     ) => {
-                        log::debug!(
-                            "FlexParser: Begin Number event, current_pos={}, buffer_pos={}",
-                            self.buffer.current_pos(),
-                            self.buffer.current_pos() - 1
-                        );
                         let number_start =
                             ContentRange::number_start_from_current(self.buffer.current_pos());
                         self.parser_state.state = State::Number(number_start);
@@ -364,7 +343,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                                 self.buffer.current_pos(),
                             );
                             let key_result = self.copy_on_escape.end_string(end_pos)?;
-                            log::info!("key: {:?}", &*key_result);
                             break Ok(Event::Key(key_result));
                         } else {
                             break Err(ParserErrorHandler::state_mismatch("key", "end"));
@@ -378,7 +356,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                                 self.buffer.current_pos(),
                             );
                             let value_result = self.copy_on_escape.end_string(end_pos)?;
-                            log::info!("value: {:?}", &*value_result);
                             break Ok(Event::String(value_result));
                         } else {
                             break Err(ParserErrorHandler::state_mismatch("string", "end"));
@@ -386,11 +363,6 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                     }
                     EventResult::ExtractNumber => {
                         if let State::Number(start) = self.parser_state.state {
-                            log::debug!(
-                                "FlexParser: End Number, start={}, current_pos={}",
-                                start,
-                                self.buffer.current_pos()
-                            );
                             // Reset state before parsing to stop selective copying
                             self.parser_state.state = State::None;
                             let event = self.parse_number_from_buffer(start)?;

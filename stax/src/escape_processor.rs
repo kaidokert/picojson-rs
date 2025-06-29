@@ -135,17 +135,6 @@ impl EscapeProcessor {
         let utf8_str = ch.encode_utf8(utf8_buffer);
         Ok(utf8_str.as_bytes())
     }
-
-    /// Parse a Unicode escape sequence from a hex string and return UTF-8 bytes.
-    /// This is a convenience wrapper around process_unicode_escape that handles
-    /// string-to-bytes conversion. Used primarily in tests.
-    pub fn parse_unicode_escape_from_str<'a>(
-        hex_str: &str,
-        utf8_buffer: &'a mut [u8],
-    ) -> Result<&'a [u8], ParseError> {
-        let hex_bytes = hex_str.as_bytes();
-        Self::process_unicode_escape(hex_bytes, utf8_buffer)
-    }
 }
 
 /// Shared Unicode escape hex digit collector for both parsers.
@@ -303,17 +292,6 @@ mod tests {
         // For now, test basic valid cases to ensure the function works
         let result = EscapeProcessor::process_unicode_escape(b"0000", &mut buffer).unwrap();
         assert_eq!(result, "\0".as_bytes());
-    }
-
-    #[test]
-    fn test_parse_unicode_from_str() {
-        let mut buffer = [0u8; 4];
-
-        let result = EscapeProcessor::parse_unicode_escape_from_str("0041", &mut buffer).unwrap();
-        assert_eq!(result, b"A");
-
-        let result = EscapeProcessor::parse_unicode_escape_from_str("03B1", &mut buffer).unwrap();
-        assert_eq!(result, "α".as_bytes());
     }
 
     #[test]

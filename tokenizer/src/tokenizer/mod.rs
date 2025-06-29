@@ -3,8 +3,6 @@
 use crate::bitstack::BitStack;
 use crate::BitStackCore;
 
-use log::{debug, info};
-
 #[derive(Debug, Clone)]
 struct ParseContext<T: BitStack, D> {
     /// Keeps track of the depth of the object/array
@@ -290,7 +288,6 @@ impl<T: BitStack + core::fmt::Debug, D: BitStackCore> Tokenizer<T, D> {
             return Error::new(ErrKind::EmptyStream, b' ', self.total_consumed);
         }
 
-        debug!("--finished-- {}", self.total_consumed);
         match &self.state {
             State::Finished => Ok(self.total_consumed),
             State::Number {
@@ -400,11 +397,6 @@ impl<T: BitStack + core::fmt::Debug, D: BitStackCore> Tokenizer<T, D> {
     {
         let mut pos = 0;
         while pos < data.len() {
-            info!(
-                "Pos: {}, Byte: {:?}, State: {:?}, Context: {:?}",
-                pos, data[pos] as char, self.state, self.context
-            );
-
             // Special case - this needs to be done for every Array match arm
             if let State::Array {
                 expect: Array::ItemOrEnd,
@@ -1045,7 +1037,6 @@ impl<T: BitStack + core::fmt::Debug, D: BitStackCore> Tokenizer<T, D> {
             };
             pos += 1;
         }
-        debug!("Consumed: {}", pos);
         Ok(pos)
     }
 }
