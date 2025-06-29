@@ -65,7 +65,7 @@ fn main() -> Result<(), ParseError> {
     // Create DirectParser with a reasonably sized buffer
     let mut buffer = [0u8; 256];
     let buffer_size = buffer.len();
-    let mut parser: DirectParser<u32, u8, ArrayReader> = DirectParser::new(reader, &mut buffer);
+    let mut parser = DirectParser::new(reader, &mut buffer);
 
     println!("🔄 Starting DirectParser with streaming ArrayReader:");
     println!("   Buffer size: {} bytes", buffer_size);

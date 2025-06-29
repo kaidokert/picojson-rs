@@ -1,33 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/// Trait that combines all the required trait bounds for depth counter types.
-///
-/// This is automatically implemented for any type that satisfies the individual bounds.
-pub trait BitStackCore:
-    From<u8>
-    + core::cmp::PartialEq<Self>
-    + core::ops::AddAssign<Self>
-    + core::ops::SubAssign<Self>
-    + core::ops::Not<Output = Self>
-    + core::fmt::Debug
-{
-}
-
-impl<T> BitStackCore for T where
-    T: From<u8>
-        + core::cmp::PartialEq<T>
-        + core::ops::AddAssign<T>
-        + core::ops::SubAssign<T>
-        + core::ops::Not<Output = T>
-        + core::fmt::Debug
-{
-}
-
 mod bitstack;
+// Legacy exports for backward compatibility
 pub use bitstack::ArrayBitStack;
-pub use bitstack::BitStack;
+pub use bitstack::BitBucket as BitStack;
 
-// NEW API: BitStack configuration system
+// Main API: BitStack configuration system
 pub use bitstack::ArrayBitBucket;
 pub use bitstack::BitBucket;
 pub use bitstack::BitStackConfig;

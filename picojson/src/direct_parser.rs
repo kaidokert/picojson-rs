@@ -4,8 +4,10 @@ use crate::direct_buffer::DirectBuffer;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};
 use crate::ujson;
-use ujson::BitStackCore;
-use ujson::{BitStack, EventToken, Tokenizer};
+use ujson::{EventToken, Tokenizer};
+
+// NEW API imports
+use ujson::{BitStackConfig, DefaultConfig};
 
 /// Trait for input sources that can provide data to the streaming parser
 pub trait Reader {
@@ -36,9 +38,9 @@ enum ProcessingState {
 }
 
 /// A streaming JSON parser using DirectBuffer for single-buffer input and escape processing
-pub struct DirectParser<'b, T: BitStack, D, R: Reader> {
+pub struct DirectParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     /// The tokenizer that processes JSON tokens
-    tokenizer: Tokenizer<T, D>,
+    tokenizer: Tokenizer<C::Bucket, C::Counter>,
     /// Parser state tracking
     parser_state: ParserState,
     /// Reader for streaming input
@@ -46,17 +48,19 @@ pub struct DirectParser<'b, T: BitStack, D, R: Reader> {
     /// DirectBuffer for single-buffer input and escape processing
     direct_buffer: DirectBuffer<'b>,
 
-    // NEW: Future state machine - will gradually replace fields below
     /// Processing state machine that enforces logical invariants
     processing_state: ProcessingState,
 
-    // PHASE 2.4 COMPLETE: Escape sequence state migrated to processing_state enum
     /// Shared Unicode escape collector for \uXXXX sequences
     unicode_escape_collector: UnicodeEscapeCollector,
 }
 
-impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
-    /// Create a new DirectParser
+/// Methods for DirectParser using DefaultConfig
+impl<'b, R: Reader> DirectParser<'b, R, DefaultConfig> {
+    /// Create a new DirectParser with default configuration
+    ///
+    /// Uses the default BitStack configuration (u32 bucket, u8 counter)
+    /// for most common use cases.
     pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
         Self {
             tokenizer: Tokenizer::new(),
@@ -70,11 +74,70 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                 in_escape_sequence: false,
             },
 
-            // Phase 2.4 complete: escape sequence state now in enum
             unicode_escape_collector: UnicodeEscapeCollector::new(),
         }
     }
+}
 
+/// Methods for DirectParser with custom BitStackConfig
+impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
+    /// Create a new DirectParser with custom configuration
+    ///
+    /// Use this when you need custom BitStack storage types for specific
+    /// memory or nesting depth requirements.
+    ///
+    /// # Example
+    /// ```
+    /// use picojson::{DirectParser, BitStackStruct, ArrayBitStack};
+    ///
+    /// // Example Reader implementation
+    /// struct JsonReader<'a> { data: &'a [u8], pos: usize }
+    /// impl<'a> JsonReader<'a> {
+    ///     fn new(data: &'a [u8]) -> Self { Self { data, pos: 0 } }
+    /// }
+    /// impl picojson::Reader for JsonReader<'_> {
+    ///     type Error = ();
+    ///     fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
+    ///         let remaining = &self.data[self.pos..];
+    ///         let to_copy = buf.len().min(remaining.len());
+    ///         buf[..to_copy].copy_from_slice(&remaining[..to_copy]);
+    ///         self.pos += to_copy;
+    ///         Ok(to_copy)
+    ///     }
+    /// }
+    ///
+    /// let json = b"{\"test\": 42}";
+    /// let reader = JsonReader::new(json);
+    /// let mut buffer = [0u8; 256];
+    ///
+    /// // Custom configuration: u64 bucket + u16 counter for deeper nesting
+    /// let mut parser = DirectParser::<_, BitStackStruct<u64, u16>>::with_config(reader, &mut buffer);
+    ///
+    /// // Or with ArrayBitStack for ultra-deep nesting
+    /// let reader2 = JsonReader::new(json);
+    /// let mut buffer2 = [0u8; 256];
+    /// let mut _parser2 = DirectParser::<_, ArrayBitStack<4, u32, u16>>::with_config(reader2, &mut buffer2);
+    /// ```
+    pub fn with_config(reader: R, buffer: &'b mut [u8]) -> Self {
+        Self {
+            tokenizer: Tokenizer::new(),
+            parser_state: ParserState::new(),
+            reader,
+            direct_buffer: DirectBuffer::new(buffer),
+
+            // Initialize new state machine to Active with default values
+            processing_state: ProcessingState::Active {
+                unescaped_reset_queued: false,
+                in_escape_sequence: false,
+            },
+
+            unicode_escape_collector: UnicodeEscapeCollector::new(),
+        }
+    }
+}
+
+/// Shared methods for DirectParser with any BitStackConfig
+impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
     /// Iterator-compatible method that returns None when parsing is complete.
     /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
     /// and Some(Err(error)) for parsing errors.
@@ -602,7 +665,7 @@ mod tests {
         }
     }
 
-    type TestDirectParser<'b> = DirectParser<'b, u32, u8, SliceReader<'static>>;
+    type TestDirectParser<'b> = DirectParser<'b, SliceReader<'static>>;
 
     #[test]
     fn test_direct_parser_simple_object() {

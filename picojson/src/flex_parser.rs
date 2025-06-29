@@ -783,8 +783,6 @@ mod tests {
         assert_eq!(parser.next_event(), Ok(Event::EndDocument));
     }
 
-    // Tests for JsonNumber foundation (Phase 1)
-
     #[test_log::test]
     fn test_original_parser_escape_trace() {
         // Test escape sequence processing with logging

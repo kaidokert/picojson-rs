@@ -3,12 +3,12 @@
 use core::cmp::PartialEq;
 use core::ops::{BitAnd, BitOr, Shl, Shr};
 
-/// Trait for bit stacks.
+/// Trait for bit buckets - provides bit storage for JSON parser state.
 /// This trait is implemented for both integer and [T; N] types.
 ///
-/// NOTE: BitStack implementations do NOT implement depth tracking.
+/// NOTE: BitBucket implementations do NOT implement depth tracking.
 /// This is the responsibility of the caller.
-pub trait BitStack: Default {
+pub trait BitBucket: Default {
     /// Pushes a bit (true for 1, false for 0) onto the stack.
     fn push(&mut self, bit: bool);
     /// Pops the top bit off the stack, returning it if the stack isn’t empty.
@@ -18,8 +18,8 @@ pub trait BitStack: Default {
 }
 
 /// Automatic implementation for builtin-types ( u8, u32 etc ).
-/// Any type that implements the required traits is automatically implemented for BitStack.
-impl<T> BitStack for T
+/// Any type that implements the required traits is automatically implemented for BitBucket.
+impl<T> BitBucket for T
 where
     T: Shl<u8, Output = T>
         + Shr<u8, Output = T>
@@ -47,22 +47,6 @@ where
 
 // TODO: Can this be implemented for slices as well ?
 
-// ============================================================================
-// NEW API: BitStack Configuration System
-// ============================================================================
-
-/// Trait for bit bucket storage.
-/// This trait is implemented for both integer and [T; N] types.
-/// For now, we make BitBucket extend BitStack for compatibility during migration
-pub trait BitBucket: BitStack {
-    // BitBucket inherits all methods from BitStack for now
-    // This allows gradual migration
-    // TODO: Remove this once we've migrated fully to the new API
-}
-
-/// Automatic implementation: any type that implements BitStack also implements BitBucket
-impl<T: BitStack> BitBucket for T {}
-
 /// Trait for depth counters - tracks nesting depth
 /// This is automatically implemented for any type that satisfies the individual bounds.
 pub trait DepthCounter:
@@ -73,25 +57,19 @@ pub trait DepthCounter:
     + core::ops::Not<Output = Self>
     + core::fmt::Debug
 {
-    /// Increment the depth counter
-    fn increment(&mut self);
 }
 
-impl<T> DepthCounter for T
-where
+impl<T> DepthCounter for T where
     T: From<u8>
         + core::cmp::PartialEq<T>
         + core::ops::AddAssign<T>
         + core::ops::SubAssign<T>
         + core::ops::Not<Output = T>
-        + core::fmt::Debug,
+        + core::fmt::Debug
 {
-    fn increment(&mut self) {
-        *self += T::from(1);
-    }
 }
 
-/// Type alias for ArrayBitBucket - just reuse ArrayBitStack during migration
+/// Array-based BitBucket implementation for large storage capacity
 pub type ArrayBitBucket<const N: usize, T> = ArrayBitStackImpl<N, T>;
 
 /// Configuration trait for BitStack systems - defines bucket and counter types
@@ -125,8 +103,8 @@ where
 
 pub type ArrayBitStack<const N: usize, T, D> = BitStackStruct<ArrayBitBucket<N, T>, D>;
 
-/// Wrapper for arrays to implement BitStack trait.
-/// Provides large BitStack storage using multiple elements.
+/// Wrapper for arrays to implement BitBucket trait.
+/// Provides large BitBucket storage using multiple elements.
 /// This can be used to parse very deeply nested JSON.
 #[derive(Debug)]
 pub struct ArrayBitStackImpl<const N: usize, T>(pub [T; N]);
@@ -137,7 +115,7 @@ impl<const N: usize, T: Default + Copy> Default for ArrayBitStackImpl<N, T> {
     }
 }
 
-impl<const N: usize, T> BitStack for ArrayBitStackImpl<N, T>
+impl<const N: usize, T> BitBucket for ArrayBitStackImpl<N, T>
 where
     T: Shl<u8, Output = T>
         + Shr<u8, Output = T>

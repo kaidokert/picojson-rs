@@ -27,7 +27,6 @@ mod flex_parser;
 
 mod shared;
 pub use shared::{Event, ParseError};
-pub use ujson::BitStackCore;
 
 mod slice_input_buffer;
 
