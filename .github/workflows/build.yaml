@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+
+on: [push, pull_request]
+
+name: Build and test
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Run cargo check
+        run: cargo check
+      - name: Run cargo check --no-default-features
+        run: cargo check --no-default-features
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Default configuration (int64 + float)
+          - name: Default (int64 + float)
+            features: ""
+
+          # No features baseline
+          - name: No features
+            features: --no-default-features
+
+          # int32 configurations
+          - name: int32 + float
+            features: --no-default-features --features "int32,float"
+          - name: int32 + float-skip
+            features: --no-default-features --features "int32,float-skip"
+          - name: int32 + float-error
+            features: --no-default-features --features "int32,float-error"
+          - name: int32 + float-truncate
+            features: --no-default-features --features "int32,float-truncate"
+
+          # int64 configurations (beyond default)
+          - name: int64 + float-skip
+            features: --no-default-features --features "int64,float-skip"
+          - name: int64 + float-error
+            features: --no-default-features --features "int64,float-error"
+          - name: int64 + float-truncate
+            features: --no-default-features --features "int64,float-truncate"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Run cargo test
+        working-directory: stax
+        run: cargo test ${{ matrix.features }}
