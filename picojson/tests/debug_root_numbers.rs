@@ -6,7 +6,7 @@ fn test_json(input: &str, description: &str) {
     println!("Input: '{}'", input);
 
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+    let mut parser = PullParser::with_buffer(input, &mut scratch);
 
     let mut event_count = 0;
     loop {

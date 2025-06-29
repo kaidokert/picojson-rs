@@ -1,7 +1,6 @@
 // Example demonstrating ArrayBitStack for large nesting depths
 
-use picojson::ArrayBitStack;
-use picojson::{Event, ParseError, PullParserFlex};
+use picojson::{ArrayBitStack, Event, ParseError, PullParser};
 
 fn main() -> Result<(), ParseError> {
     println!("=== ArrayBitStack Demo ===\n");
@@ -16,8 +15,8 @@ fn main() -> Result<(), ParseError> {
     println!("   JSON structure: obj->arr->obj->arr->... (alternating pattern)");
 
     let mut scratch = [0u8; 2048];
-    let mut parser: PullParserFlex<ArrayBitStack<3, u32>, u16> =
-        PullParserFlex::new_with_buffer(&deep_json, &mut scratch);
+    let mut parser =
+        PullParser::<ArrayBitStack<3, u32, u16>>::with_config_and_buffer(&deep_json, &mut scratch);
     let mut depth = 0;
     let mut max_depth = 0;
 
@@ -110,9 +109,8 @@ fn main() -> Result<(), ParseError> {
     let complex_json = generate_complex_nested_json(25);
     println!("   JSON structure: Objects with arrays containing objects with data");
 
-    let mut scratch = [0u8; 1024];
-    let mut parser: PullParserFlex<ArrayBitStack<8, u8>, u8> =
-        PullParserFlex::new_with_buffer(&complex_json, &mut scratch);
+    let _scratch = [0u8; 1024];
+    let mut parser = PullParser::<ArrayBitStack<8, u8, u8>>::with_config(&complex_json);
     let mut depth = 0;
     let mut max_depth = 0;
 
@@ -197,7 +195,7 @@ fn generate_deep_mixed_json(depth: usize) -> String {
     }
 
     // Core data at the deepest level
-    json.push_str(r#""reached_the_deep_end""#);
+    json.push_str(r#""reached_the_deep_end\n""#);
 
     // Closing structures (reverse order)
     for i in (0..depth).rev() {

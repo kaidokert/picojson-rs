@@ -5,8 +5,10 @@ use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ujson;
-use ujson::BitStackCore;
-use ujson::{BitStack, EventToken, Tokenizer};
+use ujson::{EventToken, Tokenizer};
+
+// NEW API imports
+use ujson::{BitStackConfig, DefaultConfig};
 
 /// Result of processing a tokenizer event
 enum EventResult<'a, 'b> {
@@ -27,8 +29,8 @@ enum EventResult<'a, 'b> {
 /// Generic over BitStack storage type for configurable nesting depth.
 // Lifetime 'a is the input buffer lifetime
 // lifetime 'b is the scratch/copy buffer lifetime
-pub struct PullParserFlex<'a, 'b, T: BitStack, D> {
-    tokenizer: Tokenizer<T, D>,
+pub struct PullParser<'a, 'b, C: BitStackConfig = DefaultConfig> {
+    tokenizer: Tokenizer<C::Bucket, C::Counter>,
     buffer: SliceInputBuffer<'a>,
     parser_state: ParserState,
     copy_on_escape: CopyOnEscape<'a, 'b>,
@@ -38,18 +40,14 @@ pub struct PullParserFlex<'a, 'b, T: BitStack, D> {
     unicode_escape_collector: UnicodeEscapeCollector,
 }
 
-/// Type alias for the standard pull parser with default BitStack configuration.
-/// Uses `u32` BitStack (32-bit depth) and `u8` depth counter.
-pub type PullParser<'a, 'b> = PullParserFlex<'a, 'b, u32, u8>;
-
 /// Methods for the pull parser.
-impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
+impl<'a> PullParser<'a, '_, DefaultConfig> {
     /// Creates a new parser for the given JSON input.
     ///
     /// This parser assumes no string escapes will be encountered. If escapes are found,
     /// parsing will fail with `ScratchBufferFull` error.
     ///
-    /// For JSON with potential string escapes, use `new_with_buffer()` instead.
+    /// For JSON with potential string escapes, use `with_buffer()` instead.
     ///
     /// # Arguments
     /// * `input` - A string slice containing the JSON data to be parsed.
@@ -64,7 +62,61 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
         // Use a mutable reference to the internal zero-length buffer
         let internal_buffer: &mut [u8] = &mut [];
         let copy_on_escape = CopyOnEscape::new(data, internal_buffer);
-        PullParserFlex {
+        PullParser {
+            tokenizer: Tokenizer::new(),
+            buffer: SliceInputBuffer::new(data),
+            parser_state: ParserState::new(),
+            copy_on_escape,
+            _internal_scratch: [],
+            unicode_escape_collector: UnicodeEscapeCollector::new(),
+        }
+    }
+}
+
+/// Constructor with scratch buffer for PullParser using DefaultConfig
+impl<'a, 'b> PullParser<'a, 'b, DefaultConfig> {
+    /// Creates a new parser for the given JSON input with external scratch buffer.
+    ///
+    /// Use this when your JSON contains string escapes (like `\n`, `\"`, `\u0041`) that
+    /// need to be unescaped during parsing.
+    ///
+    /// # Arguments
+    /// * `input` - A string slice containing the JSON data to be parsed.
+    /// * `scratch_buffer` - A mutable byte slice for temporary string unescaping operations.
+    ///                      This buffer needs to be at least as long as the longest
+    ///                      contiguous token (string, key, number) in the input.
+    ///
+    /// # Example
+    /// ```
+    /// use picojson::PullParser;
+    /// let mut scratch = [0u8; 1024];
+    /// let parser = PullParser::with_buffer(r#"{"msg": "Hello\nWorld"}"#, &mut scratch);
+    /// ```
+    pub fn with_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
+        let data = input.as_bytes();
+        let copy_on_escape = CopyOnEscape::new(data, scratch_buffer);
+        PullParser {
+            tokenizer: Tokenizer::new(),
+            buffer: SliceInputBuffer::new(data),
+            parser_state: ParserState::new(),
+            copy_on_escape,
+            _internal_scratch: [],
+            unicode_escape_collector: UnicodeEscapeCollector::new(),
+        }
+    }
+}
+
+/// Generic constructor for PullParser with custom configurations
+impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
+    /// Creates a new parser with a custom `BitStackConfig`.
+    ///
+    /// This parser assumes no string escapes will be encountered. If escapes are found,
+    /// parsing will fail. For JSON with escapes, use `with_config_and_buffer`.
+    pub fn with_config(input: &'a str) -> Self {
+        let data = input.as_bytes();
+        let internal_buffer: &mut [u8] = &mut [];
+        let copy_on_escape = CopyOnEscape::new(data, internal_buffer);
+        PullParser {
             tokenizer: Tokenizer::new(),
             buffer: SliceInputBuffer::new(data),
             parser_state: ParserState::new(),
@@ -74,25 +126,19 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
         }
     }
 
-    /// Creates a new parser for the given JSON input with external scratch buffer.
+    /// Creates a new parser with a custom `BitStackConfig` and a user-provided scratch buffer.
     ///
-    /// Use this when your JSON contains string escapes (like `\n`, `\"`, `\u0041`) that
-    /// need to be unescaped during parsing.
+    /// Use this when your JSON contains string escapes (like `\n`, `\"`, `\u0041`).
     ///
     /// # Arguments
     /// * `input` - A string slice containing the JSON data to be parsed.
     /// * `scratch_buffer` - A mutable byte slice for temporary string unescaping operations.
-    ///
-    /// # Example
-    /// ```
-    /// use picojson::PullParser;
-    /// let mut scratch = [0u8; 1024];
-    /// let parser = PullParser::new_with_buffer(r#"{"msg": "Hello\nWorld"}"#, &mut scratch);
-    /// ```
-    pub fn new_with_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
+    ///                      This buffer needs to be at least as long as the longest
+    ///                      contiguous token (string, key, number) in the input.
+    pub fn with_config_and_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
         let data = input.as_bytes();
         let copy_on_escape = CopyOnEscape::new(data, scratch_buffer);
-        PullParserFlex {
+        PullParser {
             tokenizer: Tokenizer::new(),
             buffer: SliceInputBuffer::new(data),
             parser_state: ParserState::new(),
@@ -108,7 +154,11 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
 
     /// Helper function to parse a number from the buffer given a start position.
     /// Uses unified number parsing logic with centralized delimiter handling.
-    fn parse_number_from_buffer(&mut self, start: usize, from_container_end: bool) -> Result<Event, ParseError> {
+    fn parse_number_from_buffer(
+        &mut self,
+        start: usize,
+        from_container_end: bool,
+    ) -> Result<Event, ParseError> {
         crate::number_parser::parse_number_event(&self.buffer, start, from_container_end)
     }
 
@@ -265,8 +315,12 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
                         EventResult::Continue
                     }
                     ujson::Event::End(EventToken::Number) => EventResult::ExtractNumber(false),
-                    ujson::Event::End(EventToken::NumberAndArray) => EventResult::ExtractNumber(true),
-                    ujson::Event::End(EventToken::NumberAndObject) => EventResult::ExtractNumber(true),
+                    ujson::Event::End(EventToken::NumberAndArray) => {
+                        EventResult::ExtractNumber(true)
+                    }
+                    ujson::Event::End(EventToken::NumberAndObject) => {
+                        EventResult::ExtractNumber(true)
+                    }
                     // Boolean and null values
                     ujson::Event::Begin(
                         EventToken::True | EventToken::False | EventToken::Null,
@@ -402,7 +456,7 @@ mod tests {
     fn make_parser() {
         let input = r#"{"key": "value"}"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
         assert_eq!(
@@ -418,7 +472,7 @@ mod tests {
     fn parse_number() {
         let input = r#"{"key": 1242}"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
         // Check number value using new JsonNumber API
@@ -437,7 +491,7 @@ mod tests {
     fn parse_bool_and_null() {
         let input = r#"{"key": true, "key2": false, "key3": null}"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
         assert_eq!(parser.next_event(), Ok(Event::Bool(true)));
@@ -463,7 +517,7 @@ mod tests {
         let input = r#"{"key": [1, 2.2, 3]}"#; // Include float for other configs
 
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
         assert_eq!(parser.next_event(), Ok(Event::StartArray));
@@ -515,7 +569,7 @@ mod tests {
     fn test_simple_parser_api() {
         let input = r#"{"name": "test"}"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(
@@ -535,7 +589,7 @@ mod tests {
         // Use regular string literal to properly include escape sequences
         let input = "{\"name\": \"John\\nDoe\", \"message\": \"Hello\\tWorld!\"}";
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         // Test that the parser correctly handles escaped strings
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
@@ -582,7 +636,7 @@ mod tests {
         // Use regular string literal to include proper escape sequences
         let input = "{\"simple\": \"no escapes\", \"complex\": \"has\\nescapes\"}";
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
 
@@ -626,7 +680,7 @@ mod tests {
     fn test_coe2_integration_multiple_escapes() {
         let input = r#"{"key": "a\nb\tc\rd"}"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
@@ -646,7 +700,7 @@ mod tests {
     fn test_coe2_integration_zero_copy_path() {
         let input = r#"{"simple": "no_escapes_here"}"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(
@@ -673,7 +727,7 @@ mod tests {
     fn test_coe2_integration_mixed_strings() {
         let input = r#"["plain", "with\nescapes", "plain2", "more\tescapes"]"#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         assert_eq!(parser.next_event(), Ok(Event::StartArray));
 
@@ -709,7 +763,7 @@ mod tests {
     fn test_unicode_escape_integration() {
         let input = r#"{"key": "Hello\u0041World"}"#; // \u0041 = 'A'
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
         assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
@@ -733,7 +787,7 @@ mod tests {
         // Test escape sequence processing with logging
         let input = r#""a\nb""#;
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(input, &mut scratch);
+        let mut parser = PullParser::with_buffer(input, &mut scratch);
 
         // Should get String with unescaped content
         let event = parser.next_event().unwrap();

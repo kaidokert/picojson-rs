@@ -32,7 +32,7 @@ for event in parser {
 // With escape support
 let json = r#"{"message": "Hello\nWorld"}"#;
 let mut scratch = [0u8; 1024];
-let parser = PullParser::new_with_buffer(json, &mut scratch);
+let parser = PullParser::with_buffer(json, &mut scratch);
 // ... use parser
 ```
 

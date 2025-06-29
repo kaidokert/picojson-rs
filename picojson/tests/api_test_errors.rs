@@ -45,7 +45,7 @@ fn test_malformed_json_unterminated_string() {
 fn test_malformed_json_invalid_escape() {
     let json = r#"{"bad_escape": "invalid\x"}"#; // Invalid escape sequence
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::new_with_buffer(json, &mut scratch);
+    let mut parser = PullParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(
@@ -69,7 +69,7 @@ fn test_malformed_json_invalid_escape() {
 fn test_malformed_json_invalid_unicode_escape() {
     let json = r#"{"bad_unicode": "test\uXYZ"}"#; // Invalid Unicode hex
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::new_with_buffer(json, &mut scratch);
+    let mut parser = PullParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(
@@ -93,7 +93,7 @@ fn test_malformed_json_invalid_unicode_escape() {
 fn test_buffer_overflow_error() {
     let json = r#"{"large_string": "This is a very long string with escapes\nand more escapes\tand even more content that might overflow a small buffer"}"#;
     let mut small_scratch = [0u8; 10]; // Deliberately small buffer
-    let mut parser = PullParser::new_with_buffer(json, &mut small_scratch);
+    let mut parser = PullParser::with_buffer(json, &mut small_scratch);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(

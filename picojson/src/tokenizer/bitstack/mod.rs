@@ -8,9 +8,7 @@ use core::ops::{BitAnd, BitOr, Shl, Shr};
 ///
 /// NOTE: BitStack implementations do NOT implement depth tracking.
 /// This is the responsibility of the caller.
-pub trait BitStack {
-    /// Returns a default-initialized bit stack.
-    fn default() -> Self;
+pub trait BitStack: Default {
     /// Pushes a bit (true for 1, false for 0) onto the stack.
     fn push(&mut self, bit: bool);
     /// Pops the top bit off the stack, returning it if the stack isn’t empty.
@@ -28,12 +26,10 @@ where
         + BitAnd<T, Output = T>
         + BitOr<Output = T>
         + PartialEq
-        + Clone,
+        + Clone
+        + Default,
     T: From<u8>, // To create 0 and 1 constants
 {
-    fn default() -> Self {
-        T::from(0)
-    }
     fn push(&mut self, bit: bool) {
         *self = (self.clone() << 1u8) | T::from(bit as u8);
     }
@@ -51,13 +47,97 @@ where
 
 // TODO: Can this be implemented for slices as well ?
 
+// ============================================================================
+// NEW API: BitStack Configuration System
+// ============================================================================
+
+/// Trait for bit bucket storage.
+/// This trait is implemented for both integer and [T; N] types.
+/// For now, we make BitBucket extend BitStack for compatibility during migration
+pub trait BitBucket: BitStack {
+    // BitBucket inherits all methods from BitStack for now
+    // This allows gradual migration
+    // TODO: Remove this once we've migrated fully to the new API
+}
+
+/// Automatic implementation: any type that implements BitStack also implements BitBucket
+impl<T: BitStack> BitBucket for T {}
+
+/// Trait for depth counters - tracks nesting depth
+/// This is automatically implemented for any type that satisfies the individual bounds.
+pub trait DepthCounter:
+    From<u8>
+    + core::cmp::PartialEq<Self>
+    + core::ops::AddAssign<Self>
+    + core::ops::SubAssign<Self>
+    + core::ops::Not<Output = Self>
+    + core::fmt::Debug
+{
+    /// Increment the depth counter
+    fn increment(&mut self);
+}
+
+impl<T> DepthCounter for T
+where
+    T: From<u8>
+        + core::cmp::PartialEq<T>
+        + core::ops::AddAssign<T>
+        + core::ops::SubAssign<T>
+        + core::ops::Not<Output = T>
+        + core::fmt::Debug,
+{
+    fn increment(&mut self) {
+        *self += T::from(1);
+    }
+}
+
+/// Type alias for ArrayBitBucket - just reuse ArrayBitStack during migration
+pub type ArrayBitBucket<const N: usize, T> = ArrayBitStackImpl<N, T>;
+
+/// Configuration trait for BitStack systems - defines bucket and counter types
+pub trait BitStackConfig {
+    type Bucket: BitBucket + Default;
+    type Counter: DepthCounter + Default;
+}
+
+/// Default configuration using u32 bucket and u8 counter
+pub struct DefaultConfig;
+
+impl BitStackConfig for DefaultConfig {
+    type Bucket = u32;
+    type Counter = u8;
+}
+
+/// User-facing BitStack configuration struct - the main API users interact with
+/// Usage: `BitStack<u64, u16>` for custom bucket and counter types
+pub struct BitStackStruct<B, C> {
+    _phantom: core::marker::PhantomData<(B, C)>,
+}
+
+impl<B, C> BitStackConfig for BitStackStruct<B, C>
+where
+    B: BitBucket + Default,
+    C: DepthCounter + Default,
+{
+    type Bucket = B;
+    type Counter = C;
+}
+
+pub type ArrayBitStack<const N: usize, T, D> = BitStackStruct<ArrayBitBucket<N, T>, D>;
+
 /// Wrapper for arrays to implement BitStack trait.
 /// Provides large BitStack storage using multiple elements.
 /// This can be used to parse very deeply nested JSON.
 #[derive(Debug)]
-pub struct ArrayBitStack<const N: usize, T>(pub [T; N]);
+pub struct ArrayBitStackImpl<const N: usize, T>(pub [T; N]);
 
-impl<const N: usize, T> BitStack for ArrayBitStack<N, T>
+impl<const N: usize, T: Default + Copy> Default for ArrayBitStackImpl<N, T> {
+    fn default() -> Self {
+        ArrayBitStackImpl([T::default(); N])
+    }
+}
+
+impl<const N: usize, T> BitStack for ArrayBitStackImpl<N, T>
 where
     T: Shl<u8, Output = T>
         + Shr<u8, Output = T>
@@ -65,12 +145,10 @@ where
         + core::ops::BitOr<Output = T>
         + PartialEq
         + Clone
-        + From<u8>,
+        + From<u8>
+        + Copy
+        + Default,
 {
-    fn default() -> Self {
-        ArrayBitStack(core::array::from_fn(|_| T::from(0)))
-    }
-
     fn push(&mut self, bit: bool) {
         // Strategy: Use array as big-endian storage, with leftmost element as most significant
         // Shift all elements left, carrying overflow from right to left
@@ -129,7 +207,7 @@ mod tests {
     #[test]
     fn test_array_bitstack() {
         // Test ArrayBitStack with 2 u8 elements (16-bit total capacity)
-        let mut bitstack: ArrayBitStack<2, u8> = ArrayBitStack::default();
+        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
 
         // Test basic push/pop operations
         bitstack.push(true);
@@ -149,7 +227,7 @@ mod tests {
     #[test]
     fn test_array_bitstack_large_capacity() {
         // Test larger ArrayBitStack (320-bit capacity with 10 u32 elements)
-        let mut bitstack: ArrayBitStack<10, u32> = ArrayBitStack::default();
+        let mut bitstack: ArrayBitStackImpl<10, u32> = ArrayBitStackImpl::default();
 
         // Push many bits to test multi-element handling
         let pattern = [true, false, true, true, false, false, true, false];
@@ -168,7 +246,7 @@ mod tests {
         // Test that bitstack correctly handles different element sizes
 
         // Test u8 elements (8-bit each)
-        let mut bitstack_u8: ArrayBitStack<1, u8> = ArrayBitStack::default();
+        let mut bitstack_u8: ArrayBitStackImpl<1, u8> = ArrayBitStackImpl::default();
 
         // Fill all 8 bits of a u8 element
         for i in 0..8 {
@@ -181,7 +259,7 @@ mod tests {
         }
 
         // Test u32 elements (32-bit each)
-        let mut bitstack_u32: ArrayBitStack<1, u32> = ArrayBitStack::default();
+        let mut bitstack_u32: ArrayBitStackImpl<1, u32> = ArrayBitStackImpl::default();
 
         // Fill all 32 bits of a u32 element
         for i in 0..32 {
@@ -191,6 +269,113 @@ mod tests {
         // Verify we can retrieve all 32 bits in LIFO order
         for i in (0..32).rev() {
             assert_eq!(bitstack_u32.pop(), i % 3 == 0);
+        }
+    }
+
+    #[test]
+    fn test_array_bitstack_basic_moved() {
+        // Test ArrayBitStack with 2 u8 elements (16-bit total capacity)
+        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+
+        // Test basic push/pop operations
+        bitstack.push(true);
+        bitstack.push(false);
+        bitstack.push(true);
+
+        // Verify top() doesn't modify stack
+        assert_eq!(bitstack.top(), true);
+        assert_eq!(bitstack.top(), true);
+
+        // Verify LIFO order
+        assert_eq!(bitstack.pop(), true);
+        assert_eq!(bitstack.pop(), false);
+        assert_eq!(bitstack.pop(), true);
+    }
+
+    #[test]
+    fn test_array_bitstack_large_capacity_moved() {
+        // Test larger ArrayBitStack (320-bit capacity with 10 u32 elements)
+        let mut bitstack: ArrayBitStackImpl<10, u32> = ArrayBitStackImpl::default();
+
+        // Push many bits to test multi-element handling
+        let pattern = [true, false, true, true, false, false, true, false];
+        for &bit in &pattern {
+            bitstack.push(bit);
+        }
+
+        // Pop and verify reverse order (LIFO)
+        for &expected in pattern.iter().rev() {
+            assert_eq!(bitstack.pop(), expected);
+        }
+    }
+
+    #[test]
+    fn test_array_bitstack_element_overflow_moved() {
+        // Test ArrayBitStack with 2 u8 elements to verify cross-element operations
+        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+
+        // Push more than 8 bits to force usage of multiple elements
+        let bits = [
+            true, false, true, false, true, false, true, false, true, true,
+        ];
+        for &bit in &bits {
+            bitstack.push(bit);
+        }
+
+        // Pop all bits and verify order
+        for &expected in bits.iter().rev() {
+            assert_eq!(bitstack.pop(), expected);
+        }
+    }
+
+    #[test]
+    fn test_array_bitstack_empty_behavior_moved() {
+        // Test behavior when popping from an empty ArrayBitStack
+        // With the new API, empty stacks return false (no depth tracking needed)
+        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+
+        // CURRENT BEHAVIOR: Empty stack returns false (was Some(false) before API change)
+        // This behavior is now the intended design - no depth tracking needed
+        assert_eq!(bitstack.pop(), false, "Empty stack returns false");
+        assert_eq!(bitstack.top(), false, "Empty stack top() returns false");
+
+        // Test that underflow doesn't panic (at least it's safe)
+        assert_eq!(
+            bitstack.pop(),
+            false,
+            "Multiple underflow calls don't panic"
+        );
+        assert_eq!(
+            bitstack.pop(),
+            false,
+            "Multiple underflow calls don't panic"
+        );
+    }
+
+    #[test]
+    fn test_array_bitstack_underflow_does_not_panic_moved() {
+        // Test that multiple underflow attempts are safe (don't panic)
+        // This is important for robustness even with the current incorrect API
+        let mut bitstack: ArrayBitStackImpl<1, u8> = ArrayBitStackImpl::default();
+
+        // Multiple calls to pop() on empty stack should not panic
+        for i in 0..5 {
+            let result = bitstack.pop();
+            // With new API, just ensure it doesn't panic and returns a bool
+            assert_eq!(
+                result,
+                false,
+                "Empty ArrayBitStack pop() attempt {} should return false",
+                i + 1
+            );
+
+            let top_result = bitstack.top();
+            assert_eq!(
+                top_result,
+                false,
+                "Empty ArrayBitStack top() attempt {} should return false",
+                i + 1
+            );
         }
     }
 }
