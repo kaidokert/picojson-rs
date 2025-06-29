@@ -449,7 +449,11 @@ mod tests {
 
     #[test]
     fn parse_array() {
-        let input = r#"{"key": [1, 2.2, 3]}"#;
+        #[cfg(feature = "float-error")]
+        let input = r#"{"key": [1, 2, 3]}"#; // No floats for float-error config
+        #[cfg(not(feature = "float-error"))]
+        let input = r#"{"key": [1, 2.2, 3]}"#; // Include float for other configs
+
         let mut scratch = [0u8; 1024];
         let mut parser = PullParser::new_with_buffer(input, &mut scratch);
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
@@ -465,15 +469,24 @@ mod tests {
             other => panic!("Expected Number(1), got: {:?}", other),
         }
 
-        // Second number: 2.2 (float)
+        // Second number: depends on configuration
         match parser.next_event() {
             Ok(Event::Number(num)) => {
-                assert_eq!(num.as_str(), "2.2");
-                #[cfg(feature = "float")]
-                assert_eq!(num.as_f64(), Some(2.2));
-                assert!(num.is_float());
+                #[cfg(feature = "float-error")]
+                {
+                    assert_eq!(num.as_str(), "2");
+                    assert_eq!(num.as_int(), Some(2));
+                }
+                #[cfg(not(feature = "float-error"))]
+                {
+                    assert_eq!(num.as_str(), "2.2");
+                    #[cfg(feature = "float")]
+                    assert_eq!(num.as_f64(), Some(2.2));
+                    #[cfg(not(feature = "float-error"))]
+                    assert!(num.is_float());
+                }
             }
-            other => panic!("Expected Number(2.2), got: {:?}", other),
+            other => panic!("Expected Number, got: {:?}", other),
         }
 
         // Third number: 3 (integer)

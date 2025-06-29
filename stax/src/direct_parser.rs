@@ -1208,20 +1208,38 @@ mod tests {
         let mut buffer = [0u8; 256];
         let mut parser = TestDirectParser::new(reader, &mut buffer);
 
-        let event = parser.next_event().unwrap();
-        if let Event::Number(json_number) = event {
-            assert_eq!(json_number.as_str(), "3.14159");
-        } else {
-            panic!("Expected Number event, got: {:?}", event);
+        #[cfg(feature = "float-error")]
+        {
+            // float-error configuration should return an error for float values
+            let result = parser.next_event();
+            assert!(
+                result.is_err(),
+                "Expected error for float with float-error configuration"
+            );
+            return;
         }
 
-        let event = parser.next_event().unwrap();
-        assert_eq!(event, Event::EndDocument);
+        #[cfg(not(feature = "float-error"))]
+        {
+            let event = parser.next_event().unwrap();
+            if let Event::Number(json_number) = event {
+                assert_eq!(json_number.as_str(), "3.14159");
+            } else {
+                panic!("Expected Number event, got: {:?}", event);
+            }
+
+            let event = parser.next_event().unwrap();
+            assert_eq!(event, Event::EndDocument);
+        }
     }
 
     #[test_log::test]
     fn test_direct_parser_numbers_in_array() {
-        let json = b"[42, -7, 3.14]";
+        #[cfg(feature = "float-error")]
+        let json = b"[42, -7]"; // No floats for float-error config
+        #[cfg(not(feature = "float-error"))]
+        let json = b"[42, -7, 3.14]"; // Include float for other configs
+
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
         let mut parser = TestDirectParser::new(reader, &mut buffer);
@@ -1242,11 +1260,14 @@ mod tests {
             panic!("Expected Number event, got: {:?}", event);
         }
 
-        let event = parser.next_event().unwrap();
-        if let Event::Number(json_number) = event {
-            assert_eq!(json_number.as_str(), "3.14");
-        } else {
-            panic!("Expected Number event, got: {:?}", event);
+        #[cfg(not(feature = "float-error"))]
+        {
+            let event = parser.next_event().unwrap();
+            if let Event::Number(json_number) = event {
+                assert_eq!(json_number.as_str(), "3.14");
+            } else {
+                panic!("Expected Number event, got: {:?}", event);
+            }
         }
 
         assert_eq!(parser.next_event().unwrap(), Event::EndArray);
@@ -1255,7 +1276,11 @@ mod tests {
 
     #[test_log::test]
     fn test_direct_parser_numbers_in_object() {
-        let json = b"{\"count\": 42, \"score\": -7.5}";
+        #[cfg(feature = "float-error")]
+        let json = b"{\"count\": 42, \"score\": -7}"; // No floats for float-error config
+        #[cfg(not(feature = "float-error"))]
+        let json = b"{\"count\": 42, \"score\": -7.5}"; // Include float for other configs
+
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
         let mut parser = TestDirectParser::new(reader, &mut buffer);
@@ -1283,6 +1308,9 @@ mod tests {
         }
 
         if let Event::Number(val2) = parser.next_event().unwrap() {
+            #[cfg(feature = "float-error")]
+            assert_eq!(val2.as_str(), "-7");
+            #[cfg(not(feature = "float-error"))]
             assert_eq!(val2.as_str(), "-7.5");
         } else {
             panic!("Expected Number event");
@@ -1318,37 +1346,52 @@ mod tests {
             panic!("Expected Number event");
         }
 
-        // Float key-value (should be FloatDisabled in no-float build)
+        // Float key-value - behavior varies by configuration
         assert_eq!(
             parser.next_event().unwrap(),
             Event::Key(crate::String::Borrowed("float"))
         );
-        if let Event::Number(num) = parser.next_event().unwrap() {
-            assert_eq!(num.as_str(), "3.14");
-            // In no-float configuration, this should be FloatDisabled
-            match num.parsed() {
-                #[cfg(not(feature = "float"))]
-                crate::NumberResult::FloatDisabled => {
-                    // This is expected in no-float build
+
+        #[cfg(feature = "float-error")]
+        {
+            // float-error should return an error when encountering floats
+            let result = parser.next_event();
+            assert!(
+                result.is_err(),
+                "Expected error for float with float-error configuration"
+            );
+            return; // Test ends here for float-error
+        }
+
+        #[cfg(not(feature = "float-error"))]
+        {
+            if let Event::Number(num) = parser.next_event().unwrap() {
+                assert_eq!(num.as_str(), "3.14");
+                // In no-float configuration, this should be FloatDisabled
+                match num.parsed() {
+                    #[cfg(not(feature = "float"))]
+                    crate::NumberResult::FloatDisabled => {
+                        // This is expected in no-float build
+                    }
+                    #[cfg(feature = "float")]
+                    crate::NumberResult::Float(f) => {
+                        // This is expected in float-enabled build
+                        assert!((f - 3.14).abs() < f64::EPSILON);
+                    }
+                    #[cfg(feature = "float-skip")]
+                    crate::NumberResult::FloatSkipped => {
+                        // This is expected in float-skip build
+                    }
+                    #[cfg(feature = "float-truncate")]
+                    crate::NumberResult::FloatTruncated(i) => {
+                        // This is expected in float-truncate build (3.14 -> 3)
+                        assert_eq!(*i, 3);
+                    }
+                    _ => panic!("Unexpected number parsing result for float"),
                 }
-                #[cfg(feature = "float")]
-                crate::NumberResult::Float(f) => {
-                    // This is expected in float-enabled build
-                    assert!((f - 3.14).abs() < f64::EPSILON);
-                }
-                #[cfg(feature = "float-skip")]
-                crate::NumberResult::FloatSkipped => {
-                    // This is expected in float-skip build
-                }
-                #[cfg(feature = "float-truncate")]
-                crate::NumberResult::FloatTruncated(i) => {
-                    // This is expected in float-truncate build (3.14 -> 3)
-                    assert_eq!(*i, 3);
-                }
-                _ => panic!("Unexpected number parsing result for float"),
+            } else {
+                panic!("Expected Number event");
             }
-        } else {
-            panic!("Expected Number event");
         }
 
         // Scientific notation handling varies by float configuration
