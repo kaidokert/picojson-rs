@@ -152,16 +152,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             }
 
             // Now we have events - process ONE event (FlexParser pattern)
-            let taken_event = {
-                let mut found_event = None;
-                for evt in self.parser_state.evts.iter_mut() {
-                    if evt.is_some() {
-                        found_event = evt.take();
-                        break;
-                    }
-                }
-                found_event
-            };
+            let taken_event = self.parser_state.evts.iter_mut().find_map(|e| e.take());
 
             if let Some(taken_event) = taken_event {
                 log::trace!("DirectParser: Processing event: {:?}", taken_event);
