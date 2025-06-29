@@ -21,12 +21,6 @@ pub trait Reader {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
 }
 
-/// Result of processing a tokenizer event
-enum EventResult {
-    /// Continue processing, no event to return yet
-    Continue,
-}
-
 /// Represents the processing state of the DirectParser
 /// Enforces logical invariants: once Finished, no other processing states are possible
 #[derive(Debug)]
@@ -150,21 +144,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         return Err(ParseError::TokenizerError);
                     }
 
-                    // Handle special cases for escape sequences
-                    if let Some(event) = &self.parser_state.evts[0] {
-                        match event {
-                            ujson::Event::Begin(EventToken::UnicodeEscape) => {
-                                // Current byte is the first hex digit - reset collector and add it
-                                self.unicode_escape_collector.reset();
-                                self.unicode_escape_collector.add_hex_digit(byte)?;
-                            }
-                            ujson::Event::End(EventToken::UnicodeEscape) => {
-                                // Current byte is the fourth hex digit - add it to complete the sequence
-                                self.unicode_escape_collector.add_hex_digit(byte)?;
-                            }
-                            _ => {}
-                        }
-                    }
+                    // Special case processing removed - let all escape handling go through event system
 
                     // Handle byte accumulation if no event was generated
                     if !self.have_events() {
@@ -186,6 +166,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             };
 
             if let Some(taken_event) = taken_event {
+                log::trace!("DirectParser: Processing event: {:?}", taken_event);
                 // Process the event directly in the main loop (FlexParser pattern)
                 match taken_event {
                     // Container events
@@ -222,11 +203,17 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         // Update parser state to track string position
                         let current_pos = self.direct_buffer.current_position();
                         let quote_pos = ContentRange::quote_position_from_current(current_pos);
+                        log::trace!(
+                            "DirectParser: String Begin at pos {}, quote at {}",
+                            current_pos,
+                            quote_pos
+                        );
                         self.parser_state.state = crate::shared::State::String(quote_pos);
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::String) => {
                         // Extract string content from parser state
+                        log::trace!("DirectParser: String End, extracting content");
                         return self.extract_string_from_state();
                     }
 
@@ -258,6 +245,9 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                     // Escape sequence handling
                     ujson::Event::Begin(EventToken::EscapeSequence) => {
                         // Start of escape sequence - we'll handle escapes by unescaping to buffer
+                        log::trace!(
+                            "DirectParser: EscapeSequence Begin - starting escape processing"
+                        );
                         self.start_escape_processing()?;
                         // Continue processing
                     }
@@ -272,27 +262,40 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         | EventToken::EscapeTab),
                     ) => {
                         // Handle simple escape sequences
+                        log::trace!("DirectParser: Simple escape End: {:?}", escape_token);
                         self.handle_simple_escape(&escape_token)?;
                         // Continue processing
                     }
                     ujson::Event::Begin(EventToken::UnicodeEscape) => {
-                        // Start Unicode escape collection
-                        // Note: Reset and first hex digit are handled in special case processing above
+                        // Start Unicode escape collection - reset collector for new sequence
+                        // Only handle if we're inside a string or key (FlexParser approach)
+                        log::trace!("DirectParser: Unicode escape Begin");
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                                self.start_unicode_escape();
+                                log::trace!("DirectParser: Resetting Unicode collector");
+                                self.unicode_escape_collector.reset();
                             }
-                            _ => {} // Ignore if not in string/key context
+                            _ => {
+                                log::trace!(
+                                    "DirectParser: Ignoring Unicode escape (not in string/key)"
+                                );
+                            }
                         }
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::UnicodeEscape) => {
-                        // Handle end of Unicode escape sequence (\\uXXXX)
+                        // Handle end of Unicode escape sequence (\\uXXXX) using FlexParser approach
+                        log::trace!("DirectParser: Unicode escape End");
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                                self.finish_unicode_escape()?;
+                                log::trace!("DirectParser: Processing Unicode escape");
+                                self.process_unicode_escape_like_flexparser()?;
                             }
-                            _ => {} // Ignore if not in string/key context
+                            _ => {
+                                log::trace!(
+                                    "DirectParser: Ignoring Unicode escape end (not in string/key)"
+                                );
+                            }
                         }
                         // Continue processing
                     }
@@ -312,7 +315,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
         self.parser_state.evts.iter().any(|evt| evt.is_some())
     }
 
-
     /// Extract number from parser state without 'static lifetime cheating
     fn extract_number_from_state(&mut self) -> Result<Event, ParseError> {
         self.extract_number_from_state_with_context(false)
@@ -324,11 +326,19 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             return Err(ParserErrorHandler::state_mismatch("string", "extract"));
         };
 
+        log::trace!(
+            "DirectParser: extract_string_from_state start_pos={} has_unescaped={}",
+            start_pos,
+            self.direct_buffer.has_unescaped_content()
+        );
+
         self.parser_state.state = crate::shared::State::None;
 
         if self.direct_buffer.has_unescaped_content() {
+            log::trace!("DirectParser: Creating unescaped string");
             self.create_unescaped_string()
         } else {
+            log::trace!("DirectParser: Creating borrowed string");
             self.create_borrowed_string(start_pos)
         }
     }
@@ -433,6 +443,13 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             crate::shared::State::String(_) | crate::shared::State::Key(_)
         );
 
+        log::trace!(
+            "DirectParser: handle_byte_accumulation byte={:02x} '{}' in_string_mode={}",
+            byte,
+            byte as char,
+            in_string_mode
+        );
+
         if in_string_mode {
             // Access escape state from enum
             let in_escape = if let ProcessingState::Active {
@@ -444,16 +461,20 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 false
             };
 
-            // Check if we're collecting Unicode hex digits (2nd and 3rd)
-            let hex_count = self.unicode_escape_collector.hex_count();
-            if in_escape && hex_count > 0 && hex_count < 3 {
-                // We're in a Unicode escape - collect 2nd and 3rd hex digits
-                self.unicode_escape_collector.add_hex_digit(byte)?;
-            } else if !in_escape {
-                // Normal byte - if we're doing escape processing, accumulate it
-                if self.direct_buffer.has_unescaped_content() {
-                    self.append_byte_to_escape_buffer(byte)?;
-                }
+            // Normal byte accumulation - all escape processing now goes through event system
+            if !in_escape && self.direct_buffer.has_unescaped_content() {
+                log::trace!(
+                    "DirectParser: Appending byte to escape buffer: {:02x} '{}'",
+                    byte,
+                    byte as char
+                );
+                self.append_byte_to_escape_buffer(byte)?;
+            } else {
+                log::trace!(
+                    "DirectParser: Skipping byte accumulation (in_escape={}, has_unescaped={})",
+                    in_escape,
+                    self.direct_buffer.has_unescaped_content()
+                );
             }
         }
 
@@ -461,7 +482,9 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
     }
 
     /// Start escape processing using DirectBuffer
-    fn start_escape_processing(&mut self) -> Result<EventResult, ParseError> {
+    fn start_escape_processing(&mut self) -> Result<(), ParseError> {
+        log::trace!("DirectParser: start_escape_processing called");
+
         // Update escape state in enum
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -469,10 +492,12 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
         } = self.processing_state
         {
             *in_escape_sequence = true;
+            log::trace!("DirectParser: Set in_escape_sequence = true");
         }
 
         // Initialize escape processing with DirectBuffer if not already started
         if !self.direct_buffer.has_unescaped_content() {
+            log::trace!("DirectParser: Starting unescaping for the first time");
             if let crate::shared::State::String(start_pos) | crate::shared::State::Key(start_pos) =
                 self.parser_state.state
             {
@@ -480,27 +505,36 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 let (content_start, content_end) =
                     ContentRange::string_content_bounds_before_escape(start_pos, current_pos);
 
+                log::trace!(
+                    "DirectParser: Content bounds before escape: start={}, end={} (pos {} to {})",
+                    content_start,
+                    content_end,
+                    start_pos,
+                    current_pos
+                );
+
                 // Estimate max length needed for unescaping (content so far + remaining buffer)
                 let max_escaped_len =
                     self.direct_buffer.remaining_bytes() + (content_end - content_start);
 
                 // Start unescaping with DirectBuffer and copy existing content
+                log::trace!("DirectParser: Calling start_unescaping_with_copy");
                 self.direct_buffer.start_unescaping_with_copy(
                     max_escaped_len,
                     content_start,
                     content_end,
                 )?;
+                log::trace!("DirectParser: Escape processing initialized successfully");
             }
+        } else {
+            log::trace!("DirectParser: Unescaping already active");
         }
 
-        Ok(EventResult::Continue)
+        Ok(())
     }
 
     /// Handle simple escape sequence using unified EscapeProcessor
-    fn handle_simple_escape(
-        &mut self,
-        escape_token: &EventToken,
-    ) -> Result<EventResult, ParseError> {
+    fn handle_simple_escape(&mut self, escape_token: &EventToken) -> Result<(), ParseError> {
         // Update escape state in enum
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -515,53 +549,50 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             self.append_byte_to_escape_buffer(unescaped_char)?;
         }
 
-        Ok(EventResult::Continue)
+        Ok(())
     }
 
-    /// Start Unicode escape sequence
-    fn start_unicode_escape(&mut self) -> EventResult {
-        // Update escape state in enum
-        if let ProcessingState::Active {
-            ref mut in_escape_sequence,
-            ..
-        } = self.processing_state
-        {
-            *in_escape_sequence = true;
-        }
-        // Note: unicode_hex_pos and first hex digit are set in the special case handler
-        EventResult::Continue
-    }
-
-    /// Finish Unicode escape sequence using shared UnicodeEscapeCollector
-    fn finish_unicode_escape(&mut self) -> Result<EventResult, ParseError> {
-        // Update escape state
+    /// Process Unicode escape sequence using FlexParser approach
+    /// Extracts hex digits from buffer and processes them through the collector
+    fn process_unicode_escape_like_flexparser(&mut self) -> Result<(), ParseError> {
+        // Update escape state in enum - Unicode escape processing is complete
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
             ..
         } = self.processing_state
         {
             *in_escape_sequence = false;
-        } else {
-            return Err(ParserErrorHandler::state_mismatch("active", "process"));
         }
 
-        // Verify we have collected all 4 hex digits
-        if !self.unicode_escape_collector.is_complete() {
-            return Err(ParserErrorHandler::invalid_unicode_escape());
+        // Current position is right after the 4 hex digits (similar to FlexParser)
+        let current_pos = self.direct_buffer.current_position();
+        let (hex_start, hex_end, _escape_start_pos) =
+            ContentRange::unicode_escape_bounds(current_pos);
+
+        // Extract the 4 hex digits from buffer
+        let hex_slice = self.direct_buffer.get_string_slice(hex_start, hex_end)?;
+
+        if hex_slice.len() != 4 {
+            return Err(ParserErrorHandler::invalid_unicode_length());
         }
 
-        // Process Unicode escape using the shared collector
+        // Feed hex digits to the shared collector
+        for &hex_digit in hex_slice {
+            self.unicode_escape_collector.add_hex_digit(hex_digit)?;
+        }
+
+        // Process the complete sequence to UTF-8
         let mut utf8_buf = [0u8; 4];
         let utf8_bytes = self
             .unicode_escape_collector
             .process_to_utf8(&mut utf8_buf)?;
 
-        // Append UTF-8 bytes to escape buffer
+        // Handle the Unicode escape via DirectBuffer escape processing
         for &byte in utf8_bytes {
             self.append_byte_to_escape_buffer(byte)?;
         }
 
-        Ok(EventResult::Continue)
+        Ok(())
     }
 
     /// Append a byte to the DirectBuffer's unescaped content
@@ -608,6 +639,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_log::test;
 
     /// Simple test reader that reads from a byte slice
     pub struct SliceReader<'a> {
@@ -689,7 +721,7 @@ mod tests {
         if let Event::String(json_string) = parser.next_event().unwrap() {
             // For now, test will fail as escapes aren't implemented yet
             // This will be fixed once escape handling is added
-            println!("Got string: '{}'", json_string.as_str());
+            log::info!("Got string: '{}'", json_string.as_str());
         } else {
             panic!("Expected String event");
         }
@@ -886,7 +918,7 @@ mod tests {
         let json = br#"[1, 2, 3]"#;
 
         // First test with FlexParser to see expected behavior
-        println!("=== Testing with FlexParser ===");
+        log::info!("=== Testing with FlexParser ===");
         let mut scratch = [0u8; 256];
         let mut flex_parser =
             crate::PullParser::new_with_buffer(std::str::from_utf8(json).unwrap(), &mut scratch);
@@ -897,23 +929,23 @@ mod tests {
                 Ok(Event::EndDocument) => break,
                 Ok(Event::Number(num)) => {
                     flex_numbers.push(num.as_str().to_string());
-                    println!("FlexParser number: {}", num.as_str());
+                    log::info!("FlexParser number: {}", num.as_str());
                 }
                 Ok(event) => {
-                    println!("FlexParser event: {:?}", event);
+                    log::info!("FlexParser event: {:?}", event);
                 }
                 Err(e) => panic!("FlexParser failed: {:?}", e),
             }
         }
 
-        println!(
+        log::info!(
             "FlexParser found {} numbers: {:?}",
             flex_numbers.len(),
             flex_numbers
         );
 
         // Test with original DirectParser next_event
-        println!("=== Testing with DirectParser next_event ===");
+        log::info!("=== Testing with DirectParser next_event ===");
         let reader2 = SliceReader::new(json);
         let mut buffer2 = [0u8; 256];
         let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
@@ -928,29 +960,29 @@ mod tests {
 
             match parser2.next_event() {
                 Ok(Event::EndDocument) => {
-                    println!("Original parser got EndDocument");
+                    log::info!("Original parser got EndDocument");
                     break;
                 }
                 Ok(Event::Number(num)) => {
                     let num_str = num.as_str().to_string();
-                    println!("Original parser found number: {}", num_str);
+                    log::info!("Original parser found number: {}", num_str);
                     orig_numbers.push(num_str);
                 }
                 Ok(event) => {
-                    println!("Original parser found event: {:?}", event);
+                    log::info!("Original parser found event: {:?}", event);
                 }
                 Err(e) => panic!("Original parser failed: {:?}", e),
             }
         }
 
-        println!(
+        log::info!(
             "Original parser found {} numbers: {:?}",
             orig_numbers.len(),
             orig_numbers
         );
 
         // Test with FlexParser using trace to understand its flow
-        println!("=== Testing FlexParser with detailed events ===");
+        log::info!("=== Testing FlexParser with detailed events ===");
         let mut scratch2 = [0u8; 256];
         let mut flex_parser2 =
             crate::PullParser::new_with_buffer(std::str::from_utf8(json).unwrap(), &mut scratch2);
@@ -964,16 +996,16 @@ mod tests {
                 }
                 Ok(event) => {
                     let event_str = format!("{:?}", event);
-                    println!("FlexParser detailed event: {}", event_str);
+                    log::info!("FlexParser detailed event: {}", event_str);
                     flex_all_events.push(event_str);
                 }
                 Err(e) => panic!("FlexParser detailed failed: {:?}", e),
             }
         }
-        println!("FlexParser all events: {:?}", flex_all_events);
+        log::info!("FlexParser all events: {:?}", flex_all_events);
 
         // Now test with DirectParser
-        println!("=== Testing with DirectParser ===");
+        log::info!("=== Testing with DirectParser ===");
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
         let mut parser = TestDirectParser::new(reader, &mut buffer);
@@ -990,25 +1022,25 @@ mod tests {
 
             match parser.next_event() {
                 Ok(Event::EndDocument) => {
-                    println!("Got EndDocument");
+                    log::info!("Got EndDocument");
                     break;
                 }
                 Ok(Event::Number(num)) => {
                     let num_str = num.as_str().to_string();
-                    println!("Found number: {}", num_str);
+                    log::info!("Found number: {}", num_str);
                     number_values.push(num_str);
                     all_events.push("Number".to_string());
                 }
                 Ok(event) => {
-                    println!("Found event: {:?}", event);
+                    log::info!("Found event: {:?}", event);
                     all_events.push(format!("{:?}", event));
                 }
                 Err(e) => panic!("next_event number parsing failed: {:?}", e),
             }
         }
 
-        println!("All events: {:?}", all_events);
-        println!("Number values: {:?}", number_values);
+        log::info!("All events: {:?}", all_events);
+        log::info!("Number values: {:?}", number_values);
 
         // Should match FlexParser behavior
         // Note: minor delimiter issue with NumberAndArray - core functionality works
@@ -1022,6 +1054,9 @@ mod tests {
     #[test]
     fn test_next_event_number_parsing() {
         // Test the next_event function specifically with Number events
+        #[cfg(feature = "float-error")]
+        let json = br#"{"int": 42, "negative": -123, "array": [1, 2, 3]}"#; // No floats for float-error config
+        #[cfg(not(feature = "float-error"))]
         let json = br#"{"int": 42, "float": 3.14, "negative": -123, "array": [1, 2, 3]}"#;
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
@@ -1035,30 +1070,45 @@ mod tests {
                 Ok(Event::EndDocument) => break,
                 Ok(Event::Number(num)) => {
                     let num_str = num.as_str().to_string();
-                    println!("Found number: {}", num_str);
+                    log::info!("Found number: {}", num_str);
                     number_values.push(num_str);
                     all_events.push("Number".to_string());
                 }
                 Ok(event) => {
-                    println!("Found event: {:?}", event);
+                    log::info!("Found event: {:?}", event);
                     all_events.push(format!("{:?}", event));
                 }
                 Err(e) => panic!("next_event number parsing failed: {:?}", e),
             }
         }
 
-        println!("All events: {:?}", all_events);
-        println!("Number values: {:?}", number_values);
+        log::info!("All events: {:?}", all_events);
+        log::info!("Number values: {:?}", number_values);
 
-        // Should have parsed all 6 numbers: 42, 3.14, -123, 1, 2, 3
-        assert_eq!(number_values.len(), 6);
-        assert_eq!(number_values[0], "42");
-        assert_eq!(number_values[1], "3.14");
-        assert_eq!(number_values[2], "-123");
-        assert_eq!(number_values[3], "1");
-        assert_eq!(number_values[4], "2");
-        // Temporarily accept delimiter issue
-        assert!(number_values[5].starts_with("3"));
+        // Should have parsed numbers based on configuration
+        #[cfg(feature = "float-error")]
+        {
+            // Should have parsed 5 numbers: 42, -123, 1, 2, 3 (no float)
+            assert_eq!(number_values.len(), 5);
+            assert_eq!(number_values[0], "42");
+            assert_eq!(number_values[1], "-123");
+            assert_eq!(number_values[2], "1");
+            assert_eq!(number_values[3], "2");
+            // Temporarily accept delimiter issue
+            assert!(number_values[4].starts_with("3"));
+        }
+        #[cfg(not(feature = "float-error"))]
+        {
+            // Should have parsed all 6 numbers: 42, 3.14, -123, 1, 2, 3
+            assert_eq!(number_values.len(), 6);
+            assert_eq!(number_values[0], "42");
+            assert_eq!(number_values[1], "3.14");
+            assert_eq!(number_values[2], "-123");
+            assert_eq!(number_values[3], "1");
+            assert_eq!(number_values[4], "2");
+            // Temporarily accept delimiter issue
+            assert!(number_values[5].starts_with("3"));
+        }
     }
 
     #[test_log::test]
@@ -1066,7 +1116,7 @@ mod tests {
         // Test case to reproduce numbers problem - numbers at end of containers
         let problematic_json = r#"{"key": 123, "arr": [456, 789]}"#;
 
-        println!("=== Testing FlexParser ===");
+        log::info!("=== Testing FlexParser ===");
         let mut scratch = [0u8; 1024];
         let mut flex_parser = crate::PullParser::new_with_buffer(problematic_json, &mut scratch);
 
@@ -1080,9 +1130,9 @@ mod tests {
             }
         }
 
-        println!("FlexParser events: {:?}", flex_events);
+        log::info!("FlexParser events: {:?}", flex_events);
 
-        println!("=== Testing DirectParser ===");
+        log::info!("=== Testing DirectParser ===");
         let json_bytes = problematic_json.as_bytes();
         let reader = SliceReader::new(json_bytes);
         let mut buffer = [0u8; 1024];
@@ -1098,7 +1148,7 @@ mod tests {
             }
         }
 
-        println!("DirectParser events: {:?}", direct_events);
+        log::info!("DirectParser events: {:?}", direct_events);
 
         // Compare results
         assert_eq!(
@@ -1178,17 +1228,19 @@ mod tests {
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             let content = json_string.as_str();
-            println!("Multiple escapes result: '{}'", content);
-            println!("Content bytes: {:?}", content.as_bytes());
+            log::info!("Multiple escapes result: '{}'", content);
+            log::info!("Content bytes: {:?}", content.as_bytes());
 
             // Check that escape sequences were properly processed
             let has_newline = content.contains('\n');
             let has_tab = content.contains('\t');
             let has_quote = content.contains('"');
 
-            println!(
+            log::info!(
                 "Has newline: {}, Has tab: {}, Has quote: {}",
-                has_newline, has_tab, has_quote
+                has_newline,
+                has_tab,
+                has_quote
             );
 
             // These should be real control characters, not literal \n \t \"
@@ -1209,7 +1261,7 @@ mod tests {
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             let content = json_string.as_str();
-            println!("Unicode escape result: '{}'", content);
+            log::info!("Unicode escape result: '{}'", content);
             // Should be "Hello A⍺" (with actual A and alpha characters)
             assert!(content.contains('A'));
             // Note: This test will initially fail until we implement Unicode escapes
@@ -1367,7 +1419,7 @@ mod tests {
         // Phase 4: TODO - When we add complex structures:
         // - Add tests for: {"key": "value"}, [1, 2, 3], nested structures
 
-        println!("Phase 3 complete: Primitive values (true, false, null) work without 'static lifetimes!");
+        log::info!("Phase 3 complete: Primitive values (true, false, null) work without 'static lifetimes!");
     }
 
     #[test]
@@ -1437,7 +1489,7 @@ mod tests {
             events, expected,
             "Realistic client usage should produce expected event sequence"
         );
-        println!("✅ Realistic client usage test passed - events properly consumed within loop iterations");
+        log::info!("✅ Realistic client usage test passed - events properly consumed within loop iterations");
     }
 
     #[test]
@@ -1463,7 +1515,7 @@ mod tests {
         match result2 {
             Ok(Event::Key(key_string)) => {
                 assert_eq!(key_string.as_str(), "foo");
-                println!(
+                log::info!(
                     "🎉 SUCCESS! Key extraction works with proper borrowing: '{}'",
                     key_string.as_str()
                 );
@@ -1502,7 +1554,7 @@ mod tests {
         let json = br#"{"key": "hello\nworld"}"#;
 
         // First test with the original next_event method to see if escape works there
-        println!("=== Testing with original next_event ===");
+        log::info!("=== Testing with original next_event ===");
         let reader1 = SliceReader::new(json);
         let mut buffer1 = [0u8; 1024];
         let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
@@ -1510,21 +1562,21 @@ mod tests {
         assert_eq!(parser1.next_event().unwrap(), Event::StartObject);
         match parser1.next_event().unwrap() {
             Event::Key(key) => {
-                println!("Original parser Key: '{}'", &*key);
+                log::info!("Original parser Key: '{}'", &*key);
                 assert_eq!(&*key, "key");
             }
             other => panic!("Expected Key, got {:?}", other),
         }
         match parser1.next_event().unwrap() {
             Event::String(s) => {
-                println!("Original parser String: '{}'", &*s);
+                log::info!("Original parser String: '{}'", &*s);
                 // For reference, see what the original parser produces
             }
             other => panic!("Expected String, got {:?}", other),
         }
 
         // Now test with next_event
-        println!("=== Testing with next_event ===");
+        log::info!("=== Testing with next_event ===");
         let reader2 = SliceReader::new(json);
         let mut buffer2 = [0u8; 1024];
         let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
@@ -1535,7 +1587,7 @@ mod tests {
         // Should get Key
         match parser2.next_event().unwrap() {
             Event::Key(key) => {
-                println!("Super parser Key: '{}'", &*key);
+                log::info!("Super parser Key: '{}'", &*key);
                 assert_eq!(&*key, "key");
             }
             other => panic!("Expected Key, got {:?}", other),
@@ -1544,7 +1596,7 @@ mod tests {
         // Should get String with escape sequence processed
         match parser2.next_event().unwrap() {
             Event::String(s) => {
-                println!("Super parser String: '{}'", &*s);
+                log::info!("Super parser String: '{}'", &*s);
                 // For now, just print what we get instead of asserting
                 // The escape sequence should be processed
                 // assert_eq!(&*s, "hello\nworld");
@@ -1558,10 +1610,10 @@ mod tests {
         // Should get EndDocument
         assert_eq!(parser2.next_event().unwrap(), Event::EndDocument);
 
-        println!("✅ Basic escape sequence test completed - both parsers match!");
+        log::info!("✅ Basic escape sequence test completed - both parsers match!");
 
         // Test with more complex escape sequences (without Unicode for now)
-        println!("=== Testing complex escape sequences ===");
+        log::info!("=== Testing complex escape sequences ===");
         let complex_json = br#"{"test": "Hello\tWorld\nWith\"Quote"}"#;
         let reader3 = SliceReader::new(complex_json);
         let mut buffer3 = [0u8; 1024];
@@ -1576,7 +1628,7 @@ mod tests {
         }
         match parser3.next_event().unwrap() {
             Event::String(s) => {
-                println!("Complex escape result: '{}'", &*s);
+                log::info!("Complex escape result: '{}'", &*s);
                 // Should be: Hello<tab>World<newline>With"Quote
                 // \t -> tab, \n -> newline, \" -> quote
             }
@@ -1584,10 +1636,10 @@ mod tests {
         }
         assert_eq!(parser3.next_event().unwrap(), Event::EndObject);
         assert_eq!(parser3.next_event().unwrap(), Event::EndDocument);
-        println!("✅ Complex escape sequence test completed successfully!");
+        log::info!("✅ Complex escape sequence test completed successfully!");
 
         // Test Unicode escape sequence specifically
-        println!("=== Testing Unicode escape sequence ===");
+        log::info!("=== Testing Unicode escape sequence ===");
         let unicode_json = br#"{"unicode": "A\u0041B"}"#; // Should be "AAB"
         let reader4 = SliceReader::new(unicode_json);
         let mut buffer4 = [0u8; 1024];
@@ -1601,7 +1653,7 @@ mod tests {
             other => panic!("Expected Key, got {:?}", other),
         }
         // First test with original parser for comparison
-        println!("--- Testing with original parser ---");
+        log::info!("--- Testing with original parser ---");
         let reader4_orig = SliceReader::new(unicode_json);
         let mut buffer4_orig = [0u8; 1024];
         let mut parser4_orig = TestDirectParser::new(reader4_orig, &mut buffer4_orig);
@@ -1613,15 +1665,15 @@ mod tests {
         }
         match parser4_orig.next_event() {
             Ok(Event::String(s)) => {
-                println!("Original parser Unicode result: '{}'", &*s);
+                log::info!("Original parser Unicode result: '{}'", &*s);
             }
             Err(e) => {
-                println!("Original parser Unicode error: {:?}", e);
+                log::info!("Original parser Unicode error: {:?}", e);
             }
             Ok(other) => panic!("Expected String, got {:?}", other),
         }
 
-        println!("--- Testing with FlexParser ---");
+        log::info!("--- Testing with FlexParser ---");
         use crate::flex_parser::PullParser;
         let unicode_str = std::str::from_utf8(unicode_json).unwrap();
         let mut scratch = [0u8; 1024];
@@ -1634,22 +1686,22 @@ mod tests {
         }
         match flex_parser.next_event() {
             Ok(Event::String(s)) => {
-                println!("FlexParser Unicode result: '{}'", &*s);
+                log::info!("FlexParser Unicode result: '{}'", &*s);
             }
             Err(e) => {
-                println!("FlexParser Unicode error: {:?}", e);
+                log::info!("FlexParser Unicode error: {:?}", e);
             }
             Ok(other) => panic!("Expected String, got {:?}", other),
         }
 
-        println!("--- Testing with next_event ---");
+        log::info!("--- Testing with next_event ---");
         match parser4.next_event() {
             Ok(Event::String(s)) => {
-                println!("Super parser Unicode result: '{}'", &*s);
-                println!("Expected: 'AAB' (A + \\u0041 + B)");
+                log::info!("Super parser Unicode result: '{}'", &*s);
+                log::info!("Expected: 'AAB' (A + \\u0041 + B)");
             }
             Err(e) => {
-                println!("Super parser Unicode error: {:?}", e);
+                log::info!("Super parser Unicode error: {:?}", e);
                 // This will help us debug the issue
             }
             Ok(other) => panic!("Expected String, got {:?}", other),
@@ -1679,7 +1731,7 @@ mod tests {
         match result2 {
             Ok(Event::String(string_val)) => {
                 assert_eq!(string_val.as_str(), "hello");
-                println!(
+                log::info!(
                     "🎉 SUCCESS! String extraction works with proper borrowing: '{}'",
                     string_val.as_str()
                 );
@@ -1692,7 +1744,7 @@ mod tests {
         match result3 {
             Ok(Event::String(string_val)) => {
                 assert_eq!(string_val.as_str(), "world");
-                println!("🎉 Second string also works: '{}'", string_val.as_str());
+                log::info!("🎉 Second string also works: '{}'", string_val.as_str());
             }
             other => panic!("Expected String(\"world\"), got: {:?}", other),
         }
@@ -1712,6 +1764,139 @@ mod tests {
             "Expected EndDocument, got: {:?}",
             result5
         );
+    }
+
+    #[test]
+    fn test_unicode_escape_flaw() {
+        // Focused test to isolate the Unicode escape handling issue
+        let json = br#""A\u0041B""#; // Should become "AAB"
+
+        log::info!("=== Testing DirectParser Unicode Handling ===");
+        let reader = SliceReader::new(json);
+        let mut buffer = [0u8; 256];
+        let mut parser = TestDirectParser::new(reader, &mut buffer);
+
+        match parser.next_event() {
+            Ok(Event::String(s)) => {
+                log::info!("DirectParser result: '{}'", s.as_str());
+                log::info!("Expected: 'AAB'");
+                log::info!("Actual length: {}, Expected length: 3", s.as_str().len());
+
+                if s.as_str() != "AAB" {
+                    log::info!("❌ UNICODE ESCAPE FLAW CONFIRMED");
+                    log::info!("DirectParser is not properly processing \\u0041 escape sequence");
+                } else {
+                    log::info!("✅ Unicode escape working correctly");
+                }
+            }
+            other => panic!("Expected String event, got: {:?}", other),
+        }
+
+        // Compare with FlexParser
+        log::info!("=== Testing FlexParser for comparison ===");
+        let json_str = std::str::from_utf8(json).unwrap();
+        let mut scratch = [0u8; 256];
+        let mut flex_parser = crate::PullParser::new_with_buffer(json_str, &mut scratch);
+
+        match flex_parser.next_event() {
+            Ok(Event::String(s)) => {
+                log::info!("FlexParser result: '{}'", s.as_str());
+                log::info!("FlexParser length: {}", s.as_str().len());
+            }
+            other => panic!("FlexParser failed: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_simple_escape_flaw() {
+        // Test simple escape sequences to see if they have the same issue
+        let json = br#""A\nB""#; // Should become "A\nB" (with actual newline)
+
+        log::info!("=== Testing DirectParser Simple Escape Handling ===");
+        let reader = SliceReader::new(json);
+        let mut buffer = [0u8; 256];
+        let mut parser = TestDirectParser::new(reader, &mut buffer);
+
+        match parser.next_event() {
+            Ok(Event::String(s)) => {
+                log::info!("DirectParser result: '{:?}'", s.as_str());
+                log::info!("DirectParser result (display): '{}'", s.as_str());
+                log::info!("Length: {}", s.as_str().len());
+
+                // Check if it contains actual newline character
+                if s.as_str().contains('\n') {
+                    log::info!("✅ Simple escape working - contains actual newline");
+                } else {
+                    log::info!("❌ Simple escape issue - no actual newline found");
+                }
+            }
+            other => panic!("Expected String event, got: {:?}", other),
+        }
+
+        // Compare with FlexParser
+        log::info!("=== Testing FlexParser for comparison ===");
+        let json_str = std::str::from_utf8(json).unwrap();
+        let mut scratch = [0u8; 256];
+        let mut flex_parser = crate::PullParser::new_with_buffer(json_str, &mut scratch);
+
+        match flex_parser.next_event() {
+            Ok(Event::String(s)) => {
+                log::info!("FlexParser result: '{:?}'", s.as_str());
+                log::info!("FlexParser result (display): '{}'", s.as_str());
+                log::info!("FlexParser length: {}", s.as_str().len());
+            }
+            other => panic!("FlexParser failed: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_escape_character_loss_pattern() {
+        // Test to see if DirectParser loses characters before escape sequences
+        log::info!("=== Testing Character Loss Pattern ===");
+
+        let test_cases = [
+            (r#""AB""#, "AB", "simple string"),
+            (r#""A\nB""#, "A\nB", "newline escape"),
+            (r#""A\u0041B""#, "AAB", "unicode escape"),
+            (r#""ABC\nDEF""#, "ABC\nDEF", "longer string with escape"),
+        ];
+
+        for (json, expected, description) in test_cases {
+            log::info!("\n--- Testing: {} ---", description);
+            log::info!("JSON: {}", json);
+            log::info!("Expected: '{}'", expected);
+
+            // Test DirectParser
+            let json_bytes = json.as_bytes();
+            let reader = SliceReader::new(json_bytes);
+            let mut buffer = [0u8; 256];
+            let mut parser = TestDirectParser::new(reader, &mut buffer);
+
+            match parser.next_event() {
+                Ok(Event::String(s)) => {
+                    log::info!("DirectParser: '{}'", s.as_str());
+                    if s.as_str() == expected {
+                        log::info!("✅ CORRECT");
+                    } else {
+                        log::info!("❌ WRONG (expected '{}', got '{}')", expected, s.as_str());
+
+                        // Analyze the difference
+                        let expected_len = expected.chars().count();
+                        let actual_len = s.as_str().chars().count();
+                        log::info!(
+                            "  Expected length: {}, Actual length: {}",
+                            expected_len,
+                            actual_len
+                        );
+
+                        if actual_len < expected_len {
+                            log::info!("  → Characters are being lost!");
+                        }
+                    }
+                }
+                other => panic!("Expected String event, got: {:?}", other),
+            }
+        }
     }
 
     #[test]
@@ -2003,5 +2188,125 @@ mod tests {
             assert_eq!(parser.next_event().unwrap(), Event::EndObject);
             assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
         }
+    }
+
+    #[test]
+    fn test_comprehensive_escape_sequence_comparison() {
+        // Comprehensive test comparing DirectParser and FlexParser on various escape sequences
+        // This ensures both parsers produce identical results
+
+        let test_cases = [
+            // Basic cases
+            (r#""simple""#, "Simple string without escapes"),
+            (r#""A\nB""#, "Simple newline escape"),
+            (r#""A\tB""#, "Simple tab escape"),
+            (r#""A\"B""#, "Simple quote escape"),
+            (r#""A\\B""#, "Simple backslash escape"),
+            (r#""A\/B""#, "Simple forward slash escape"),
+            (r#""A\bB""#, "Simple backspace escape"),
+            (r#""A\fB""#, "Simple form feed escape"),
+            (r#""A\rB""#, "Simple carriage return escape"),
+            // Unicode escapes
+            (r#""A\u0041B""#, "Unicode escape (A)"),
+            (
+                r#""A\u0048\u0065\u006C\u006C\u006FB""#,
+                "Multiple Unicode escapes (Hello)",
+            ),
+            (r#""\u03B1\u03B2\u03B3""#, "Greek letters Unicode"),
+            // Mixed escape sequences
+            (r#""Hello\nWorld\tTest""#, "Mixed newline and tab"),
+            (r#""Line1\nLine2\r\nLine3""#, "Multiple line breaks"),
+            (r#""Quote: \"Hello\" End""#, "Quotes in string"),
+            (r#""Path: C:\\Users\\test""#, "File path with backslashes"),
+            (r#""JSON: {\"key\": \"value\"}""#, "Nested JSON string"),
+            // Complex combinations
+            (r#""Start\u0041\nMiddle\tEnd""#, "Unicode + newline + tab"),
+            (
+                r#""Complex\u0048\u0065\u006C\u006C\u006F\nWorld""#,
+                "Unicode Hello + newline",
+            ),
+            (
+                r#""A\u0041\u0042\u0043\nD\u0045\u0046""#,
+                "Multiple Unicode sequences",
+            ),
+        ];
+
+        log::info!("=== Comprehensive Escape Sequence Comparison ===");
+
+        for (json, description) in &test_cases {
+            log::info!("\nTesting: {}", description);
+            log::info!("JSON: {}", json);
+
+            // Parse with DirectParser
+            let json_bytes = json.as_bytes();
+            let reader = SliceReader::new(json_bytes);
+            let mut buffer = [0u8; 512];
+            let mut direct_parser = TestDirectParser::new(reader, &mut buffer);
+
+            let direct_result = match direct_parser.next_event() {
+                Ok(Event::String(s)) => s.as_str().to_string(),
+                Ok(other) => panic!("DirectParser: Expected String, got {:?}", other),
+                Err(e) => panic!("DirectParser failed: {:?}", e),
+            };
+
+            // Parse with FlexParser
+            let mut scratch = [0u8; 512];
+            let mut flex_parser = crate::PullParser::new_with_buffer(json, &mut scratch);
+
+            let flex_result = match flex_parser.next_event() {
+                Ok(Event::String(s)) => s.as_str().to_string(),
+                Ok(other) => panic!("FlexParser: Expected String, got {:?}", other),
+                Err(e) => panic!("FlexParser failed: {:?}", e),
+            };
+
+            // Compare results
+            if direct_result == flex_result {
+                log::info!("✅ MATCH: '{}'", direct_result);
+            } else {
+                log::info!("❌ MISMATCH:");
+                log::info!(
+                    "  DirectParser: '{}' (len: {})",
+                    direct_result,
+                    direct_result.len()
+                );
+                log::info!(
+                    "  FlexParser:   '{}' (len: {})",
+                    flex_result,
+                    flex_result.len()
+                );
+
+                // Detailed character-by-character comparison
+                let direct_chars: Vec<char> = direct_result.chars().collect();
+                let flex_chars: Vec<char> = flex_result.chars().collect();
+
+                log::info!("  Character comparison:");
+                let max_len = direct_chars.len().max(flex_chars.len());
+                for i in 0..max_len {
+                    let direct_char = direct_chars.get(i).copied().unwrap_or('?');
+                    let flex_char = flex_chars.get(i).copied().unwrap_or('?');
+                    let match_str = if direct_char == flex_char {
+                        "✓"
+                    } else {
+                        "✗"
+                    };
+                    log::info!(
+                        "    [{}] Direct: {:?} ({:?}), Flex: {:?} ({:?}) {}",
+                        i,
+                        direct_char,
+                        direct_char as u32,
+                        flex_char,
+                        flex_char as u32,
+                        match_str
+                    );
+                }
+
+                panic!(
+                    "DirectParser and FlexParser produced different results for: {}",
+                    description
+                );
+            }
+        }
+
+        log::info!("\n✅ All escape sequence tests passed! DirectParser and FlexParser produce identical results.");
     }
 }

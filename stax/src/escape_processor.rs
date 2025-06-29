@@ -188,16 +188,6 @@ impl UnicodeEscapeCollector {
 
         EscapeProcessor::process_unicode_escape(&self.hex_buffer, utf8_buffer)
     }
-
-    /// Check if we have collected all 4 hex digits
-    pub fn is_complete(&self) -> bool {
-        self.hex_pos == 4
-    }
-
-    /// Get the current number of collected hex digits
-    pub fn hex_count(&self) -> usize {
-        self.hex_pos
-    }
 }
 
 #[cfg(test)]
@@ -386,17 +376,11 @@ mod tests {
         let mut collector = UnicodeEscapeCollector::new();
         let mut utf8_buffer = [0u8; 4];
 
-        assert_eq!(collector.hex_count(), 0);
-        assert!(!collector.is_complete());
-
         // Add hex digits for \u0041 -> 'A'
         assert!(!collector.add_hex_digit(b'0').unwrap()); // Not complete yet
         assert!(!collector.add_hex_digit(b'0').unwrap()); // Not complete yet
         assert!(!collector.add_hex_digit(b'4').unwrap()); // Not complete yet
         assert!(collector.add_hex_digit(b'1').unwrap()); // Complete!
-
-        assert_eq!(collector.hex_count(), 4);
-        assert!(collector.is_complete());
 
         // Process to UTF-8
         let result = collector.process_to_utf8(&mut utf8_buffer).unwrap();
@@ -413,10 +397,6 @@ mod tests {
 
         // Invalid hex digit should fail
         assert!(collector.add_hex_digit(b'G').is_err());
-
-        // State should be preserved after error
-        assert_eq!(collector.hex_count(), 2);
-        assert!(!collector.is_complete());
     }
 
     #[test]
@@ -426,16 +406,12 @@ mod tests {
         // Add some digits
         assert!(!collector.add_hex_digit(b'0').unwrap());
         assert!(!collector.add_hex_digit(b'1').unwrap());
-        assert_eq!(collector.hex_count(), 2);
 
         // Reset should clear state
         collector.reset();
-        assert_eq!(collector.hex_count(), 0);
-        assert!(!collector.is_complete());
 
         // Should be able to start fresh
         assert!(!collector.add_hex_digit(b'A').unwrap());
-        assert_eq!(collector.hex_count(), 1);
     }
 
     #[test]
