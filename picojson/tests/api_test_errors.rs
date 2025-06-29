@@ -1,6 +1,6 @@
 // Additional error handling tests for the API
 
-use stax::{Event, ParseError, PullParser, String};
+use picojson::{Event, ParseError, PullParser, String};
 
 #[test]
 fn test_malformed_json_missing_quotes() {

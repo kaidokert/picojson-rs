@@ -43,6 +43,7 @@ where
 
 // Newtype wrapper for arrays to implement BitStack trait
 // Provides large BitStack storage using multiple elements
+// TODO: Can this be done with slices as well ?
 #[derive(Debug)]
 pub struct ArrayBitStack<const N: usize, T>(pub [T; N]);
 

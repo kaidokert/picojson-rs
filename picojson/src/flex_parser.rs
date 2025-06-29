@@ -4,6 +4,7 @@ use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
+use crate::ujson;
 use ujson::BitStackCore;
 use ujson::{BitStack, EventToken, Tokenizer};
 
@@ -54,7 +55,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
     ///
     /// # Example
     /// ```
-    /// use stax::PullParser;
+    /// use picojson::PullParser;
     /// let parser = PullParser::new(r#"{"name": "value"}"#);
     /// ```
     pub fn new(input: &'a str) -> Self {
@@ -83,7 +84,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
     ///
     /// # Example
     /// ```
-    /// use stax::PullParser;
+    /// use picojson::PullParser;
     /// let mut scratch = [0u8; 1024];
     /// let parser = PullParser::new_with_buffer(r#"{"msg": "Hello\nWorld"}"#, &mut scratch);
     /// ```
@@ -332,6 +333,10 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
                     ) => {
                         // End of escape sequence - ignored here
                         EventResult::Continue
+                    }
+                    #[cfg(test)]
+                    ujson::Event::Uninitialized => {
+                        return Err(ParseError::UnexpectedState("Uninitialized event"));
                     }
                 };
                 match res {

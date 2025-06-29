@@ -1,6 +1,6 @@
 // Example demonstrating DirectParser with a Reader over a fixed-size array
 
-use stax::{DirectParser, Event, Reader};
+use picojson::{DirectParser, Event, ParseError, Reader};
 
 /// Simple Reader implementation that reads from a fixed-size byte array
 /// This simulates reading from a stream, network socket, or any other byte source
@@ -48,7 +48,7 @@ impl<'a> Reader for ArrayReader<'a> {
     }
 }
 
-fn main() -> Result<(), stax::ParseError> {
+fn main() -> Result<(), ParseError> {
     println!("🚀 DirectParser Demo with ArrayReader");
     println!("=====================================");
 

@@ -6,6 +6,7 @@ use crate::{shared::ParserErrorHandler, ParseError};
 /// This module contains pure functions for escape processing that can be used
 /// by both CopyOnEscape and StreamingBuffer components.
 pub(crate) struct EscapeProcessor;
+use crate::ujson;
 
 impl EscapeProcessor {
     /// Convert an escape token from the tokenizer to the corresponding escape character.
@@ -286,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_token_to_escape_char() {
-        use ujson::EventToken;
+        use crate::ujson::EventToken;
 
         // Test all valid escape tokens
         assert_eq!(
@@ -331,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_process_escape_token() {
-        use ujson::EventToken;
+        use crate::ujson::EventToken;
 
         // Test valid escape tokens that produce correct unescaped bytes
         assert_eq!(

@@ -5,6 +5,11 @@
 // Compile-time configuration validation
 mod config_check;
 
+mod tokenizer;
+use tokenizer as ujson;
+pub use tokenizer::ArrayBitStack;
+pub use tokenizer::BitStack;
+
 mod copy_on_escape;
 
 mod escape_processor;

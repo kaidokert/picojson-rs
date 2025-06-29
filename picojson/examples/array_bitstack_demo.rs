@@ -1,9 +1,9 @@
 // Example demonstrating ArrayBitStack for large nesting depths
 
-use stax::{Event, PullParserFlex};
-use ujson::bitstack::ArrayBitStack;
+use picojson::ArrayBitStack;
+use picojson::{Event, ParseError, PullParserFlex};
 
-fn main() -> Result<(), stax::ParseError> {
+fn main() -> Result<(), ParseError> {
     println!("=== ArrayBitStack Demo ===\n");
 
     // Generate deeply nested JSON with mixed objects and arrays (70+ levels)

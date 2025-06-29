@@ -82,7 +82,7 @@ pub enum State {
 /// Parser state and event storage
 pub(super) struct ParserState {
     pub state: State,
-    pub evts: [Option<ujson::Event>; 2],
+    pub evts: [Option<crate::ujson::Event>; 2],
 }
 
 impl ParserState {
