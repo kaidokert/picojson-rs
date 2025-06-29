@@ -194,15 +194,11 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                             ujson::Event::Begin(EventToken::UnicodeEscape) => {
                                 // Current byte is the first hex digit - reset collector and add it
                                 self.unicode_escape_collector.reset();
-                                if let Err(_) = self.unicode_escape_collector.add_hex_digit(byte) {
-                                    // Invalid hex digit - error will be handled by tokenizer
-                                }
+                                self.unicode_escape_collector.add_hex_digit(byte)?;
                             }
                             ujson::Event::End(EventToken::UnicodeEscape) => {
                                 // Current byte is the fourth hex digit - add it to complete the sequence
-                                if let Err(_) = self.unicode_escape_collector.add_hex_digit(byte) {
-                                    // Invalid hex digit - error will be handled by tokenizer
-                                }
+                                self.unicode_escape_collector.add_hex_digit(byte)?;
                             }
                             _ => {}
                         }
@@ -517,9 +513,7 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             let hex_count = self.unicode_escape_collector.hex_count();
             if in_escape && hex_count > 0 && hex_count < 3 {
                 // We're in a Unicode escape - collect 2nd and 3rd hex digits
-                if let Err(_) = self.unicode_escape_collector.add_hex_digit(byte) {
-                    // Invalid hex digit - error will be handled by tokenizer
-                }
+                self.unicode_escape_collector.add_hex_digit(byte)?;
             } else if !in_escape {
                 // Normal byte - if we're doing escape processing, accumulate it
                 if self.direct_buffer.has_unescaped_content() {
