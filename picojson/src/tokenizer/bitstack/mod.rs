@@ -51,6 +51,81 @@ where
 
 // TODO: Can this be implemented for slices as well ?
 
+// ============================================================================
+// NEW API: BitStack Configuration System
+// ============================================================================
+
+/// Trait for bit bucket storage - replaces the old BitStack trait name for storage
+/// This trait is implemented for both integer and [T; N] types.
+/// For now, we make BitBucket extend BitStack for compatibility during migration
+pub trait BitBucket: BitStack {
+    // BitBucket inherits all methods from BitStack for now
+    // This allows gradual migration
+}
+
+/// Automatic implementation: any type that implements BitStack also implements BitBucket
+impl<T: BitStack> BitBucket for T {}
+
+/// Trait for depth counters - tracks nesting depth
+/// This is automatically implemented for any type that satisfies the individual bounds.
+pub trait DepthCounter:
+    From<u8>
+    + core::cmp::PartialEq<Self>
+    + core::ops::AddAssign<Self>
+    + core::ops::SubAssign<Self>
+    + core::ops::Not<Output = Self>
+    + core::fmt::Debug
+{
+    /// Increment the depth counter
+    fn increment(&mut self);
+}
+
+impl<T> DepthCounter for T
+where
+    T: From<u8>
+        + core::cmp::PartialEq<T>
+        + core::ops::AddAssign<T>
+        + core::ops::SubAssign<T>
+        + core::ops::Not<Output = T>
+        + core::fmt::Debug,
+{
+    fn increment(&mut self) {
+        *self += T::from(1);
+    }
+}
+
+/// Type alias for ArrayBitBucket - just reuse ArrayBitStack during migration
+pub type ArrayBitBucket<const N: usize, T> = ArrayBitStack<N, T>;
+
+/// Configuration trait for BitStack systems - defines bucket and counter types
+pub trait BitStackConfig {
+    type Bucket: BitBucket + Default;
+    type Counter: DepthCounter + Default;
+}
+
+/// Default configuration using u32 bucket and u8 counter
+pub struct DefaultConfig;
+
+impl BitStackConfig for DefaultConfig {
+    type Bucket = u32;
+    type Counter = u8;
+}
+
+/// User-facing BitStack configuration struct - the main API users interact with
+/// Usage: `BitStack<u64, u16>` for custom bucket and counter types
+pub struct BitStackStruct<B, C> {
+    _phantom: core::marker::PhantomData<(B, C)>,
+}
+
+impl<B, C> BitStackConfig for BitStackStruct<B, C>
+where
+    B: BitBucket + Default,
+    C: DepthCounter + Default,
+{
+    type Bucket = B;
+    type Counter = C;
+}
+
 /// Wrapper for arrays to implement BitStack trait.
 /// Provides large BitStack storage using multiple elements.
 /// This can be used to parse very deeply nested JSON.

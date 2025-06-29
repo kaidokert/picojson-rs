@@ -5,8 +5,10 @@ use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ujson;
-use ujson::BitStackCore;
-use ujson::{BitStack, EventToken, Tokenizer};
+use ujson::{EventToken, Tokenizer};
+
+// NEW API imports
+use ujson::{BitStackConfig, DefaultConfig};
 
 /// Result of processing a tokenizer event
 enum EventResult<'a, 'b> {
@@ -27,8 +29,8 @@ enum EventResult<'a, 'b> {
 /// Generic over BitStack storage type for configurable nesting depth.
 // Lifetime 'a is the input buffer lifetime
 // lifetime 'b is the scratch/copy buffer lifetime
-pub struct PullParserFlex<'a, 'b, T: BitStack, D> {
-    tokenizer: Tokenizer<T, D>,
+pub struct PullParser<'a, 'b, C: BitStackConfig = DefaultConfig> {
+    tokenizer: Tokenizer<C::Bucket, C::Counter>,
     buffer: SliceInputBuffer<'a>,
     parser_state: ParserState,
     copy_on_escape: CopyOnEscape<'a, 'b>,
@@ -38,12 +40,8 @@ pub struct PullParserFlex<'a, 'b, T: BitStack, D> {
     unicode_escape_collector: UnicodeEscapeCollector,
 }
 
-/// Type alias for the standard pull parser with default BitStack configuration.
-/// Uses `u32` BitStack (32-bit depth) and `u8` depth counter.
-pub type PullParser<'a, 'b> = PullParserFlex<'a, 'b, u32, u8>;
-
 /// Methods for the pull parser.
-impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
+impl<'a> PullParser<'a, '_, DefaultConfig> {
     /// Creates a new parser for the given JSON input.
     ///
     /// This parser assumes no string escapes will be encountered. If escapes are found,
@@ -64,7 +62,7 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
         // Use a mutable reference to the internal zero-length buffer
         let internal_buffer: &mut [u8] = &mut [];
         let copy_on_escape = CopyOnEscape::new(data, internal_buffer);
-        PullParserFlex {
+        PullParser {
             tokenizer: Tokenizer::new(),
             buffer: SliceInputBuffer::new(data),
             parser_state: ParserState::new(),
@@ -73,7 +71,10 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
             unicode_escape_collector: UnicodeEscapeCollector::new(),
         }
     }
+}
 
+/// Constructor with scratch buffer for PullParser using DefaultConfig
+impl<'a, 'b> PullParser<'a, 'b, DefaultConfig> {
     /// Creates a new parser for the given JSON input with external scratch buffer.
     ///
     /// Use this when your JSON contains string escapes (like `\n`, `\"`, `\u0041`) that
@@ -92,7 +93,24 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
     pub fn new_with_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
         let data = input.as_bytes();
         let copy_on_escape = CopyOnEscape::new(data, scratch_buffer);
-        PullParserFlex {
+        PullParser {
+            tokenizer: Tokenizer::new(),
+            buffer: SliceInputBuffer::new(data),
+            parser_state: ParserState::new(),
+            copy_on_escape,
+            _internal_scratch: [],
+            unicode_escape_collector: UnicodeEscapeCollector::new(),
+        }
+    }
+}
+
+/// Generic constructor for PullParser with custom configurations
+impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
+    /// Creates a new parser with custom BitStackConfig.
+    pub fn with_config(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
+        let data = input.as_bytes();
+        let copy_on_escape = CopyOnEscape::new(data, scratch_buffer);
+        PullParser {
             tokenizer: Tokenizer::new(),
             buffer: SliceInputBuffer::new(data),
             parser_state: ParserState::new(),
@@ -108,7 +126,11 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
 
     /// Helper function to parse a number from the buffer given a start position.
     /// Uses unified number parsing logic with centralized delimiter handling.
-    fn parse_number_from_buffer(&mut self, start: usize, from_container_end: bool) -> Result<Event, ParseError> {
+    fn parse_number_from_buffer(
+        &mut self,
+        start: usize,
+        from_container_end: bool,
+    ) -> Result<Event, ParseError> {
         crate::number_parser::parse_number_event(&self.buffer, start, from_container_end)
     }
 
@@ -265,8 +287,12 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
                         EventResult::Continue
                     }
                     ujson::Event::End(EventToken::Number) => EventResult::ExtractNumber(false),
-                    ujson::Event::End(EventToken::NumberAndArray) => EventResult::ExtractNumber(true),
-                    ujson::Event::End(EventToken::NumberAndObject) => EventResult::ExtractNumber(true),
+                    ujson::Event::End(EventToken::NumberAndArray) => {
+                        EventResult::ExtractNumber(true)
+                    }
+                    ujson::Event::End(EventToken::NumberAndObject) => {
+                        EventResult::ExtractNumber(true)
+                    }
                     // Boolean and null values
                     ujson::Event::Begin(
                         EventToken::True | EventToken::False | EventToken::Null,

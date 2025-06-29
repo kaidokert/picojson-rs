@@ -60,7 +60,6 @@ pub fn parse_number_event<T: NumberExtractor>(
     }))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +99,6 @@ mod tests {
             self.empty
         }
     }
-
 
     #[test]
     fn test_parse_number_event_with_container() {
