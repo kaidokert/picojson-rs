@@ -524,10 +524,10 @@ impl<'b> crate::number_parser::NumberExtractor for DirectBuffer<'b> {
     }
 
     fn current_position(&self) -> usize {
-        self.current_position()
+        self.tokenize_pos
     }
 
     fn is_empty(&self) -> bool {
-        self.is_empty()
+        self.tokenize_pos >= self.data_end
     }
 }
