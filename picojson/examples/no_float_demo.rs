@@ -8,7 +8,7 @@
 // cargo run --example no_float_demo --features int32,float-error             # Error on floats (embedded-friendly)
 // cargo run --example no_float_demo --features float                         # Full float support
 
-use stax::{Event, NumberResult, PullParser, String};
+use picojson::{Event, NumberResult, PullParser, String};
 
 fn main() {
     // Full JSON with scientific notation

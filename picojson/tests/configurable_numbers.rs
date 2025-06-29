@@ -1,7 +1,7 @@
 // Comprehensive tests for configurable number handling
 // These tests demonstrate the various compilation configurations
 
-use stax::{Event, NumberResult, PullParser};
+use picojson::{Event, NumberResult, PullParser};
 
 #[test]
 #[cfg(feature = "int32")]
@@ -56,7 +56,7 @@ fn test_float_error_behavior() {
 
     // Float should cause an error
     match parser.next_event() {
-        Err(stax::ParseError::FloatNotAllowed) => {
+        Err(picojson::ParseError::FloatNotAllowed) => {
             // Expected behavior - test passes
         }
         other => panic!("Expected FloatNotAllowed error, got: {:?}", other),
@@ -140,7 +140,7 @@ fn test_float_truncate_scientific_notation() {
 
     // Scientific notation should cause InvalidNumber error to avoid float math
     match parser.next_event() {
-        Err(stax::ParseError::InvalidNumber) => {
+        Err(picojson::ParseError::InvalidNumber) => {
             // Expected behavior - test passes
         }
         other => panic!(

@@ -1,8 +1,8 @@
 // Example demonstrating configurable BitStack storage for different nesting depths
 
-use stax::{Event, PullParserFlex};
+use picojson::{Event, ParseError, PullParserFlex};
 
-fn main() -> Result<(), stax::ParseError> {
+fn main() -> Result<(), ParseError> {
     println!("BitStack Configuration Examples");
     println!("===============================");
 
@@ -10,7 +10,7 @@ fn main() -> Result<(), stax::ParseError> {
     println!("1. Standard PullParser (u32 BitStack, ~32 levels max):");
     let json = r#"{"deeply": {"nested": {"object": {"with": {"data": "test"}}}}}"#;
     let mut scratch = [0u8; 512];
-    let mut parser = stax::PullParser::new_with_buffer(json, &mut scratch);
+    let mut parser = picojson::PullParser::new_with_buffer(json, &mut scratch);
     let mut depth = 0;
     while let Some(event) = parser.next() {
         match event? {

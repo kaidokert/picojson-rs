@@ -3,6 +3,7 @@
 use crate::direct_buffer::DirectBuffer;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};
+use crate::ujson;
 use ujson::BitStackCore;
 use ujson::{BitStack, EventToken, Tokenizer};
 
@@ -54,7 +55,7 @@ pub struct DirectParser<'b, T: BitStack, D, R: Reader> {
     unicode_escape_collector: UnicodeEscapeCollector,
 }
 
-impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
+impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
     /// Create a new DirectParser
     pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
         Self {
@@ -155,7 +156,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             let taken_event = self.parser_state.evts.iter_mut().find_map(|e| e.take());
 
             if let Some(taken_event) = taken_event {
-                log::trace!("DirectParser: Processing event: {:?}", taken_event);
                 // Process the event directly in the main loop (FlexParser pattern)
                 match taken_event {
                     // Container events
@@ -192,17 +192,11 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         // Update parser state to track string position
                         let current_pos = self.direct_buffer.current_position();
                         let quote_pos = ContentRange::quote_position_from_current(current_pos);
-                        log::trace!(
-                            "DirectParser: String Begin at pos {}, quote at {}",
-                            current_pos,
-                            quote_pos
-                        );
                         self.parser_state.state = crate::shared::State::String(quote_pos);
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::String) => {
                         // Extract string content from parser state
-                        log::trace!("DirectParser: String End, extracting content");
                         return self.extract_string_from_state();
                     }
 
@@ -234,9 +228,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                     // Escape sequence handling
                     ujson::Event::Begin(EventToken::EscapeSequence) => {
                         // Start of escape sequence - we'll handle escapes by unescaping to buffer
-                        log::trace!(
-                            "DirectParser: EscapeSequence Begin - starting escape processing"
-                        );
                         self.start_escape_processing()?;
                         // Continue processing
                     }
@@ -251,40 +242,27 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                         | EventToken::EscapeTab),
                     ) => {
                         // Handle simple escape sequences
-                        log::trace!("DirectParser: Simple escape End: {:?}", escape_token);
                         self.handle_simple_escape(&escape_token)?;
                         // Continue processing
                     }
                     ujson::Event::Begin(EventToken::UnicodeEscape) => {
                         // Start Unicode escape collection - reset collector for new sequence
                         // Only handle if we're inside a string or key (FlexParser approach)
-                        log::trace!("DirectParser: Unicode escape Begin");
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                                log::trace!("DirectParser: Resetting Unicode collector");
                                 self.unicode_escape_collector.reset();
                             }
-                            _ => {
-                                log::trace!(
-                                    "DirectParser: Ignoring Unicode escape (not in string/key)"
-                                );
-                            }
+                            _ => {}
                         }
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::UnicodeEscape) => {
                         // Handle end of Unicode escape sequence (\\uXXXX) using FlexParser approach
-                        log::trace!("DirectParser: Unicode escape End");
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                                log::trace!("DirectParser: Processing Unicode escape");
                                 self.process_unicode_escape_with_collector()?;
                             }
-                            _ => {
-                                log::trace!(
-                                    "DirectParser: Ignoring Unicode escape end (not in string/key)"
-                                );
-                            }
+                            _ => {}
                         }
                         // Continue processing
                     }
@@ -315,19 +293,11 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             return Err(ParserErrorHandler::state_mismatch("string", "extract"));
         };
 
-        log::trace!(
-            "DirectParser: extract_string_from_state start_pos={} has_unescaped={}",
-            start_pos,
-            self.direct_buffer.has_unescaped_content()
-        );
-
         self.parser_state.state = crate::shared::State::None;
 
         if self.direct_buffer.has_unescaped_content() {
-            log::trace!("DirectParser: Creating unescaped string");
             self.create_unescaped_string()
         } else {
-            log::trace!("DirectParser: Creating borrowed string");
             self.create_borrowed_string(start_pos)
         }
     }
@@ -438,13 +408,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
             crate::shared::State::String(_) | crate::shared::State::Key(_)
         );
 
-        log::trace!(
-            "DirectParser: handle_byte_accumulation byte={:02x} '{}' in_string_mode={}",
-            byte,
-            byte as char,
-            in_string_mode
-        );
-
         if in_string_mode {
             // Access escape state from enum
             let in_escape = if let ProcessingState::Active {
@@ -458,18 +421,8 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 
             // Normal byte accumulation - all escape processing now goes through event system
             if !in_escape && self.direct_buffer.has_unescaped_content() {
-                log::trace!(
-                    "DirectParser: Appending byte to escape buffer: {:02x} '{}'",
-                    byte,
-                    byte as char
-                );
                 self.append_byte_to_escape_buffer(byte)?;
             } else {
-                log::trace!(
-                    "DirectParser: Skipping byte accumulation (in_escape={}, has_unescaped={})",
-                    in_escape,
-                    self.direct_buffer.has_unescaped_content()
-                );
             }
         }
 
@@ -478,8 +431,6 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
 
     /// Start escape processing using DirectBuffer
     fn start_escape_processing(&mut self) -> Result<(), ParseError> {
-        log::trace!("DirectParser: start_escape_processing called");
-
         // Update escape state in enum
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -487,12 +438,10 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
         } = self.processing_state
         {
             *in_escape_sequence = true;
-            log::trace!("DirectParser: Set in_escape_sequence = true");
         }
 
         // Initialize escape processing with DirectBuffer if not already started
         if !self.direct_buffer.has_unescaped_content() {
-            log::trace!("DirectParser: Starting unescaping for the first time");
             if let crate::shared::State::String(start_pos) | crate::shared::State::Key(start_pos) =
                 self.parser_state.state
             {
@@ -500,29 +449,18 @@ impl<'b, T: BitStack + core::fmt::Debug, D: BitStackCore, R: Reader> DirectParse
                 let (content_start, content_end) =
                     ContentRange::string_content_bounds_before_escape(start_pos, current_pos);
 
-                log::trace!(
-                    "DirectParser: Content bounds before escape: start={}, end={} (pos {} to {})",
-                    content_start,
-                    content_end,
-                    start_pos,
-                    current_pos
-                );
-
                 // Estimate max length needed for unescaping (content so far + remaining buffer)
                 let max_escaped_len =
                     self.direct_buffer.remaining_bytes() + (content_end - content_start);
 
                 // Start unescaping with DirectBuffer and copy existing content
-                log::trace!("DirectParser: Calling start_unescaping_with_copy");
                 self.direct_buffer.start_unescaping_with_copy(
                     max_escaped_len,
                     content_start,
                     content_end,
                 )?;
-                log::trace!("DirectParser: Escape processing initialized successfully");
             }
         } else {
-            log::trace!("DirectParser: Unescaping already active");
         }
 
         Ok(())
@@ -714,9 +652,7 @@ mod tests {
         let mut parser = TestDirectParser::new(reader, &mut buffer);
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
-            // For now, test will fail as escapes aren't implemented yet
-            // This will be fixed once escape handling is added
-            log::info!("Got string: '{}'", json_string.as_str());
+            assert_eq!(json_string.as_str(), "hello\nworld");
         } else {
             panic!("Expected String event");
         }
@@ -1345,16 +1281,20 @@ mod tests {
     #[test]
     fn test_number_parsing_delimiter_exclusion() {
         // Test that numbers don't include trailing delimiters in various contexts
-        
+
         // Test 1: Number followed by array end
         let json1 = b"[123]";
         let reader1 = SliceReader::new(json1);
         let mut buffer1 = [0u8; 256];
         let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
-        
+
         assert!(matches!(parser1.next_event().unwrap(), Event::StartArray));
         if let Event::Number(num) = parser1.next_event().unwrap() {
-            assert_eq!(num.as_str(), "123", "Number should not include trailing delimiter ']'");
+            assert_eq!(
+                num.as_str(),
+                "123",
+                "Number should not include trailing delimiter ']'"
+            );
         } else {
             panic!("Expected Number event");
         }
@@ -1365,11 +1305,15 @@ mod tests {
         let reader2 = SliceReader::new(json2);
         let mut buffer2 = [0u8; 256];
         let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
-        
+
         assert!(matches!(parser2.next_event().unwrap(), Event::StartObject));
         assert!(matches!(parser2.next_event().unwrap(), Event::Key(_)));
         if let Event::Number(num) = parser2.next_event().unwrap() {
-            assert_eq!(num.as_str(), "456", "Number should not include trailing delimiter '}}'");
+            assert_eq!(
+                num.as_str(),
+                "456",
+                "Number should not include trailing delimiter '}}'"
+            );
         } else {
             panic!("Expected Number event");
         }
@@ -1380,15 +1324,23 @@ mod tests {
         let reader3 = SliceReader::new(json3);
         let mut buffer3 = [0u8; 256];
         let mut parser3 = TestDirectParser::new(reader3, &mut buffer3);
-        
+
         assert!(matches!(parser3.next_event().unwrap(), Event::StartArray));
         if let Event::Number(num1) = parser3.next_event().unwrap() {
-            assert_eq!(num1.as_str(), "789", "First number should not include trailing delimiter ','");
+            assert_eq!(
+                num1.as_str(),
+                "789",
+                "First number should not include trailing delimiter ','"
+            );
         } else {
             panic!("Expected first Number event");
         }
         if let Event::Number(num2) = parser3.next_event().unwrap() {
-            assert_eq!(num2.as_str(), "10", "Second number should not include trailing delimiter ']'");
+            assert_eq!(
+                num2.as_str(),
+                "10",
+                "Second number should not include trailing delimiter ']'"
+            );
         } else {
             panic!("Expected second Number event");
         }
@@ -1399,17 +1351,25 @@ mod tests {
         let reader4 = SliceReader::new(json4);
         let mut buffer4 = [0u8; 256];
         let mut parser4 = TestDirectParser::new(reader4, &mut buffer4);
-        
+
         assert!(matches!(parser4.next_event().unwrap(), Event::StartObject));
         assert!(matches!(parser4.next_event().unwrap(), Event::Key(_)));
         if let Event::Number(num1) = parser4.next_event().unwrap() {
-            assert_eq!(num1.as_str(), "11", "First number should not include trailing delimiter ','");
+            assert_eq!(
+                num1.as_str(),
+                "11",
+                "First number should not include trailing delimiter ','"
+            );
         } else {
             panic!("Expected first Number event");
         }
         assert!(matches!(parser4.next_event().unwrap(), Event::Key(_)));
         if let Event::Number(num2) = parser4.next_event().unwrap() {
-            assert_eq!(num2.as_str(), "22", "Second number should not include trailing delimiter '}}'");
+            assert_eq!(
+                num2.as_str(),
+                "22",
+                "Second number should not include trailing delimiter '}}'"
+            );
         } else {
             panic!("Expected second Number event");
         }
@@ -1420,9 +1380,13 @@ mod tests {
         let reader5 = SliceReader::new(json5);
         let mut buffer5 = [0u8; 256];
         let mut parser5 = TestDirectParser::new(reader5, &mut buffer5);
-        
+
         if let Event::Number(num) = parser5.next_event().unwrap() {
-            assert_eq!(num.as_str(), "999", "Standalone number should include full content");
+            assert_eq!(
+                num.as_str(),
+                "999",
+                "Standalone number should include full content"
+            );
         } else {
             panic!("Expected Number event");
         }
@@ -1433,15 +1397,23 @@ mod tests {
         let reader6 = SliceReader::new(json6);
         let mut buffer6 = [0u8; 256];
         let mut parser6 = TestDirectParser::new(reader6, &mut buffer6);
-        
+
         assert!(matches!(parser6.next_event().unwrap(), Event::StartArray));
         if let Event::Number(num1) = parser6.next_event().unwrap() {
-            assert_eq!(num1.as_str(), "-42", "Negative number should not include trailing delimiter ','");
+            assert_eq!(
+                num1.as_str(),
+                "-42",
+                "Negative number should not include trailing delimiter ','"
+            );
         } else {
             panic!("Expected first Number event");
         }
         if let Event::Number(num2) = parser6.next_event().unwrap() {
-            assert_eq!(num2.as_str(), "33", "Second number should not include trailing delimiter ']'");
+            assert_eq!(
+                num2.as_str(),
+                "33",
+                "Second number should not include trailing delimiter ']'"
+            );
         } else {
             panic!("Expected second Number event");
         }
@@ -1454,15 +1426,23 @@ mod tests {
             let reader7 = SliceReader::new(json7);
             let mut buffer7 = [0u8; 256];
             let mut parser7 = TestDirectParser::new(reader7, &mut buffer7);
-            
+
             assert!(matches!(parser7.next_event().unwrap(), Event::StartArray));
             if let Event::Number(num1) = parser7.next_event().unwrap() {
-                assert_eq!(num1.as_str(), "3.14", "Decimal number should not include trailing delimiter ','");
+                assert_eq!(
+                    num1.as_str(),
+                    "3.14",
+                    "Decimal number should not include trailing delimiter ','"
+                );
             } else {
                 panic!("Expected first Number event");
             }
             if let Event::Number(num2) = parser7.next_event().unwrap() {
-                assert_eq!(num2.as_str(), "2.71", "Second decimal number should not include trailing delimiter ']'");
+                assert_eq!(
+                    num2.as_str(),
+                    "2.71",
+                    "Second decimal number should not include trailing delimiter ']'"
+                );
             } else {
                 panic!("Expected second Number event");
             }

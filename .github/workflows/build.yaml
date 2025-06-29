@@ -68,5 +68,5 @@ jobs:
           override: true
 
       - name: Run cargo test
-        working-directory: stax
+        working-directory: picojson
         run: cargo test ${{ matrix.features }}

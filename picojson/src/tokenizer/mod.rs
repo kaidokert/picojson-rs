@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#![cfg_attr(not(test), no_std)]
-
-pub mod bitstack;
-pub use bitstack::BitStack;
-mod tokenizer;
-
-pub use tokenizer::Tokenizer;
-pub use tokenizer::{Event, EventToken};
-
 /// Trait that combines all the required trait bounds for depth counter types.
+///
 /// This is automatically implemented for any type that satisfies the individual bounds.
 pub trait BitStackCore:
     From<u8>
@@ -30,3 +22,13 @@ impl<T> BitStackCore for T where
         + core::fmt::Debug
 {
 }
+
+mod bitstack;
+pub use bitstack::ArrayBitStack;
+pub use bitstack::BitStack;
+pub(super) use tokenizer::Tokenizer;
+
+pub(super) use tokenizer::Event;
+pub(super) use tokenizer::EventToken;
+
+mod tokenizer;

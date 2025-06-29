@@ -1,8 +1,8 @@
 // Example demonstrating the simple new API
 
-use stax::{Event, PullParser};
+use picojson::{Event, ParseError, PullParser};
 
-fn main() -> Result<(), stax::ParseError> {
+fn main() -> Result<(), ParseError> {
     // Test the new simple API
     let json = r#"{"name": "value", "number": 42, "flag": true}"#;
     let mut parser = PullParser::new(json);

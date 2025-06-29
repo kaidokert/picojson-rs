@@ -1,5 +1,5 @@
 // Debug root-level number parsing issue
-use stax::{Event, PullParser};
+use picojson::{Event, PullParser};
 
 fn test_json(input: &str, description: &str) {
     println!("\n=== Testing: {} ===", description);
