@@ -140,7 +140,7 @@ fn test_float_truncate_scientific_notation() {
 
     // Scientific notation should cause InvalidNumber error to avoid float math
     match parser.next_event() {
-        Err(ParseError::InvalidNumber) => {
+        Err(stax::ParseError::InvalidNumber) => {
             // Expected behavior - test passes
         }
         other => panic!(
