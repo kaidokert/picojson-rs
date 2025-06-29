@@ -56,7 +56,7 @@ fn test_float_error_behavior() {
 
     // Float should cause an error
     match parser.next_event() {
-        Err(ParseError::FloatNotAllowed) => {
+        Err(stax::ParseError::FloatNotAllowed) => {
             // Expected behavior - test passes
         }
         other => panic!("Expected FloatNotAllowed error, got: {:?}", other),
