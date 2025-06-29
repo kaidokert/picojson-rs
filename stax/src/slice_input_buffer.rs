@@ -60,12 +60,8 @@ impl<'a> crate::number_parser::NumberExtractor for SliceInputBuffer<'a> {
         start: usize,
         end: usize,
     ) -> Result<&[u8], crate::shared::ParseError> {
-        if end > self.data.len() {
-            return Err(crate::shared::ParseError::UnexpectedState(
-                "End position beyond buffer",
-            ));
-        }
-        Ok(&self.data[start..end])
+        self.slice(start, end)
+            .map_err(|_| crate::shared::ParseError::InvalidNumber)
     }
 
     fn current_position(&self) -> usize {

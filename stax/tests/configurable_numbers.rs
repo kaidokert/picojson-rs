@@ -1,7 +1,7 @@
 // Comprehensive tests for configurable number handling
 // These tests demonstrate the various compilation configurations
 
-use stax::{Event, NumberResult, ParseError, PullParser};
+use stax::{Event, NumberResult, PullParser};
 
 #[test]
 #[cfg(feature = "int32")]
