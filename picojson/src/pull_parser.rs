@@ -7,7 +7,6 @@ use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ujson;
 use ujson::{EventToken, Tokenizer};
 
-// NEW API imports
 use ujson::{BitStackConfig, DefaultConfig};
 
 /// Result of processing a tokenizer event

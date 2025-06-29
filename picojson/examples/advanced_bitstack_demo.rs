@@ -31,7 +31,7 @@ fn main() -> Result<(), ParseError> {
     println!("  Maximum depth reached: {}\n", depth);
 
     // Test 2: u8 BitStack (8-bit depth, more memory efficient for shallow data)
-    println!("2. Memory-efficient PullParserFlex (u8 BitStack, ~8 levels max):");
+    println!("2. Memory-efficient PullParser (u8 BitStack, ~8 levels max):");
     let json = r#"{"shallow": {"data": [1, 2, 3]}}"#;
     let mut scratch = [0u8; 256];
     let mut parser =
@@ -64,7 +64,7 @@ fn main() -> Result<(), ParseError> {
     println!("  Maximum depth reached: {}\n", depth);
 
     // Test 3: u64 BitStack (64-bit depth, for very deep nesting)
-    println!("3. Deep-nesting PullParserFlex (u64 BitStack, ~64 levels max):");
+    println!("3. Deep-nesting PullParser (u64 BitStack, ~64 levels max):");
     let json = r#"{"very": {"deeply": {"nested": {"structure": {"with": {"many": {"levels": {"data": "deep"}}}}}}}}"#;
     let mut scratch = [0u8; 1024];
     let mut parser =

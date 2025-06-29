@@ -11,7 +11,6 @@ use tokenizer as ujson;
 pub use tokenizer::ArrayBitStack;
 pub use tokenizer::BitStack;
 
-// NEW API exports
 pub use tokenizer::ArrayBitBucket;
 pub use tokenizer::{BitBucket, BitStackConfig, BitStackStruct, DefaultConfig, DepthCounter};
 
@@ -23,7 +22,7 @@ mod direct_buffer;
 
 mod direct_parser;
 
-mod flex_parser;
+mod pull_parser;
 
 mod shared;
 pub use shared::{Event, ParseError};
@@ -40,7 +39,7 @@ pub use json_string::String;
 mod number_parser;
 
 pub use direct_parser::{DirectParser, Reader};
-pub use flex_parser::PullParser;
+pub use pull_parser::PullParser;
 
 impl From<slice_input_buffer::Error> for ParseError {
     fn from(err: slice_input_buffer::Error) -> Self {

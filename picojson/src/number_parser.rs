@@ -4,7 +4,6 @@ use crate::shared::{Event, ParseError, ParserErrorHandler};
 use crate::JsonNumber;
 
 /// Trait for extracting number slices from different buffer implementations.
-/// This allows unified number parsing logic between FlexParser and DirectParser.
 pub trait NumberExtractor {
     /// Extract a slice of bytes representing a number from start to end position.
     ///

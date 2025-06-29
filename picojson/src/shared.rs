@@ -175,7 +175,7 @@ impl ContentRange {
         (hex_start, hex_end, escape_start)
     }
 
-    /// Calculate end position for string content in FlexParser style
+    /// Calculate end position for string content
     /// Used when the parser position needs to exclude the delimiter
     ///
     /// # Arguments

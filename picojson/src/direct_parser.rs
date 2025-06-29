@@ -6,7 +6,6 @@ use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserS
 use crate::ujson;
 use ujson::{EventToken, Tokenizer};
 
-// NEW API imports
 use ujson::{BitStackConfig, DefaultConfig};
 
 /// Trait for input sources that can provide data to the streaming parser
@@ -154,7 +153,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
         self.apply_unescaped_reset_if_queued();
 
         loop {
-            // Pull events from tokenizer until we have some (FlexParser exact pattern)
+            // Pull events from tokenizer until we have some
             while !self.have_events() {
                 // Fill buffer and check for end of data
                 self.fill_buffer_from_reader()?;
@@ -167,7 +166,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
                         // Clear events and try to finish tokenizer
                         self.clear_events();
                         let mut callback = |event, _len| {
-                            // Store events in the array, filling available slots (same as FlexParser)
+                            // Store events in the array, filling available slots
                             for evt in self.parser_state.evts.iter_mut() {
                                 if evt.is_none() {
                                     *evt = Some(event);
@@ -193,7 +192,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
                     // Process byte through tokenizer
                     self.clear_events();
                     let mut callback = |event, _len| {
-                        // Store events in the array, filling available slots (same as FlexParser)
+                        // Store events in the array, filling available slots
                         for evt in self.parser_state.evts.iter_mut() {
                             if evt.is_none() {
                                 *evt = Some(event);
@@ -215,11 +214,11 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
                 }
             }
 
-            // Now we have events - process ONE event (FlexParser pattern)
+            // Now we have events - process ONE event
             let taken_event = self.parser_state.evts.iter_mut().find_map(|e| e.take());
 
             if let Some(taken_event) = taken_event {
-                // Process the event directly in the main loop (FlexParser pattern)
+                // Process the event directly in the main loop
                 match taken_event {
                     // Container events
                     ujson::Event::ObjectStart => return Ok(Event::StartObject),
@@ -310,7 +309,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
                     }
                     ujson::Event::Begin(EventToken::UnicodeEscape) => {
                         // Start Unicode escape collection - reset collector for new sequence
-                        // Only handle if we're inside a string or key (FlexParser approach)
+                        // Only handle if we're inside a string or key
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                                 self.unicode_escape_collector.reset();
@@ -320,7 +319,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::UnicodeEscape) => {
-                        // Handle end of Unicode escape sequence (\\uXXXX) using FlexParser approach
+                        // Handle end of Unicode escape sequence (\\uXXXX)
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                                 self.process_unicode_escape_with_collector()?;
@@ -340,7 +339,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
         }
     }
 
-    /// Check if we have events waiting to be processed (FlexParser pattern)
+    /// Check if we have events waiting to be processed
     fn have_events(&self) -> bool {
         self.parser_state.evts.iter().any(|evt| evt.is_some())
     }
@@ -548,7 +547,6 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
         Ok(())
     }
 
-    /// Process Unicode escape sequence using FlexParser approach
     /// Extracts hex digits from buffer and processes them through the collector
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         // Update escape state in enum - Unicode escape processing is complete
@@ -560,7 +558,7 @@ impl<'b, R: Reader, C: BitStackConfig> DirectParser<'b, R, C> {
             *in_escape_sequence = false;
         }
 
-        // Current position is right after the 4 hex digits (similar to FlexParser)
+        // Current position is right after the 4 hex digits
         let current_pos = self.direct_buffer.current_position();
         let (hex_start, hex_end, _escape_start_pos) =
             ContentRange::unicode_escape_bounds(current_pos);
