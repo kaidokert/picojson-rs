@@ -65,9 +65,9 @@ impl<'a> crate::number_parser::NumberExtractor for SliceInputBuffer<'a> {
     }
 
     fn current_position(&self) -> usize {
-        // FlexParser's position is AFTER the delimiter that ended the number
-        // We need to return the position BEFORE that delimiter for consistent behavior
-        self.pos.saturating_sub(1)
+        // Return the actual current position (AFTER any delimiter)
+        // Delimiter handling is now centralized in parse_number_event()
+        self.pos
     }
 
     fn is_empty(&self) -> bool {

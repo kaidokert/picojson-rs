@@ -60,27 +60,6 @@ pub fn parse_number_event<T: NumberExtractor>(
     }))
 }
 
-/// Simple version for FlexParser that doesn't need container context.
-/// Uses current buffer position as end without delimiter exclusion logic.
-pub fn parse_number_event_simple<T: NumberExtractor>(
-    extractor: &T,
-    start_pos: usize,
-) -> Result<Event, ParseError> {
-    let current_pos = extractor.current_position();
-
-    // Extract number bytes and convert to string
-    let number_bytes = extractor.get_number_slice(start_pos, current_pos)?;
-    let number_str = ParserErrorHandler::bytes_to_utf8_str(number_bytes)?;
-
-    // Parse number using shared logic
-    let parsed_result = crate::parse_number_from_str(number_str)?;
-
-    // Create event
-    Ok(Event::Number(JsonNumber::Borrowed {
-        raw: number_str,
-        parsed: parsed_result,
-    }))
-}
 
 #[cfg(test)]
 mod tests {
@@ -122,19 +101,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_number_event_simple() {
-        let data = b"123";
-        let extractor = MockExtractor::new(data, 3, false);
-
-        let result = parse_number_event_simple(&extractor, 0).unwrap();
-        if let Event::Number(num) = result {
-            assert_eq!(num.as_str(), "123");
-            assert_eq!(num.as_int(), Some(123));
-        } else {
-            panic!("Expected Number event");
-        }
-    }
 
     #[test]
     fn test_parse_number_event_with_container() {
