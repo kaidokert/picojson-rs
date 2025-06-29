@@ -78,7 +78,11 @@ fn test_new_with_buffer_handles_escapes() {
 
 #[test]
 fn test_new_with_numbers_and_arrays() {
-    let json = r#"[1, 2.5, true, false, null]"#;
+    #[cfg(feature = "float-error")]
+    let json = r#"[1, 2, true, false, null]"#; // No floats for float-error config
+    #[cfg(not(feature = "float-error"))]
+    let json = r#"[1, 2.5, true, false, null]"#; // Include float for other configs
+
     let mut parser = PullParser::new(json);
 
     // Should handle all basic types without issues
