@@ -133,7 +133,7 @@ impl ContentRange {
         current_pos: usize,
     ) -> (usize, usize) {
         let content_start = quote_start + 1; // Skip opening quote
-        let content_end = current_pos.saturating_sub(2); // Back up to before the backslash
+        let content_end = current_pos.saturating_sub(1); // Back up to before the backslash
         (content_start, content_end)
     }
 
@@ -232,11 +232,6 @@ impl ParserErrorHandler {
             ("active", "process") => ParseError::UnexpectedState("Not in active processing state"),
             _ => ParseError::UnexpectedState("State mismatch"),
         }
-    }
-
-    /// Create error for invalid Unicode escape sequences
-    pub fn invalid_unicode_escape() -> ParseError {
-        ParseError::InvalidUnicodeHex
     }
 
     /// Create error for invalid Unicode escape length
