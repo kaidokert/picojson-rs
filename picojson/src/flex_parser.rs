@@ -19,7 +19,8 @@ enum EventResult<'a, 'b> {
     /// Extract key content from current state
     ExtractKey,
     /// Extract number content from current state,
-    ExtractNumber,
+    /// bool indicates if number was terminated by container delimiter
+    ExtractNumber(bool),
 }
 
 /// A flexible pull parser for JSON that yields events on demand.
@@ -106,9 +107,9 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
     }
 
     /// Helper function to parse a number from the buffer given a start position.
-    /// Uses unified number parsing logic.
-    fn parse_number_from_buffer(&mut self, start: usize) -> Result<Event, ParseError> {
-        crate::number_parser::parse_number_event_simple(&self.buffer, start)
+    /// Uses unified number parsing logic with centralized delimiter handling.
+    fn parse_number_from_buffer(&mut self, start: usize, from_container_end: bool) -> Result<Event, ParseError> {
+        crate::number_parser::parse_number_event(&self.buffer, start, from_container_end)
     }
 
     /// Helper method to handle simple escape tokens using EscapeProcessor
@@ -263,9 +264,9 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
                         self.parser_state.state = State::Number(number_start);
                         EventResult::Continue
                     }
-                    ujson::Event::End(EventToken::Number) => EventResult::ExtractNumber,
-                    ujson::Event::End(EventToken::NumberAndArray) => EventResult::ExtractNumber,
-                    ujson::Event::End(EventToken::NumberAndObject) => EventResult::ExtractNumber,
+                    ujson::Event::End(EventToken::Number) => EventResult::ExtractNumber(false),
+                    ujson::Event::End(EventToken::NumberAndArray) => EventResult::ExtractNumber(true),
+                    ujson::Event::End(EventToken::NumberAndObject) => EventResult::ExtractNumber(true),
                     // Boolean and null values
                     ujson::Event::Begin(
                         EventToken::True | EventToken::False | EventToken::Null,
@@ -368,11 +369,11 @@ impl<'a, 'b, T: BitStack, D: BitStackCore> PullParserFlex<'a, 'b, T, D> {
                             break Err(ParserErrorHandler::state_mismatch("string", "end"));
                         }
                     }
-                    EventResult::ExtractNumber => {
+                    EventResult::ExtractNumber(from_container_end) => {
                         if let State::Number(start) = self.parser_state.state {
                             // Reset state before parsing to stop selective copying
                             self.parser_state.state = State::None;
-                            let event = self.parse_number_from_buffer(start)?;
+                            let event = self.parse_number_from_buffer(start, from_container_end)?;
                             break Ok(event);
                         } else {
                             break Err(ParseError::UnexpectedState(
