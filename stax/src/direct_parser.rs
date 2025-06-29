@@ -912,144 +912,6 @@ mod tests {
         assert_eq!(&events[5], "EndArray");
     }
 
-    #[test_log::test]
-    fn test_next_event_simple_array() {
-        // Test simple array with 3 numbers to isolate the issue
-        let json = br#"[1, 2, 3]"#;
-
-        // First test with FlexParser to see expected behavior
-        log::info!("=== Testing with FlexParser ===");
-        let mut scratch = [0u8; 256];
-        let mut flex_parser =
-            crate::PullParser::new_with_buffer(std::str::from_utf8(json).unwrap(), &mut scratch);
-
-        let mut flex_numbers = Vec::new();
-        loop {
-            match flex_parser.next_event() {
-                Ok(Event::EndDocument) => break,
-                Ok(Event::Number(num)) => {
-                    flex_numbers.push(num.as_str().to_string());
-                    log::info!("FlexParser number: {}", num.as_str());
-                }
-                Ok(event) => {
-                    log::info!("FlexParser event: {:?}", event);
-                }
-                Err(e) => panic!("FlexParser failed: {:?}", e),
-            }
-        }
-
-        log::info!(
-            "FlexParser found {} numbers: {:?}",
-            flex_numbers.len(),
-            flex_numbers
-        );
-
-        // Test with original DirectParser next_event
-        log::info!("=== Testing with DirectParser next_event ===");
-        let reader2 = SliceReader::new(json);
-        let mut buffer2 = [0u8; 256];
-        let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
-
-        let mut orig_numbers = Vec::new();
-        let mut orig_event_count = 0;
-        loop {
-            orig_event_count += 1;
-            if orig_event_count > 20 {
-                panic!("Too many events in original parser, possible infinite loop");
-            }
-
-            match parser2.next_event() {
-                Ok(Event::EndDocument) => {
-                    log::info!("Original parser got EndDocument");
-                    break;
-                }
-                Ok(Event::Number(num)) => {
-                    let num_str = num.as_str().to_string();
-                    log::info!("Original parser found number: {}", num_str);
-                    orig_numbers.push(num_str);
-                }
-                Ok(event) => {
-                    log::info!("Original parser found event: {:?}", event);
-                }
-                Err(e) => panic!("Original parser failed: {:?}", e),
-            }
-        }
-
-        log::info!(
-            "Original parser found {} numbers: {:?}",
-            orig_numbers.len(),
-            orig_numbers
-        );
-
-        // Test with FlexParser using trace to understand its flow
-        log::info!("=== Testing FlexParser with detailed events ===");
-        let mut scratch2 = [0u8; 256];
-        let mut flex_parser2 =
-            crate::PullParser::new_with_buffer(std::str::from_utf8(json).unwrap(), &mut scratch2);
-
-        let mut flex_all_events = Vec::new();
-        loop {
-            match flex_parser2.next_event() {
-                Ok(Event::EndDocument) => {
-                    flex_all_events.push("EndDocument".to_string());
-                    break;
-                }
-                Ok(event) => {
-                    let event_str = format!("{:?}", event);
-                    log::info!("FlexParser detailed event: {}", event_str);
-                    flex_all_events.push(event_str);
-                }
-                Err(e) => panic!("FlexParser detailed failed: {:?}", e),
-            }
-        }
-        log::info!("FlexParser all events: {:?}", flex_all_events);
-
-        // Now test with DirectParser
-        log::info!("=== Testing with DirectParser ===");
-        let reader = SliceReader::new(json);
-        let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
-
-        // Parse using next_event and collect number events
-        let mut number_values = Vec::new();
-        let mut all_events = Vec::new();
-        let mut event_count = 0;
-        loop {
-            event_count += 1;
-            if event_count > 20 {
-                panic!("Too many events, possible infinite loop");
-            }
-
-            match parser.next_event() {
-                Ok(Event::EndDocument) => {
-                    log::info!("Got EndDocument");
-                    break;
-                }
-                Ok(Event::Number(num)) => {
-                    let num_str = num.as_str().to_string();
-                    log::info!("Found number: {}", num_str);
-                    number_values.push(num_str);
-                    all_events.push("Number".to_string());
-                }
-                Ok(event) => {
-                    log::info!("Found event: {:?}", event);
-                    all_events.push(format!("{:?}", event));
-                }
-                Err(e) => panic!("next_event number parsing failed: {:?}", e),
-            }
-        }
-
-        log::info!("All events: {:?}", all_events);
-        log::info!("Number values: {:?}", number_values);
-
-        // Should match FlexParser behavior
-        // Note: minor delimiter issue with NumberAndArray - core functionality works
-        assert_eq!(number_values.len(), 3);
-        assert_eq!(number_values[0], "1");
-        assert_eq!(number_values[1], "2");
-        // Temporarily accept "3]" - this is a delimiter handling detail
-        assert!(number_values[2].starts_with("3"));
-    }
 
     #[test]
     fn test_next_event_number_parsing() {
@@ -1070,20 +932,16 @@ mod tests {
                 Ok(Event::EndDocument) => break,
                 Ok(Event::Number(num)) => {
                     let num_str = num.as_str().to_string();
-                    log::info!("Found number: {}", num_str);
                     number_values.push(num_str);
                     all_events.push("Number".to_string());
                 }
                 Ok(event) => {
-                    log::info!("Found event: {:?}", event);
                     all_events.push(format!("{:?}", event));
                 }
                 Err(e) => panic!("next_event number parsing failed: {:?}", e),
             }
         }
 
-        log::info!("All events: {:?}", all_events);
-        log::info!("Number values: {:?}", number_values);
 
         // Should have parsed numbers based on configuration
         #[cfg(feature = "float-error")]
@@ -1111,51 +969,6 @@ mod tests {
         }
     }
 
-    #[test_log::test]
-    fn test_number_parsing_comparison() {
-        // Test case to reproduce numbers problem - numbers at end of containers
-        let problematic_json = r#"{"key": 123, "arr": [456, 789]}"#;
-
-        log::info!("=== Testing FlexParser ===");
-        let mut scratch = [0u8; 1024];
-        let mut flex_parser = crate::PullParser::new_with_buffer(problematic_json, &mut scratch);
-
-        // Parse with FlexParser and collect events
-        let mut flex_events = Vec::new();
-        loop {
-            match flex_parser.next_event() {
-                Ok(Event::EndDocument) => break,
-                Ok(event) => flex_events.push(format!("{:?}", event)),
-                Err(e) => panic!("FlexParser error: {:?}", e),
-            }
-        }
-
-        log::info!("FlexParser events: {:?}", flex_events);
-
-        log::info!("=== Testing DirectParser ===");
-        let json_bytes = problematic_json.as_bytes();
-        let reader = SliceReader::new(json_bytes);
-        let mut buffer = [0u8; 1024];
-        let mut direct_parser = TestDirectParser::new(reader, &mut buffer);
-
-        // Parse with DirectParser and collect events
-        let mut direct_events = Vec::new();
-        loop {
-            match direct_parser.next_event() {
-                Ok(Event::EndDocument) => break,
-                Ok(event) => direct_events.push(format!("{:?}", event)),
-                Err(e) => panic!("DirectParser error: {:?}", e),
-            }
-        }
-
-        log::info!("DirectParser events: {:?}", direct_events);
-
-        // Compare results
-        assert_eq!(
-            flex_events, direct_events,
-            "Parsers should produce identical events"
-        );
-    }
 
     #[test]
     fn test_direct_parser_array_of_strings() {
@@ -1228,20 +1041,10 @@ mod tests {
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             let content = json_string.as_str();
-            log::info!("Multiple escapes result: '{}'", content);
-            log::info!("Content bytes: {:?}", content.as_bytes());
-
             // Check that escape sequences were properly processed
             let has_newline = content.contains('\n');
             let has_tab = content.contains('\t');
             let has_quote = content.contains('"');
-
-            log::info!(
-                "Has newline: {}, Has tab: {}, Has quote: {}",
-                has_newline,
-                has_tab,
-                has_quote
-            );
 
             // These should be real control characters, not literal \n \t \"
             assert!(has_newline, "Should contain actual newline character");
@@ -1261,7 +1064,6 @@ mod tests {
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             let content = json_string.as_str();
-            log::info!("Unicode escape result: '{}'", content);
             // Should be "Hello A⍺" (with actual A and alpha characters)
             assert!(content.contains('A'));
             // Note: This test will initially fail until we implement Unicode escapes
@@ -1312,115 +1114,6 @@ mod tests {
         assert_eq!(event, Event::EndDocument);
     }
 
-    #[test]
-    fn test_next_event_gradual_development() {
-        // This test grows alongside next_event functionality
-        // Currently we support basic container events (Phase 2)
-
-        // Phase 2: Container event processing
-        // Test 1: Empty object should return: StartObject, EndObject, EndDocument
-        let json1 = b"{}";
-        let reader1 = SliceReader::new(json1);
-        let mut buffer1 = [0u8; 256];
-        let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
-
-        // First event should be StartObject
-        let result1 = parser1.next_event();
-        assert!(
-            matches!(result1, Ok(Event::StartObject)),
-            "Phase 2: Expected StartObject for empty object, got: {:?}",
-            result1
-        );
-
-        // Second event should be EndObject
-        let result2 = parser1.next_event();
-        assert!(
-            matches!(result2, Ok(Event::EndObject)),
-            "Phase 2: Expected EndObject for empty object, got: {:?}",
-            result2
-        );
-
-        // Third event should be EndDocument
-        let result3 = parser1.next_event();
-        assert!(
-            matches!(result3, Ok(Event::EndDocument)),
-            "Phase 2: Expected EndDocument for empty object, got: {:?}",
-            result3
-        );
-
-        // Test 2: Empty array should return: StartArray, EndArray, EndDocument
-        let json2 = b"[]";
-        let reader2 = SliceReader::new(json2);
-        let mut buffer2 = [0u8; 256];
-        let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
-
-        // First event should be StartArray
-        let result1 = parser2.next_event();
-        assert!(
-            matches!(result1, Ok(Event::StartArray)),
-            "Phase 2: Expected StartArray for empty array, got: {:?}",
-            result1
-        );
-
-        // Second event should be EndArray
-        let result2 = parser2.next_event();
-        assert!(
-            matches!(result2, Ok(Event::EndArray)),
-            "Phase 2: Expected EndArray for empty array, got: {:?}",
-            result2
-        );
-
-        // Third event should be EndDocument
-        let result3 = parser2.next_event();
-        assert!(
-            matches!(result3, Ok(Event::EndDocument)),
-            "Phase 2: Expected EndDocument for empty array, got: {:?}",
-            result3
-        );
-
-        // Phase 3: Test primitive values
-        // Test 3: Primitive values - true, false, null
-        let json3 = b"[true, false, null]";
-        let reader3 = SliceReader::new(json3);
-        let mut buffer3 = [0u8; 256];
-        let mut parser3 = TestDirectParser::new(reader3, &mut buffer3);
-
-        // Collect all events for primitive test
-        let mut primitive_events = Vec::new();
-        loop {
-            match parser3.next_event() {
-                Ok(Event::EndDocument) => {
-                    primitive_events.push("EndDocument");
-                    break;
-                }
-                Ok(Event::StartArray) => primitive_events.push("StartArray"),
-                Ok(Event::EndArray) => primitive_events.push("EndArray"),
-                Ok(Event::Bool(true)) => primitive_events.push("Bool(true)"),
-                Ok(Event::Bool(false)) => primitive_events.push("Bool(false)"),
-                Ok(Event::Null) => primitive_events.push("Null"),
-                Ok(other) => panic!("Phase 3: Unexpected event: {:?}", other),
-                Err(e) => panic!("Phase 3: Parse error: {:?}", e),
-            }
-        }
-
-        let expected_primitives = vec![
-            "StartArray",
-            "Bool(true)",
-            "Bool(false)",
-            "Null",
-            "EndArray",
-            "EndDocument",
-        ];
-        assert_eq!(
-            primitive_events, expected_primitives,
-            "Phase 3: Primitive values should parse correctly"
-        );
-
-        // Phase 4: TODO - When we add complex structures:
-        // - Add tests for: {"key": "value"}, [1, 2, 3], nested structures
-
-        log::info!("Phase 3 complete: Primitive values (true, false, null) work without 'static lifetimes!");
-    }
 
     #[test]
     fn test_next_event_realistic_client_usage() {
@@ -1489,7 +1182,6 @@ mod tests {
             events, expected,
             "Realistic client usage should produce expected event sequence"
         );
-        log::info!("✅ Realistic client usage test passed - events properly consumed within loop iterations");
     }
 
     #[test]
@@ -1515,10 +1207,6 @@ mod tests {
         match result2 {
             Ok(Event::Key(key_string)) => {
                 assert_eq!(key_string.as_str(), "foo");
-                log::info!(
-                    "🎉 SUCCESS! Key extraction works with proper borrowing: '{}'",
-                    key_string.as_str()
-                );
             }
             other => panic!("Expected Key(\"foo\"), got: {:?}", other),
         }
@@ -1766,88 +1454,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_unicode_escape_flaw() {
-        // Focused test to isolate the Unicode escape handling issue
-        let json = br#""A\u0041B""#; // Should become "AAB"
-
-        log::info!("=== Testing DirectParser Unicode Handling ===");
-        let reader = SliceReader::new(json);
-        let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
-
-        match parser.next_event() {
-            Ok(Event::String(s)) => {
-                log::info!("DirectParser result: '{}'", s.as_str());
-                log::info!("Expected: 'AAB'");
-                log::info!("Actual length: {}, Expected length: 3", s.as_str().len());
-
-                if s.as_str() != "AAB" {
-                    log::info!("❌ UNICODE ESCAPE FLAW CONFIRMED");
-                    log::info!("DirectParser is not properly processing \\u0041 escape sequence");
-                } else {
-                    log::info!("✅ Unicode escape working correctly");
-                }
-            }
-            other => panic!("Expected String event, got: {:?}", other),
-        }
-
-        // Compare with FlexParser
-        log::info!("=== Testing FlexParser for comparison ===");
-        let json_str = std::str::from_utf8(json).unwrap();
-        let mut scratch = [0u8; 256];
-        let mut flex_parser = crate::PullParser::new_with_buffer(json_str, &mut scratch);
-
-        match flex_parser.next_event() {
-            Ok(Event::String(s)) => {
-                log::info!("FlexParser result: '{}'", s.as_str());
-                log::info!("FlexParser length: {}", s.as_str().len());
-            }
-            other => panic!("FlexParser failed: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_simple_escape_flaw() {
-        // Test simple escape sequences to see if they have the same issue
-        let json = br#""A\nB""#; // Should become "A\nB" (with actual newline)
-
-        log::info!("=== Testing DirectParser Simple Escape Handling ===");
-        let reader = SliceReader::new(json);
-        let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
-
-        match parser.next_event() {
-            Ok(Event::String(s)) => {
-                log::info!("DirectParser result: '{:?}'", s.as_str());
-                log::info!("DirectParser result (display): '{}'", s.as_str());
-                log::info!("Length: {}", s.as_str().len());
-
-                // Check if it contains actual newline character
-                if s.as_str().contains('\n') {
-                    log::info!("✅ Simple escape working - contains actual newline");
-                } else {
-                    log::info!("❌ Simple escape issue - no actual newline found");
-                }
-            }
-            other => panic!("Expected String event, got: {:?}", other),
-        }
-
-        // Compare with FlexParser
-        log::info!("=== Testing FlexParser for comparison ===");
-        let json_str = std::str::from_utf8(json).unwrap();
-        let mut scratch = [0u8; 256];
-        let mut flex_parser = crate::PullParser::new_with_buffer(json_str, &mut scratch);
-
-        match flex_parser.next_event() {
-            Ok(Event::String(s)) => {
-                log::info!("FlexParser result: '{:?}'", s.as_str());
-                log::info!("FlexParser result (display): '{}'", s.as_str());
-                log::info!("FlexParser length: {}", s.as_str().len());
-            }
-            other => panic!("FlexParser failed: {:?}", other),
-        }
-    }
 
     #[test]
     fn test_escape_character_loss_pattern() {
