@@ -10,3 +10,4 @@ A minimal Rust JSON parser for resource constrained environments.
 - Configuration of int32 / int64 support
 - Configuration and disabling of float support
 - no_std by default
+- no unsafe code
