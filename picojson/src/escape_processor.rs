@@ -7,6 +7,7 @@ use crate::{shared::ParserErrorHandler, ParseError};
 /// by both CopyOnEscape and StreamingBuffer components.
 pub(crate) struct EscapeProcessor;
 use crate::ujson;
+use ujson::EventToken;
 
 impl EscapeProcessor {
     /// Convert an escape token from the tokenizer to the corresponding escape character.
@@ -25,14 +26,14 @@ impl EscapeProcessor {
     /// ```
     pub fn token_to_escape_char(escape_token: &ujson::EventToken) -> Option<u8> {
         match escape_token {
-            ujson::EventToken::EscapeQuote => Some(b'"'),
-            ujson::EventToken::EscapeBackslash => Some(b'\\'),
-            ujson::EventToken::EscapeSlash => Some(b'/'),
-            ujson::EventToken::EscapeBackspace => Some(b'b'),
-            ujson::EventToken::EscapeFormFeed => Some(b'f'),
-            ujson::EventToken::EscapeNewline => Some(b'n'),
-            ujson::EventToken::EscapeCarriageReturn => Some(b'r'),
-            ujson::EventToken::EscapeTab => Some(b't'),
+            EventToken::EscapeQuote => Some(b'"'),
+            EventToken::EscapeBackslash => Some(b'\\'),
+            EventToken::EscapeSlash => Some(b'/'),
+            EventToken::EscapeBackspace => Some(b'b'),
+            EventToken::EscapeFormFeed => Some(b'f'),
+            EventToken::EscapeNewline => Some(b'n'),
+            EventToken::EscapeCarriageReturn => Some(b'r'),
+            EventToken::EscapeTab => Some(b't'),
             _ => None,
         }
     }
