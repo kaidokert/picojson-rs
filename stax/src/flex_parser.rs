@@ -115,7 +115,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
     fn handle_simple_escape_token(
         &mut self,
         escape_token: &EventToken,
-    ) -> Result<Option<Event<'a, 'b>>, ParseError> {
+    ) -> Result<Option<Event>, ParseError> {
         // Use unified escape token processing
         let unescaped_char = EscapeProcessor::process_escape_token(escape_token)?;
 
@@ -124,10 +124,7 @@ impl<'a, 'b, T: BitStack + core::fmt::Debug, D: BitStackCore> PullParserFlex<'a,
     }
 
     /// Handles escape sequence events by delegating to CopyOnEscape if we're inside a string or key
-    fn handle_escape_event(
-        &mut self,
-        escape_char: u8,
-    ) -> Result<Option<Event<'a, 'b>>, ParseError> {
+    fn handle_escape_event(&mut self, escape_char: u8) -> Result<Option<Event>, ParseError> {
         if let State::String(_) | State::Key(_) = self.parser_state.state {
             self.copy_on_escape
                 .handle_escape(self.buffer.current_pos(), escape_char)?;
