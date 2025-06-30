@@ -52,10 +52,10 @@ fn test_new_with_escapes_fails() {
 }
 
 #[test]
-fn test_new_with_buffer_handles_escapes() {
+fn test_with_buffer_handles_escapes() {
     let json = r#"{"message": "Hello\nWorld"}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::new_with_buffer(json, &mut scratch);
+    let mut parser = PullParser::with_buffer(json, &mut scratch);
 
     // Should parse successfully with escape handling
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
@@ -100,7 +100,7 @@ fn test_new_with_numbers_and_arrays() {
 fn test_mixed_string_types() {
     let json = r#"{"simple": "no_escapes", "complex": "with\tescapes"}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::new_with_buffer(json, &mut scratch);
+    let mut parser = PullParser::with_buffer(json, &mut scratch);
 
     // Events: StartObject, Key("simple"), String("no_escapes"), Key("complex"), String("with\tescapes"), EndObject
     assert_eq!(parser.next_event(), Ok(Event::StartObject));

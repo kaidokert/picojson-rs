@@ -1,6 +1,6 @@
-// Example demonstrating DirectParser with a Reader over a fixed-size array
+// Example demonstrating StreamParser with a Reader over a fixed-size array
 
-use picojson::{DirectParser, Event, ParseError, Reader};
+use picojson::{Event, ParseError, Reader, StreamParser};
 
 /// Simple Reader implementation that reads from a fixed-size byte array
 /// This simulates reading from a stream, network socket, or any other byte source
@@ -49,7 +49,7 @@ impl<'a> Reader for ArrayReader<'a> {
 }
 
 fn main() -> Result<(), ParseError> {
-    println!("🚀 DirectParser Demo with ArrayReader");
+    println!("🚀 StreamParser Demo with ArrayReader");
     println!("=====================================");
 
     // Test JSON with various data types including escape sequences
@@ -62,12 +62,12 @@ fn main() -> Result<(), ParseError> {
     // Create ArrayReader that reads in small chunks (simulates network streaming)
     let reader = ArrayReader::new(json, 8); // Read 8 bytes at a time
 
-    // Create DirectParser with a reasonably sized buffer
+    // Create StreamParser with a reasonably sized buffer
     let mut buffer = [0u8; 256];
     let buffer_size = buffer.len();
-    let mut parser: DirectParser<u32, u8, ArrayReader> = DirectParser::new(reader, &mut buffer);
+    let mut parser = StreamParser::new(reader, &mut buffer);
 
-    println!("🔄 Starting DirectParser with streaming ArrayReader:");
+    println!("🔄 Starting StreamParser with streaming ArrayReader:");
     println!("   Buffer size: {} bytes", buffer_size);
     println!("   Chunk size: 8 bytes (simulates small network packets)");
     println!();
@@ -112,19 +112,10 @@ fn main() -> Result<(), ParseError> {
 
     println!();
     println!(
-        "✅ Successfully parsed {} events with DirectParser!",
+        "✅ Successfully parsed {} events with StreamParser!",
         event_count
     );
     println!("💡 Notice how the Reader was called multiple times in small chunks,");
     println!("   demonstrating true streaming behavior with a fixed-size buffer.");
-
-    // Show buffer statistics
-    let stats = parser.buffer_stats();
-    println!();
-    println!("📊 Final buffer statistics:");
-    println!("   Total capacity: {} bytes", stats.total_capacity);
-    println!("   Data processed: {} bytes", stats.data_end);
-    println!("   Remaining: {} bytes", stats.remaining_bytes);
-
     Ok(())
 }

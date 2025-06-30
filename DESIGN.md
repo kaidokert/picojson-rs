@@ -22,7 +22,7 @@ To provide the most idiomatic API, `PullParser` will implement the standard `Ite
 ```rust
 // The user-facing API will be clean and simple:
 let mut scratch = [0; 1024];
-let parser = PullParser::new_with_buffer(json_input, &mut scratch);
+let parser = PullParser::with_buffer(json_input, &mut scratch);
 
 for event_result in parser {
     let event = event_result?;

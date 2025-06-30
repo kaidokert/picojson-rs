@@ -61,7 +61,7 @@ fn main() {
         println!();
 
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::new_with_buffer(json, &mut scratch);
+        let mut parser = PullParser::with_buffer(json, &mut scratch);
 
         parse_and_display(&mut parser);
 

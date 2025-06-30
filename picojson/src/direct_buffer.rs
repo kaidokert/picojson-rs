@@ -185,31 +185,6 @@ impl<'a> DirectBuffer<'a> {
         }
         Ok(&self.buffer[start..end])
     }
-
-    /// Get buffer statistics for debugging
-    pub fn stats(&self) -> DirectBufferStats {
-        DirectBufferStats {
-            total_capacity: self.buffer.len(),
-            tokenize_pos: self.tokenize_pos,
-            data_end: self.data_end,
-            unescaped_len: self.unescaped_len,
-            remaining_bytes: self.remaining_bytes(),
-            available_space: self.buffer.len().saturating_sub(self.data_end),
-            escape_reserve: self.escape_reserve,
-        }
-    }
-}
-
-/// Statistics for DirectBuffer state (useful for debugging and testing)
-#[derive(Debug, PartialEq)]
-pub struct DirectBufferStats {
-    pub total_capacity: usize,
-    pub tokenize_pos: usize,
-    pub data_end: usize,
-    pub unescaped_len: usize,
-    pub remaining_bytes: usize,
-    pub available_space: usize,
-    pub escape_reserve: usize,
 }
 
 #[cfg(test)]
@@ -288,29 +263,6 @@ mod tests {
     }
 
     #[test]
-    fn test_buffer_stats() {
-        let mut buffer = [0u8; 100];
-        let mut db = DirectBuffer::new(&mut buffer);
-
-        {
-            let fill_slice = db.get_fill_slice().unwrap();
-            fill_slice[0..10].copy_from_slice(b"0123456789");
-        }
-        db.mark_filled(10).unwrap();
-
-        for _ in 0..3 {
-            db.advance().unwrap();
-        }
-
-        let stats = db.stats();
-        assert_eq!(stats.total_capacity, 100);
-        assert_eq!(stats.tokenize_pos, 3);
-        assert_eq!(stats.data_end, 10);
-        assert_eq!(stats.remaining_bytes, 7);
-        assert_eq!(stats.available_space, 90);
-    }
-
-    #[test]
     fn test_buffer_full_scenario() {
         // Test what happens when buffer gets completely full
         let mut buffer = [0u8; 10];
@@ -385,20 +337,17 @@ mod tests {
         let db = DirectBuffer::new(&mut buffer);
 
         // Check escape reserve calculation
-        let stats = db.stats();
-        assert_eq!(stats.escape_reserve, 64); // max(100/10, 64) = 64
+        assert_eq!(db.escape_reserve, 64); // max(100/10, 64) = 64
 
         // Test with smaller buffer
         let mut small_buffer = [0u8; 50];
         let small_db = DirectBuffer::new(&mut small_buffer);
-        let small_stats = small_db.stats();
-        assert_eq!(small_stats.escape_reserve, 64); // Still 64 (minimum)
+        assert_eq!(small_db.escape_reserve, 64); // Still 64 (minimum)
 
         // Test with larger buffer
         let mut large_buffer = [0u8; 1000];
         let large_db = DirectBuffer::new(&mut large_buffer);
-        let large_stats = large_db.stats();
-        assert_eq!(large_stats.escape_reserve, 100); // 1000/10 = 100
+        assert_eq!(large_db.escape_reserve, 100); // 1000/10 = 100
     }
 
     #[test]
@@ -465,8 +414,7 @@ mod tests {
         let mut db = DirectBuffer::new(&mut buffer);
 
         // Check escape reserve was set correctly (10% of 100, minimum 64)
-        let stats = db.stats();
-        assert_eq!(stats.escape_reserve, 64);
+        assert_eq!(db.escape_reserve, 64);
 
         // Should be able to append up to (buffer_len - escape_reserve) bytes
         let max_unescaped = 100 - db.escape_reserve; // 100 - 64 = 36
@@ -493,8 +441,7 @@ mod tests {
         let mut db = DirectBuffer::new(&mut buffer);
 
         // Even small buffers get minimum 64 byte escape reserve, but that's larger than buffer
-        let stats = db.stats();
-        assert_eq!(stats.escape_reserve, 64); // minimum
+        assert_eq!(db.escape_reserve, 64); // minimum
 
         // Since escape_reserve (64) > buffer.len() (10), no bytes should be appendable
         // This should not panic with underflow, but return BufferFull error
@@ -504,8 +451,7 @@ mod tests {
         // Test with even smaller buffer to ensure we handle underflow correctly
         let mut tiny_buffer = [0u8; 3];
         let mut tiny_db = DirectBuffer::new(&mut tiny_buffer);
-        let tiny_stats = tiny_db.stats();
-        assert_eq!(tiny_stats.escape_reserve, 64); // Still minimum 64
+        assert_eq!(tiny_db.escape_reserve, 64); // Still minimum 64
 
         // Should handle this gracefully without panic
         let result = tiny_db.append_unescaped_byte(b'B');

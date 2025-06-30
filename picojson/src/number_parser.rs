@@ -4,7 +4,6 @@ use crate::shared::{Event, ParseError, ParserErrorHandler};
 use crate::JsonNumber;
 
 /// Trait for extracting number slices from different buffer implementations.
-/// This allows unified number parsing logic between FlexParser and DirectParser.
 pub trait NumberExtractor {
     /// Extract a slice of bytes representing a number from start to end position.
     ///
@@ -23,7 +22,7 @@ pub trait NumberExtractor {
     fn is_empty(&self) -> bool;
 }
 
-/// Unified number parsing logic shared between FlexParser and DirectParser.
+/// Unified number parsing logic shared between PullParser and StreamParser.
 ///
 /// This function encapsulates the common pattern:
 /// 1. Extract number slice from buffer
@@ -59,7 +58,6 @@ pub fn parse_number_event<T: NumberExtractor>(
         parsed: parsed_result,
     }))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -100,7 +98,6 @@ mod tests {
             self.empty
         }
     }
-
 
     #[test]
     fn test_parse_number_event_with_container() {

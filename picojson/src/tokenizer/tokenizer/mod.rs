@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::BitStack;
-use super::BitStackCore;
+use super::BitBucket;
+use super::DepthCounter;
 
 #[derive(Debug, Clone)]
-struct ParseContext<T: BitStack, D> {
+struct ParseContext<T: BitBucket, D> {
     /// Keeps track of the depth of the object/array
     depth: D,
     /// Keeps track of the stack of objects/arrays
@@ -13,7 +13,7 @@ struct ParseContext<T: BitStack, D> {
     after_comma: Option<(u8, usize)>,
 }
 
-impl<T: BitStack, D: BitStackCore> ParseContext<T, D> {
+impl<T: BitBucket, D: DepthCounter> ParseContext<T, D> {
     // We can expect an unsigned with From<u8> requirement
     // So this math usually works
     fn max_depth() -> D {
@@ -184,7 +184,7 @@ pub enum Event {
     Uninitialized,
 }
 
-pub struct Tokenizer<T: BitStack = u32, D = u8> {
+pub struct Tokenizer<T: BitBucket = u32, D = u8> {
     state: State,
     total_consumed: usize,
     context: ParseContext<T, D>,
@@ -244,7 +244,7 @@ impl Default for Tokenizer {
     }
 }
 
-impl<T: BitStack, D: BitStackCore> Tokenizer<T, D> {
+impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,

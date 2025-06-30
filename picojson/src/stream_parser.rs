@@ -4,10 +4,11 @@ use crate::direct_buffer::DirectBuffer;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};
 use crate::ujson;
-use ujson::BitStackCore;
-use ujson::{BitStack, EventToken, Tokenizer};
+use ujson::{EventToken, Tokenizer};
 
-/// Trait for input sources that can provide data to the streaming parser
+use ujson::{BitStackConfig, DefaultConfig};
+
+/// Trait for input sources that can provide data to the streaming parser.
 pub trait Reader {
     /// The error type returned by read operations
     type Error;
@@ -22,7 +23,7 @@ pub trait Reader {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
 }
 
-/// Represents the processing state of the DirectParser
+/// Represents the processing state of the StreamParser
 /// Enforces logical invariants: once Finished, no other processing states are possible
 #[derive(Debug)]
 enum ProcessingState {
@@ -36,9 +37,9 @@ enum ProcessingState {
 }
 
 /// A streaming JSON parser using DirectBuffer for single-buffer input and escape processing
-pub struct DirectParser<'b, T: BitStack, D, R: Reader> {
+pub struct StreamParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     /// The tokenizer that processes JSON tokens
-    tokenizer: Tokenizer<T, D>,
+    tokenizer: Tokenizer<C::Bucket, C::Counter>,
     /// Parser state tracking
     parser_state: ParserState,
     /// Reader for streaming input
@@ -46,18 +47,59 @@ pub struct DirectParser<'b, T: BitStack, D, R: Reader> {
     /// DirectBuffer for single-buffer input and escape processing
     direct_buffer: DirectBuffer<'b>,
 
-    // NEW: Future state machine - will gradually replace fields below
     /// Processing state machine that enforces logical invariants
     processing_state: ProcessingState,
 
-    // PHASE 2.4 COMPLETE: Escape sequence state migrated to processing_state enum
     /// Shared Unicode escape collector for \uXXXX sequences
     unicode_escape_collector: UnicodeEscapeCollector,
 }
 
-impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
-    /// Create a new DirectParser
+/// Methods for StreamParser using DefaultConfig
+impl<'b, R: Reader> StreamParser<'b, R, DefaultConfig> {
+    /// Create a new StreamParser with default configuration
+    ///
+    /// Uses the default BitStack configuration (u32 bucket, u8 counter)
+    /// for most common use cases.
     pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
+        Self::with_config(reader, buffer)
+    }
+}
+
+/// Methods for StreamParser with custom BitStackConfig
+impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
+    /// Create a new StreamParser with custom configuration
+    ///
+    /// Use this when you need custom BitStack storage types for specific
+    /// memory or nesting depth requirements.
+    ///
+    /// # Example
+    /// ```
+    /// use picojson::{StreamParser, BitStackStruct, ArrayBitStack};
+    ///
+    /// # // Example Reader implementation
+    /// # struct JsonReader<'a> { data: &'a [u8], pos: usize }
+    /// # impl<'a> JsonReader<'a> {
+    /// #     fn new(data: &'a [u8]) -> Self { Self { data, pos: 0 } }
+    /// # }
+    /// # impl picojson::Reader for JsonReader<'_> {
+    /// #     type Error = ();
+    /// #     fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
+    /// #         let remaining = &self.data[self.pos..];
+    /// #         let to_copy = buf.len().min(remaining.len());
+    /// #         buf[..to_copy].copy_from_slice(&remaining[..to_copy]);
+    /// #         self.pos += to_copy;
+    /// #         Ok(to_copy)
+    /// #     }
+    /// # }
+    /// #
+    /// # let json = b"{\"test\": 42}";
+    /// let reader = JsonReader::new(json);
+    /// let mut buffer = [0u8; 256];
+    ///
+    /// // Custom configuration: u64 bucket + u16 counter for deeper nesting
+    /// let mut parser = StreamParser::<_, BitStackStruct<u64, u16>>::with_config(reader, &mut buffer);
+    /// ```
+    pub fn with_config(reader: R, buffer: &'b mut [u8]) -> Self {
         Self {
             tokenizer: Tokenizer::new(),
             parser_state: ParserState::new(),
@@ -70,11 +112,13 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                 in_escape_sequence: false,
             },
 
-            // Phase 2.4 complete: escape sequence state now in enum
             unicode_escape_collector: UnicodeEscapeCollector::new(),
         }
     }
+}
 
+/// Shared methods for StreamParser with any BitStackConfig
+impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
     /// Iterator-compatible method that returns None when parsing is complete.
     /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
     /// and Some(Err(error)) for parsing errors.
@@ -91,7 +135,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
         self.apply_unescaped_reset_if_queued();
 
         loop {
-            // Pull events from tokenizer until we have some (FlexParser exact pattern)
+            // Pull events from tokenizer until we have some
             while !self.have_events() {
                 // Fill buffer and check for end of data
                 self.fill_buffer_from_reader()?;
@@ -104,7 +148,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                         // Clear events and try to finish tokenizer
                         self.clear_events();
                         let mut callback = |event, _len| {
-                            // Store events in the array, filling available slots (same as FlexParser)
+                            // Store events in the array, filling available slots
                             for evt in self.parser_state.evts.iter_mut() {
                                 if evt.is_none() {
                                     *evt = Some(event);
@@ -130,7 +174,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                     // Process byte through tokenizer
                     self.clear_events();
                     let mut callback = |event, _len| {
-                        // Store events in the array, filling available slots (same as FlexParser)
+                        // Store events in the array, filling available slots
                         for evt in self.parser_state.evts.iter_mut() {
                             if evt.is_none() {
                                 *evt = Some(event);
@@ -152,11 +196,11 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                 }
             }
 
-            // Now we have events - process ONE event (FlexParser pattern)
+            // Now we have events - process ONE event
             let taken_event = self.parser_state.evts.iter_mut().find_map(|e| e.take());
 
             if let Some(taken_event) = taken_event {
-                // Process the event directly in the main loop (FlexParser pattern)
+                // Process the event directly in the main loop
                 match taken_event {
                     // Container events
                     ujson::Event::ObjectStart => return Ok(Event::StartObject),
@@ -247,7 +291,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                     }
                     ujson::Event::Begin(EventToken::UnicodeEscape) => {
                         // Start Unicode escape collection - reset collector for new sequence
-                        // Only handle if we're inside a string or key (FlexParser approach)
+                        // Only handle if we're inside a string or key
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                                 self.unicode_escape_collector.reset();
@@ -257,7 +301,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::UnicodeEscape) => {
-                        // Handle end of Unicode escape sequence (\\uXXXX) using FlexParser approach
+                        // Handle end of Unicode escape sequence (\\uXXXX)
                         match self.parser_state.state {
                             crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                                 self.process_unicode_escape_with_collector()?;
@@ -277,7 +321,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
         }
     }
 
-    /// Check if we have events waiting to be processed (FlexParser pattern)
+    /// Check if we have events waiting to be processed
     fn have_events(&self) -> bool {
         self.parser_state.evts.iter().any(|evt| evt.is_some())
     }
@@ -395,11 +439,6 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
         Ok(())
     }
 
-    /// Get buffer statistics for debugging
-    pub fn buffer_stats(&self) -> crate::direct_buffer::DirectBufferStats {
-        self.direct_buffer.stats()
-    }
-
     /// Handle byte accumulation for strings/keys and Unicode escape sequences
     fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
         // Check if we're in a string or key state
@@ -485,7 +524,6 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
         Ok(())
     }
 
-    /// Process Unicode escape sequence using FlexParser approach
     /// Extracts hex digits from buffer and processes them through the collector
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         // Update escape state in enum - Unicode escape processing is complete
@@ -497,7 +535,7 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
             *in_escape_sequence = false;
         }
 
-        // Current position is right after the 4 hex digits (similar to FlexParser)
+        // Current position is right after the 4 hex digits
         let current_pos = self.direct_buffer.current_position();
         let (hex_start, hex_end, _escape_start_pos) =
             ContentRange::unicode_escape_bounds(current_pos);
@@ -545,7 +583,6 @@ impl<'b, T: BitStack, D: BitStackCore, R: Reader> DirectParser<'b, T, D, R> {
         {
             *unescaped_reset_queued = true;
         }
-        // Legacy field removed - now fully using enum
     }
 
     /// Apply queued unescaped content reset if flag is set
@@ -602,14 +639,14 @@ mod tests {
         }
     }
 
-    type TestDirectParser<'b> = DirectParser<'b, u32, u8, SliceReader<'static>>;
+    type TestStreamParser<'b> = StreamParser<'b, SliceReader<'static>>;
 
     #[test]
     fn test_direct_parser_simple_object() {
         let json = b"{}";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         // Should get ObjectStart
         let event = parser.next_event().unwrap();
@@ -629,7 +666,7 @@ mod tests {
         let json = b"[]";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         // Should get ArrayStart
         let event = parser.next_event().unwrap();
@@ -649,7 +686,7 @@ mod tests {
         let json = b"\"hello\\nworld\"";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             assert_eq!(json_string.as_str(), "hello\nworld");
@@ -664,7 +701,7 @@ mod tests {
         let json1 = br#"{"a": {"b": [{"c": 123}]}}"#;
         let reader1 = SliceReader::new(json1);
         let mut buffer1 = [0u8; 256];
-        let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
+        let mut parser1 = TestStreamParser::new(reader1, &mut buffer1);
 
         let mut events = Vec::new();
         loop {
@@ -682,7 +719,7 @@ mod tests {
         let json2 = br#"[123, "string", true, null, 456]"#;
         let reader2 = SliceReader::new(json2);
         let mut buffer2 = [0u8; 256];
-        let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
+        let mut parser2 = TestStreamParser::new(reader2, &mut buffer2);
 
         let mut number_count = 0;
         loop {
@@ -699,7 +736,7 @@ mod tests {
         let json3 = br#"[[], {}, [{}], {"empty": []}]"#;
         let reader3 = SliceReader::new(json3);
         let mut buffer3 = [0u8; 256];
-        let mut parser3 = TestDirectParser::new(reader3, &mut buffer3);
+        let mut parser3 = TestStreamParser::new(reader3, &mut buffer3);
 
         loop {
             match parser3.next_event() {
@@ -713,7 +750,7 @@ mod tests {
         let json4 = br#"[1, 2, 3, 4, 5]"#;
         let reader4 = SliceReader::new(json4);
         let mut buffer4 = [0u8; 256];
-        let mut parser4 = TestDirectParser::new(reader4, &mut buffer4);
+        let mut parser4 = TestStreamParser::new(reader4, &mut buffer4);
 
         let mut consecutive_numbers = Vec::new();
         loop {
@@ -733,7 +770,7 @@ mod tests {
         let invalid_json = br#"{"key": 123,"#; // Missing closing brace
         let reader = SliceReader::new(invalid_json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         // Parse until we hit an error or EOF
         loop {
@@ -757,7 +794,7 @@ mod tests {
         let json1 = br#"[[[123]]]"#;
         let reader1 = SliceReader::new(json1);
         let mut buffer1 = [0u8; 256];
-        let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
+        let mut parser1 = TestStreamParser::new(reader1, &mut buffer1);
 
         let mut events1 = Vec::new();
         loop {
@@ -779,7 +816,7 @@ mod tests {
         let json2 = br#"{"a": [{"b": 456}]}"#;
         let reader2 = SliceReader::new(json2);
         let mut buffer2 = [0u8; 256];
-        let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
+        let mut parser2 = TestStreamParser::new(reader2, &mut buffer2);
 
         let mut events2 = Vec::new();
         loop {
@@ -797,7 +834,7 @@ mod tests {
         let json3 = br#"[123, [456, [789]]]"#;
         let reader3 = SliceReader::new(json3);
         let mut buffer3 = [0u8; 256];
-        let mut parser3 = TestDirectParser::new(reader3, &mut buffer3);
+        let mut parser3 = TestStreamParser::new(reader3, &mut buffer3);
 
         let mut number_count = 0;
         let mut events3 = Vec::new();
@@ -824,7 +861,7 @@ mod tests {
         let json = br#"[{"key": 123}]"#;
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         // Parse normally - this should work fine and never set both flags
         let mut events = Vec::new();
@@ -848,7 +885,7 @@ mod tests {
         let json = b"[\"first\", \"second\"]";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         assert!(matches!(parser.next_event().unwrap(), Event::StartArray));
 
@@ -872,7 +909,7 @@ mod tests {
         let json = b"{\"name\": \"value\", \"count\": \"42\"}";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         assert!(matches!(parser.next_event().unwrap(), Event::StartObject));
 
@@ -910,7 +947,7 @@ mod tests {
         let json = b"\"line1\\nline2\\ttab\\\"quote\"";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             let content = json_string.as_str();
@@ -933,7 +970,7 @@ mod tests {
         let json = b"\"Hello \\u0041\\u03B1\""; // Hello A(alpha)
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         if let Event::String(json_string) = parser.next_event().unwrap() {
             let content = json_string.as_str();
@@ -950,7 +987,7 @@ mod tests {
         let json = b"true";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         let event = parser.next_event().unwrap();
         assert_eq!(event, Event::Bool(true));
@@ -964,7 +1001,7 @@ mod tests {
         let json = b"false";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         let event = parser.next_event().unwrap();
         assert_eq!(event, Event::Bool(false));
@@ -978,7 +1015,7 @@ mod tests {
         let json = b"null";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         let event = parser.next_event().unwrap();
         assert_eq!(event, Event::Null);
@@ -992,7 +1029,7 @@ mod tests {
         let json = b"[true, false, null]";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         assert_eq!(parser.next_event().unwrap(), Event::StartArray);
         assert_eq!(parser.next_event().unwrap(), Event::Bool(true));
@@ -1007,7 +1044,7 @@ mod tests {
         let json = b"42";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         let event = parser.next_event().unwrap();
         if let Event::Number(json_number) = event {
@@ -1025,7 +1062,7 @@ mod tests {
         let json = b"-123";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         let event = parser.next_event().unwrap();
         if let Event::Number(json_number) = event {
@@ -1043,7 +1080,7 @@ mod tests {
         let json = b"3.14159";
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         #[cfg(feature = "float-error")]
         {
@@ -1079,7 +1116,7 @@ mod tests {
 
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         assert_eq!(parser.next_event().unwrap(), Event::StartArray);
 
@@ -1120,7 +1157,7 @@ mod tests {
 
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         assert_eq!(parser.next_event().unwrap(), Event::StartObject);
 
@@ -1159,11 +1196,11 @@ mod tests {
 
     #[test]
     fn test_direct_parser_no_float_configuration() {
-        // Test that DirectParser properly uses unified number parsing with no-float config
+        // Test that StreamParser properly uses unified number parsing with no-float config
         let json = br#"{"integer": 42, "float": 3.14, "scientific": 1e3}"#;
         let reader = SliceReader::new(json);
         let mut buffer = [0u8; 256];
-        let mut parser = TestDirectParser::new(reader, &mut buffer);
+        let mut parser = TestStreamParser::new(reader, &mut buffer);
 
         // Parse through the JSON and verify number handling
         assert_eq!(parser.next_event().unwrap(), Event::StartObject);
@@ -1286,7 +1323,7 @@ mod tests {
         let json1 = b"[123]";
         let reader1 = SliceReader::new(json1);
         let mut buffer1 = [0u8; 256];
-        let mut parser1 = TestDirectParser::new(reader1, &mut buffer1);
+        let mut parser1 = TestStreamParser::new(reader1, &mut buffer1);
 
         assert!(matches!(parser1.next_event().unwrap(), Event::StartArray));
         if let Event::Number(num) = parser1.next_event().unwrap() {
@@ -1304,7 +1341,7 @@ mod tests {
         let json2 = b"{\"key\":456}";
         let reader2 = SliceReader::new(json2);
         let mut buffer2 = [0u8; 256];
-        let mut parser2 = TestDirectParser::new(reader2, &mut buffer2);
+        let mut parser2 = TestStreamParser::new(reader2, &mut buffer2);
 
         assert!(matches!(parser2.next_event().unwrap(), Event::StartObject));
         assert!(matches!(parser2.next_event().unwrap(), Event::Key(_)));
@@ -1323,7 +1360,7 @@ mod tests {
         let json3 = b"[789,10]";
         let reader3 = SliceReader::new(json3);
         let mut buffer3 = [0u8; 256];
-        let mut parser3 = TestDirectParser::new(reader3, &mut buffer3);
+        let mut parser3 = TestStreamParser::new(reader3, &mut buffer3);
 
         assert!(matches!(parser3.next_event().unwrap(), Event::StartArray));
         if let Event::Number(num1) = parser3.next_event().unwrap() {
@@ -1350,7 +1387,7 @@ mod tests {
         let json4 = b"{\"a\":11,\"b\":22}";
         let reader4 = SliceReader::new(json4);
         let mut buffer4 = [0u8; 256];
-        let mut parser4 = TestDirectParser::new(reader4, &mut buffer4);
+        let mut parser4 = TestStreamParser::new(reader4, &mut buffer4);
 
         assert!(matches!(parser4.next_event().unwrap(), Event::StartObject));
         assert!(matches!(parser4.next_event().unwrap(), Event::Key(_)));
@@ -1379,7 +1416,7 @@ mod tests {
         let json5 = b"999";
         let reader5 = SliceReader::new(json5);
         let mut buffer5 = [0u8; 256];
-        let mut parser5 = TestDirectParser::new(reader5, &mut buffer5);
+        let mut parser5 = TestStreamParser::new(reader5, &mut buffer5);
 
         if let Event::Number(num) = parser5.next_event().unwrap() {
             assert_eq!(
@@ -1396,7 +1433,7 @@ mod tests {
         let json6 = b"[-42,33]";
         let reader6 = SliceReader::new(json6);
         let mut buffer6 = [0u8; 256];
-        let mut parser6 = TestDirectParser::new(reader6, &mut buffer6);
+        let mut parser6 = TestStreamParser::new(reader6, &mut buffer6);
 
         assert!(matches!(parser6.next_event().unwrap(), Event::StartArray));
         if let Event::Number(num1) = parser6.next_event().unwrap() {
@@ -1425,7 +1462,7 @@ mod tests {
             let json7 = b"[3.14,2.71]";
             let reader7 = SliceReader::new(json7);
             let mut buffer7 = [0u8; 256];
-            let mut parser7 = TestDirectParser::new(reader7, &mut buffer7);
+            let mut parser7 = TestStreamParser::new(reader7, &mut buffer7);
 
             assert!(matches!(parser7.next_event().unwrap(), Event::StartArray));
             if let Event::Number(num1) = parser7.next_event().unwrap() {
