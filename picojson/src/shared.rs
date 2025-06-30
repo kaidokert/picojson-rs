@@ -323,8 +323,11 @@ mod tests {
     fn test_utf8_error_conversion() {
         // Test From<Utf8Error> trait implementation
         use core::str;
-        // Create a proper invalid UTF-8 sequence (lone continuation byte)
-        let invalid_utf8 = &[0b10000000u8]; // Invalid UTF-8 - continuation byte without start
+        // Create a proper invalid UTF-8 sequence (lone continuation byte) dynamically
+        // to avoid compile-time warning about static invalid UTF-8 literals
+        let mut invalid_utf8_array = [0u8; 1];
+        invalid_utf8_array[0] = 0b10000000u8; // Invalid UTF-8 - continuation byte without start
+        let invalid_utf8 = &invalid_utf8_array;
 
         match str::from_utf8(invalid_utf8) {
             Err(utf8_error) => {
