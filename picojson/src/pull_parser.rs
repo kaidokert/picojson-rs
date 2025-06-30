@@ -59,6 +59,16 @@ impl<'a> PullParser<'a, '_, DefaultConfig> {
     }
 
     /// Creates a new parser from a byte slice.
+    ///
+    /// Assumes no string escapes will be encountered. For JSON with escapes, use [`with_buffer_from_slice`].
+    ///
+    /// # Example
+    /// ```
+    /// # use picojson::PullParser;
+    /// let parser = PullParser::new_from_slice(br#"{"name": "value"}"#);
+    /// ```
+    ///
+    /// [`with_buffer_from_slice`]: Self::with_buffer_from_slice
     pub fn new_from_slice(input: &'a [u8]) -> Self {
         Self::with_config_from_slice(input)
     }
@@ -88,6 +98,15 @@ impl<'a, 'b> PullParser<'a, 'b, DefaultConfig> {
     }
 
     /// Creates a new parser from a byte slice with a scratch buffer.
+    ///
+    /// Use when JSON contains string escapes that need unescaping.
+    ///
+    /// # Example
+    /// ```
+    /// # use picojson::PullParser;
+    /// let mut scratch = [0u8; 1024];
+    /// let parser = PullParser::with_buffer_from_slice(br#"{"msg": "Hello\nWorld"}"#, &mut scratch);
+    /// ```
     pub fn with_buffer_from_slice(input: &'a [u8], scratch_buffer: &'b mut [u8]) -> Self {
         Self::with_config_and_buffer_from_slice(input, scratch_buffer)
     }
@@ -103,7 +122,11 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
         Self::with_config_from_slice(input.as_bytes())
     }
 
-    /// Creates a new parser from a byte slice with a custom config.
+    /// Creates a new parser from a byte slice with a custom `BitStackConfig`.
+    ///
+    /// Assumes no string escapes will be encountered. For JSON with escapes, use [`with_config_and_buffer_from_slice`].
+    ///
+    /// [`with_config_and_buffer_from_slice`]: Self::with_config_and_buffer_from_slice
     pub fn with_config_from_slice(input: &'a [u8]) -> Self {
         Self::with_config_and_buffer_from_slice(input, &mut [])
     }
@@ -121,8 +144,10 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
         Self::with_config_and_buffer_from_slice(input.as_bytes(), scratch_buffer)
     }
 
-    /// Creates a new parser from a byte slice with a custom config and scratch buffer.
-    /// This will contain the core constructor logic.
+    /// Creates a new parser from a byte slice with a custom `BitStackConfig` and scratch buffer.
+    ///
+    /// Use when JSON contains string escapes that need unescaping.
+    /// This is the core constructor that all other constructors delegate to.
     pub fn with_config_and_buffer_from_slice(
         input: &'a [u8],
         scratch_buffer: &'b mut [u8],
@@ -787,6 +812,7 @@ mod tests {
             Ok(Event::String(String::Borrowed("value")))
         );
         assert_eq!(parser.next_event(), Ok(Event::EndObject));
+        assert_eq!(parser.next_event(), Ok(Event::EndDocument));
         assert_eq!(parser.next_event(), Ok(Event::EndDocument));
     }
 }
