@@ -1,13 +1,89 @@
-# picojson-rs
+# picojson
 
-A minimal Rust JSON parser for resource constrained environments.
+[![Build and test](https://github.com/kaidokert/picojson-rs/actions/workflows/build.yaml/badge.svg)](https://github.com/kaidokert/picojson-rs/actions/workflows/build.yaml)
 
-- Pull style parsers from byte slices or Reader interface - e.g streaming
-- No recursion
-- No allocations
-- No required dependencies
-- User-configured max parsing tree depth
-- Configuration of int32 / int64 support
-- Configuration and disabling of float support
-- no_std by default
-- no unsafe code
+A minimal Rust JSON **pull-parser** for resource-constrained environments.
+
+`picojson` provides a low-level, `no_std` compatible pull-parser that operates without recursion or heap allocations. It is designed for scenarios where memory is limited and direct control over parsing is required, such as embedded systems or high-performance streaming applications.
+
+## Features
+
+- **Pull-style Parsing**: Process JSON from byte slices (`PullParser`) or any source that implements a `Reader` trait (`StreamParser`).
+- **Zero Allocations**: The parser does not perform any heap allocations. All memory, including an optional scratch buffer for value copying, is provided by the caller.
+- **No Recursion**: The parsing logic is implemented with an iterative loop, ensuring a predictable and flat call stack.
+- **`no_std` by Default**: Designed for bare-metal and embedded use cases.
+- **Configurable Tree Depth**: The maximum JSON nesting depth is configured by the user at compile time to control stack usage.
+- **Configurable Number Handling**: Integer width and float parsing behavior are configurable via feature flags.
+- **Unsafe-Free**: The crate contains no `unsafe` code.
+
+## Design Philosophy
+
+The core of `picojson` is a minimal, non-recursive tokenizer that uses a bitstack (1 bit per nesting level) to track object/array depth. The parsers build upon this to provide a higher-level event stream.
+
+The design prioritizes a small resource footprint and predictable performance over raw execution speed.
+
+### Value Handling: No copy and Copy-on-Write
+
+- By default, the parser returns values (strings, keys, numbers) as borrowed slices of the original input.
+
+- In certain situations, a value must be copied into a user-provided scratch buffer:
+    1.  **String Escapes**: If a string or key contains escape sequences (e.g., `\n`, `\u0041`), its content must be un-escaped into the scratch buffer.
+    2.  **Stream Buffering**: When using the `StreamParser`, if a token (like a long number) is split across separate reads from the underlying I/O source, it must be copied into the scratch buffer to be made contiguous.
+
+## Usage
+
+### Parsing from a Slice
+
+Use `PullParser` when the entire JSON document is in memory. A scratch buffer is required to handle potential string escapes.
+
+```rust
+use picojson::{PullParser, Event, String};
+
+let json = r#"{"message": "Hello\nWorld"}"#;
+let mut scratch = [0u8; 1024];
+let mut parser = PullParser::with_buffer(json, &mut scratch);
+
+loop {
+    match parser.next_event()? {
+        Event::Key(key) => { // key is a picojson::String
+            println!("Key: {}", &*key);
+        }
+        Event::String(value) => {
+            println!("Value: {}", &*value);
+        }
+        Event::EndDocument => break,
+        _ => {}
+    }
+}
+```
+
+### Parsing from a Stream
+
+Use `StreamParser` for parsing from any source that implements the `Reader` trait, such as a file or network socket.
+
+```rust
+use picojson::{StreamParser, Event, Reader};
+
+// A simple Reader implementation over a byte slice.
+struct MyReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+// ... Reader implementation ...
+
+let json_stream = b"{\"id\": 123}";
+let mut buffer = [0u8; 1024]; // Buffer for the parser to use.
+let mut parser = StreamParser::new(MyReader::new(json_stream), &mut buffer);
+
+// ... event loop ...
+```
+
+## Configuration
+
+The parser's behavior can be customized with feature flags. For example, integer width can be set to `int32` or `int64`, and float handling can be configured to error, truncate, or ignore. For a detailed guide, please see the crate reference documentation.
+
+## Stability
+
+Very experimental and unproven, even though the tokenizer does pass conformance tests.
+
+For production code please use [serde-json-core](https://crates.io/crates/serde-json-core) or various other alternatives.
