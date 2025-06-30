@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+
+on: [push, pull_request]
+
+name: Cross-compile
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv6m-none-eabi
+          - thumbv7m-none-eabi
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Build for target
+        run: cargo build --release --target=${{ matrix.target }}
