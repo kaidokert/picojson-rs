@@ -2,6 +2,19 @@
 name = "picojson"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+authors = ["kaidokert <kaidokert@gmail.com>"]
+readme = "../README.md"
+description = """
+A resource-constrained JSON parser for embedded systems.
+"""
+repository = "https://github.com/kaidokert/picojson-rs"
+homepage = "https://github.com/kaidokert/picojson-rs"
+keywords = ["json", "static", "no-heap"]
+categories = [
+    "embedded",
+    "no-std",
+]
 
 [features]
 default = ["int64", "float"]     # Default to full support: 64-bit integers and floating point
