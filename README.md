@@ -1,5 +1,7 @@
 # picojson
 
+[![crate](https://img.shields.io/crates/v/picojson.svg)](https://crates.io/crates/picojson)
+[![documentation](https://docs.rs/picojson/badge.svg)](https://docs.rs/picojson/)
 [![Build and test](https://github.com/kaidokert/picojson-rs/actions/workflows/build.yaml/badge.svg)](https://github.com/kaidokert/picojson-rs/actions/workflows/build.yaml)
 [![Coverage Status](https://coveralls.io/repos/github/kaidokert/picojson-rs/badge.svg?branch=main)](https://coveralls.io/github/kaidokert/picojson-rs?branch=main)
 
@@ -78,6 +80,8 @@ let mut parser = StreamParser::new(MyReader::new(json_stream), &mut buffer);
 
 // ... event loop ...
 ```
+
+See the [API docs](https://docs.rs/picojson/) and [examples](https://github.com/kaidokert/picojson-rs/tree/main/picojson/examples) for more details.
 
 ## Configuration
 

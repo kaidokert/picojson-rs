@@ -1,8 +1,9 @@
 [package]
 name = "picojson"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
+exclude = ["/.github/*"]
 authors = ["kaidokert <kaidokert@gmail.com>"]
 readme = "../README.md"
 description = """
@@ -10,6 +11,7 @@ A resource-constrained JSON parser for embedded systems.
 """
 repository = "https://github.com/kaidokert/picojson-rs"
 homepage = "https://github.com/kaidokert/picojson-rs"
+documentation = "https://docs.rs/picojson"
 keywords = ["json", "parser", "embedded", "no-std", "no-heap"]
 categories = [
     "embedded",
