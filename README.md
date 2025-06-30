@@ -92,3 +92,7 @@ The parser's behavior can be customized with feature flags. For example, integer
 Very experimental and unproven, even though the tokenizer does pass conformance tests.
 
 For production code please use [serde-json-core](https://crates.io/crates/serde-json-core) or various other alternatives.
+
+## License
+
+Apache 2.0; see [`LICENSE`](LICENSE) for details.
