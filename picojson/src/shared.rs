@@ -101,7 +101,7 @@ impl Default for ParserState {
 
 /// Trait for parsers that can be used in a pull-based manner.
 ///
-/// This trait is implemented by both `PullParser` and `StreamParser`.
+/// This trait is implemented by both `SliceParser` and `StreamParser`.
 pub trait PullParser {
     /// Iterator-like method that returns None when parsing is complete.
     /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
