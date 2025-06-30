@@ -77,34 +77,42 @@ fn test_selective_extraction() {
 
         match event {
             Event::Key(key) => {
-                state = match &*key {
-                    "email" => ExtractionState::ExpectingEmail,
-                    "products" => ExtractionState::InProductsArray,
-                    "product_id" if state == ExtractionState::InProductsArray => {
+                state = match (state, &*key) {
+                    (_, "email") => ExtractionState::ExpectingEmail,
+                    (_, "products") => ExtractionState::InProductsArray,
+                    (ExtractionState::InProductsArray, "product_id") => {
                         ExtractionState::ExpectingProductId
                     }
-                    "feature_flags" => ExtractionState::InFeatureFlags,
-                    "new_dashboard" if state == ExtractionState::InFeatureFlags => {
+                    (_, "feature_flags") => ExtractionState::InFeatureFlags,
+                    (ExtractionState::InFeatureFlags, "new_dashboard") => {
                         ExtractionState::ExpectingNewDashboardStatus
                     }
-                    _ => state,
+                    (current_state, _) => current_state,
                 };
             }
             Event::String(s) => {
-                if state == ExtractionState::ExpectingEmail {
-                    extracted.email = Some(s.as_ref().to_owned());
-                    state = ExtractionState::Idle;
-                } else if state == ExtractionState::ExpectingProductId {
-                    if product_index == 1 {
-                        extracted.second_product_id = Some(s.as_ref().to_owned());
+                match (state, product_index) {
+                    (ExtractionState::ExpectingEmail, _) => {
+                        extracted.email = Some(s.as_ref().to_owned());
+                        state = ExtractionState::Idle;
                     }
-                    state = ExtractionState::InProductsArray;
+                    (ExtractionState::ExpectingProductId, 1) => {
+                        extracted.second_product_id = Some(s.as_ref().to_owned());
+                        state = ExtractionState::InProductsArray;
+                    }
+                    (ExtractionState::ExpectingProductId, _) => {
+                        state = ExtractionState::InProductsArray;
+                    }
+                    _ => {}
                 }
             }
             Event::Bool(b) => {
-                if state == ExtractionState::ExpectingNewDashboardStatus {
-                    extracted.new_dashboard_status = Some(b);
-                    state = ExtractionState::InFeatureFlags;
+                match state {
+                    ExtractionState::ExpectingNewDashboardStatus => {
+                        extracted.new_dashboard_status = Some(b);
+                        state = ExtractionState::InFeatureFlags;
+                    }
+                    _ => {}
                 }
             }
             Event::StartArray => {
@@ -116,10 +124,14 @@ fn test_selective_extraction() {
                 }
             }
             Event::EndObject => {
-                if state == ExtractionState::InProductsArray {
-                    product_index += 1;
-                } else if state == ExtractionState::InFeatureFlags {
-                    state = ExtractionState::Idle;
+                match state {
+                    ExtractionState::InProductsArray => {
+                        product_index += 1;
+                    }
+                    ExtractionState::InFeatureFlags => {
+                        state = ExtractionState::Idle;
+                    }
+                    _ => {}
                 }
             }
             Event::EndArray => {
@@ -135,7 +147,7 @@ fn test_selective_extraction() {
     }
 
     // Assert that we extracted the correct data
-    assert_eq!(extracted.email.unwrap(), "jdoe@example.com");
-    assert_eq!(extracted.second_product_id.unwrap(), "p-002");
+    assert_eq!(extracted.email, Some("jdoe@example.com".to_string()));
+    assert_eq!(extracted.second_product_id, Some("p-002".to_string()));
     assert_eq!(extracted.new_dashboard_status, Some(true));
 }
