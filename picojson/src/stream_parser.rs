@@ -535,34 +535,31 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
             *in_escape_sequence = false;
         }
 
-        // Current position is right after the 4 hex digits
-        let current_pos = self.direct_buffer.current_position();
-        let (hex_start, hex_end, _escape_start_pos) =
-            ContentRange::unicode_escape_bounds(current_pos);
+        let utf8_bytes_copy = {
+            let current_pos = self.direct_buffer.current_position();
+            let hex_slice_provider = |start, end| {
+                self.direct_buffer
+                    .get_string_slice(start, end)
+                    .map_err(Into::into)
+            };
 
-        // Extract the 4 hex digits from buffer
-        let hex_slice = self.direct_buffer.get_string_slice(hex_start, hex_end)?;
+            let mut utf8_buf = [0u8; 4];
+            let (utf8_bytes, _escape_start_pos) =
+                crate::escape_processor::process_unicode_escape_sequence(
+                    current_pos,
+                    &mut self.unicode_escape_collector,
+                    hex_slice_provider,
+                    &mut utf8_buf,
+                )?;
+            let mut copy = [0u8; 4];
+            let len = utf8_bytes.len();
+            copy[..len].copy_from_slice(utf8_bytes);
+            (copy, len)
+        };
 
-        if hex_slice.len() != 4 {
-            return Err(ParserErrorHandler::invalid_unicode_length());
-        }
-
-        // Feed hex digits to the shared collector
-        for &hex_digit in hex_slice {
-            self.unicode_escape_collector.add_hex_digit(hex_digit)?;
-        }
-
-        // Process the complete sequence to UTF-8
-        let mut utf8_buf = [0u8; 4];
-        let utf8_bytes = self
-            .unicode_escape_collector
-            .process_to_utf8(&mut utf8_buf)?;
-
-        // Handle the Unicode escape via DirectBuffer escape processing
-        for &byte in utf8_bytes {
+        for &byte in &utf8_bytes_copy.0[..utf8_bytes_copy.1] {
             self.append_byte_to_escape_buffer(byte)?;
         }
-
         Ok(())
     }
 
