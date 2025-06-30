@@ -111,6 +111,13 @@ fn parse_and_display(parser: &mut PullParser) {
                             println!("  → Manual parse as f64: {}", f);
                         }
                     }
+                    // Handle variants that shouldn't be reachable in current configuration
+                    _ => {
+                        println!(
+                            "  → Unexpected variant for current configuration: {:?}",
+                            num.parsed()
+                        );
+                    }
                 }
             }
             Ok(Event::Key(String::Borrowed(key))) => {

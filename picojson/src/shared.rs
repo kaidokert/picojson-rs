@@ -50,7 +50,6 @@ pub enum ParseError {
     /// Invalid escape sequence character.
     InvalidEscapeSequence,
     /// Float encountered but float support is disabled and float-error is configured
-    #[cfg(all(not(feature = "float"), feature = "float-error"))]
     FloatNotAllowed,
     /// A JSON token was too large to fit in the available buffer space
     TokenTooLarge {

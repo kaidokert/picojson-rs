@@ -23,16 +23,12 @@ pub enum NumberResult {
     /// Integer too large for configured type (use raw string for exact representation)
     IntegerOverflow,
     /// Float value (only available with float feature)
-    #[cfg(feature = "float")]
     Float(f64),
     /// Float parsing disabled - behavior depends on configuration
-    #[cfg(not(feature = "float"))]
     FloatDisabled,
     /// Float encountered but skipped due to float-skip configuration
-    #[cfg(all(not(feature = "float"), feature = "float-skip"))]
     FloatSkipped,
     /// Float truncated to integer due to float-truncate configuration
-    #[cfg(all(not(feature = "float"), feature = "float-truncate"))]
     FloatTruncated(ConfiguredInt),
 }
 
@@ -177,10 +173,12 @@ pub(super) fn parse_float(s: &str) -> NumberResult {
 pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
     #[cfg(feature = "float-error")]
     {
+        let _ = s; // Acknowledge parameter usage
         Err(ParseError::FloatNotAllowed)
     }
     #[cfg(feature = "float-skip")]
     {
+        let _ = s; // Acknowledge parameter usage
         Ok(NumberResult::FloatSkipped)
     }
     #[cfg(feature = "float-truncate")]
@@ -209,6 +207,7 @@ pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
         feature = "float-truncate"
     )))]
     {
+        let _ = s; // Acknowledge parameter usage
         Ok(NumberResult::FloatDisabled)
     }
 }

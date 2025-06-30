@@ -21,3 +21,69 @@ repos:
     hooks:
     -   id: fmt
         name: Fmt
+
+-   repo: local
+    hooks:
+    # Feature matrix testing to prevent breaking different configurations
+    -   id: feature-matrix-check
+        name: Feature Matrix Check - Default
+        entry: cargo check --manifest-path=picojson/Cargo.toml
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-no-defaults
+        name: Feature Matrix Check - No Defaults
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int32-float
+        name: Feature Matrix Check - int32 + float
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int32,float"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int32-float-skip
+        name: Feature Matrix Check - int32 + float-skip
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int32,float-skip"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int32-float-error
+        name: Feature Matrix Check - int32 + float-error
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int32,float-error"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int32-float-truncate
+        name: Feature Matrix Check - int32 + float-truncate
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int32,float-truncate"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int64-float-skip
+        name: Feature Matrix Check - int64 + float-skip
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int64,float-skip"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int64-float-error
+        name: Feature Matrix Check - int64 + float-error
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int64,float-error"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
+
+    -   id: feature-matrix-int64-float-truncate
+        name: Feature Matrix Check - int64 + float-truncate
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int64,float-truncate"
+        language: system
+        pass_filenames: false
+        files: "picojson/"
