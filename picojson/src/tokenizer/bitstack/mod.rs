@@ -69,10 +69,7 @@ impl<T> DepthCounter for T where
 {
 }
 
-/// Array-based BitBucket implementation for large storage capacity
-pub type ArrayBitBucket<const N: usize, T> = ArrayBitStackImpl<N, T>;
-
-/// Configuration trait for BitStack systems - defines bucket and counter types
+/// Configuration trait for BitStack systems - defines bucket and counter types.
 pub trait BitStackConfig {
     type Bucket: BitBucket + Default;
     type Counter: DepthCounter + Default;
@@ -101,21 +98,22 @@ where
     type Counter = C;
 }
 
+/// Array-based BitStack implementation for large storage capacity.
 pub type ArrayBitStack<const N: usize, T, D> = BitStackStruct<ArrayBitBucket<N, T>, D>;
 
-/// Wrapper for arrays to implement BitBucket trait.
+/// Array-based BitBucket implementation for large storage capacity.
 /// Provides large BitBucket storage using multiple elements.
 /// This can be used to parse very deeply nested JSON.
 #[derive(Debug)]
-pub struct ArrayBitStackImpl<const N: usize, T>(pub [T; N]);
+pub struct ArrayBitBucket<const N: usize, T>(pub [T; N]);
 
-impl<const N: usize, T: Default + Copy> Default for ArrayBitStackImpl<N, T> {
+impl<const N: usize, T: Default + Copy> Default for ArrayBitBucket<N, T> {
     fn default() -> Self {
-        ArrayBitStackImpl([T::default(); N])
+        ArrayBitBucket([T::default(); N])
     }
 }
 
-impl<const N: usize, T> BitBucket for ArrayBitStackImpl<N, T>
+impl<const N: usize, T> BitBucket for ArrayBitBucket<N, T>
 where
     T: Shl<u8, Output = T>
         + Shr<u8, Output = T>
@@ -185,7 +183,7 @@ mod tests {
     #[test]
     fn test_array_bitstack() {
         // Test ArrayBitStack with 2 u8 elements (16-bit total capacity)
-        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<2, u8> = ArrayBitBucket::default();
 
         // Test basic push/pop operations
         bitstack.push(true);
@@ -205,7 +203,7 @@ mod tests {
     #[test]
     fn test_array_bitstack_large_capacity() {
         // Test larger ArrayBitStack (320-bit capacity with 10 u32 elements)
-        let mut bitstack: ArrayBitStackImpl<10, u32> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<10, u32> = ArrayBitBucket::default();
 
         // Push many bits to test multi-element handling
         let pattern = [true, false, true, true, false, false, true, false];
@@ -224,7 +222,7 @@ mod tests {
         // Test that bitstack correctly handles different element sizes
 
         // Test u8 elements (8-bit each)
-        let mut bitstack_u8: ArrayBitStackImpl<1, u8> = ArrayBitStackImpl::default();
+        let mut bitstack_u8: ArrayBitBucket<1, u8> = ArrayBitBucket::default();
 
         // Fill all 8 bits of a u8 element
         for i in 0..8 {
@@ -237,7 +235,7 @@ mod tests {
         }
 
         // Test u32 elements (32-bit each)
-        let mut bitstack_u32: ArrayBitStackImpl<1, u32> = ArrayBitStackImpl::default();
+        let mut bitstack_u32: ArrayBitBucket<1, u32> = ArrayBitBucket::default();
 
         // Fill all 32 bits of a u32 element
         for i in 0..32 {
@@ -253,7 +251,7 @@ mod tests {
     #[test]
     fn test_array_bitstack_basic_moved() {
         // Test ArrayBitStack with 2 u8 elements (16-bit total capacity)
-        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<2, u8> = ArrayBitBucket::default();
 
         // Test basic push/pop operations
         bitstack.push(true);
@@ -273,7 +271,7 @@ mod tests {
     #[test]
     fn test_array_bitstack_large_capacity_moved() {
         // Test larger ArrayBitStack (320-bit capacity with 10 u32 elements)
-        let mut bitstack: ArrayBitStackImpl<10, u32> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<10, u32> = ArrayBitBucket::default();
 
         // Push many bits to test multi-element handling
         let pattern = [true, false, true, true, false, false, true, false];
@@ -290,7 +288,7 @@ mod tests {
     #[test]
     fn test_array_bitstack_element_overflow_moved() {
         // Test ArrayBitStack with 2 u8 elements to verify cross-element operations
-        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<2, u8> = ArrayBitBucket::default();
 
         // Push more than 8 bits to force usage of multiple elements
         let bits = [
@@ -310,7 +308,7 @@ mod tests {
     fn test_array_bitstack_empty_behavior_moved() {
         // Test behavior when popping from an empty ArrayBitStack
         // With the new API, empty stacks return false (no depth tracking needed)
-        let mut bitstack: ArrayBitStackImpl<2, u8> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<2, u8> = ArrayBitBucket::default();
 
         // CURRENT BEHAVIOR: Empty stack returns false (was Some(false) before API change)
         // This behavior is now the intended design - no depth tracking needed
@@ -334,7 +332,7 @@ mod tests {
     fn test_array_bitstack_underflow_does_not_panic_moved() {
         // Test that multiple underflow attempts are safe (don't panic)
         // This is important for robustness even with the current incorrect API
-        let mut bitstack: ArrayBitStackImpl<1, u8> = ArrayBitStackImpl::default();
+        let mut bitstack: ArrayBitBucket<1, u8> = ArrayBitBucket::default();
 
         // Multiple calls to pop() on empty stack should not panic
         for i in 0..5 {

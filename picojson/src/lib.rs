@@ -9,7 +9,6 @@ mod tokenizer;
 // Temporary internal alias, not exported
 use tokenizer as ujson;
 pub use tokenizer::ArrayBitStack;
-pub use tokenizer::BitStack;
 
 pub use tokenizer::ArrayBitBucket;
 pub use tokenizer::{BitBucket, BitStackConfig, BitStackStruct, DefaultConfig, DepthCounter};
@@ -20,7 +19,7 @@ mod escape_processor;
 
 mod direct_buffer;
 
-mod direct_parser;
+mod stream_parser;
 
 mod pull_parser;
 
@@ -38,8 +37,8 @@ pub use json_string::String;
 
 mod number_parser;
 
-pub use direct_parser::{DirectParser, Reader};
 pub use pull_parser::PullParser;
+pub use stream_parser::{Reader, StreamParser};
 
 impl From<slice_input_buffer::Error> for ParseError {
     fn from(err: slice_input_buffer::Error) -> Self {

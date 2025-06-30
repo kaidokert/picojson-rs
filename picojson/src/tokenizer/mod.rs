@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod bitstack;
-// Legacy exports for backward compatibility
+// User-facing API exports
 pub use bitstack::ArrayBitStack;
-pub use bitstack::BitBucket as BitStack;
 
 // Main API: BitStack configuration system
 pub use bitstack::ArrayBitBucket;
