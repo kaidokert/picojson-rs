@@ -312,8 +312,8 @@ mod tests {
 
         // CURRENT BEHAVIOR: Empty stack returns false (was Some(false) before API change)
         // This behavior is now the intended design - no depth tracking needed
-        assert_eq!(bitstack.pop(), false, "Empty stack returns false");
-        assert_eq!(bitstack.top(), false, "Empty stack top() returns false");
+        assert!(!bitstack.pop(), "Empty stack returns false");
+        assert!(!bitstack.top(), "Empty stack top() returns false");
 
         // Test that underflow doesn't panic (at least it's safe)
         assert_eq!(

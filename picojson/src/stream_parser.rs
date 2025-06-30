@@ -618,7 +618,7 @@ mod tests {
         }
     }
 
-    impl<'a> Reader for SliceReader<'a> {
+    impl Reader for SliceReader<'_> {
         type Error = ();
 
         fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
@@ -1245,7 +1245,7 @@ mod tests {
                     #[cfg(feature = "float")]
                     crate::NumberResult::Float(f) => {
                         // This is expected in float-enabled build
-                        assert!((f - 3.25).abs() < 0.01);
+                        assert!((f - 3.14).abs() < 0.01);
                     }
                     #[cfg(feature = "float-skip")]
                     crate::NumberResult::FloatSkipped => {
