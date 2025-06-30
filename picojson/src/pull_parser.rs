@@ -153,34 +153,24 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
     /// Process Unicode escape sequence using shared UnicodeEscapeCollector
     /// Extracts hex digits from buffer and processes them through the collector
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        // Current position is right after the 4 hex digits
         let current_pos = self.buffer.current_pos();
-        let (hex_start, hex_end, escape_start_pos) =
-            ContentRange::unicode_escape_bounds(current_pos);
+        let hex_slice_provider = |start, end| {
+            self.buffer
+                .slice(start, end)
+                .map_err(|_| ParseError::EndOfData)
+        };
 
-        // Extract the 4 hex digits from buffer
-        let hex_slice = self.buffer.slice(hex_start, hex_end)?;
-
-        if hex_slice.len() != 4 {
-            return Err(ParserErrorHandler::invalid_unicode_length());
-        }
-
-        // Feed hex digits to the shared collector
-        for &hex_digit in hex_slice {
-            self.unicode_escape_collector.add_hex_digit(hex_digit)?;
-        }
-
-        // Process the complete sequence to UTF-8
         let mut utf8_buf = [0u8; 4];
-        let utf8_bytes = self
-            .unicode_escape_collector
-            .process_to_utf8(&mut utf8_buf)?;
+        let (utf8_bytes, escape_start_pos) =
+            crate::escape_processor::process_unicode_escape_sequence(
+                current_pos,
+                &mut self.unicode_escape_collector,
+                hex_slice_provider,
+                &mut utf8_buf,
+            )?;
 
-        // Handle the Unicode escape via CopyOnEscape
         self.copy_on_escape
-            .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
-
-        Ok(())
+            .handle_unicode_escape(escape_start_pos, utf8_bytes)
     }
 
     fn pull_tokenizer_events(&mut self) -> Result<(), ParseError> {

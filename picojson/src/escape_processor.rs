@@ -444,3 +444,48 @@ mod tests {
         assert!(collector.process_to_utf8(&mut utf8_buffer).is_err());
     }
 }
+
+/// Shared implementation for processing a Unicode escape sequence.
+///
+/// This function centralizes the logic for handling `\uXXXX` escapes, which is
+/// common to both the pull-based and stream-based parsers. It uses a generic
+/// `hex_slice_provider` to remain independent of the underlying buffer implementation
+/// (`SliceInputBuffer` vs. `DirectBuffer`).
+///
+/// # Arguments
+/// * `current_pos` - The parser's current position in the input buffer, right after the 4 hex digits.
+/// * `unicode_escape_collector` - A mutable reference to the shared `UnicodeEscapeCollector`.
+/// * `hex_slice_provider` - A closure that takes a start and end position and returns the hex digit slice.
+/// * `copy_on_escape_handler` - A closure that handles the final unescaped UTF-8 bytes.
+///
+/// # Returns
+/// `Ok(())` on success, or a `ParseError` on failure.
+pub(crate) fn process_unicode_escape_sequence<'a, F>(
+    current_pos: usize,
+    unicode_escape_collector: &mut UnicodeEscapeCollector,
+    mut hex_slice_provider: F,
+    utf8_buf: &'a mut [u8; 4],
+) -> Result<(&'a [u8], usize), ParseError>
+where
+    F: FnMut(usize, usize) -> Result<&'a [u8], ParseError>,
+{
+    let (hex_start, hex_end, escape_start_pos) =
+        crate::shared::ContentRange::unicode_escape_bounds(current_pos);
+
+    // Extract the 4 hex digits from the buffer using the provider
+    let hex_slice = hex_slice_provider(hex_start, hex_end)?;
+
+    if hex_slice.len() != 4 {
+        return Err(ParserErrorHandler::invalid_unicode_length());
+    }
+
+    // Feed hex digits to the shared collector
+    for &hex_digit in hex_slice {
+        unicode_escape_collector.add_hex_digit(hex_digit)?;
+    }
+
+    // Process the complete sequence to UTF-8
+    let utf8_bytes = unicode_escape_collector.process_to_utf8(utf8_buf)?;
+
+    Ok((utf8_bytes, escape_start_pos))
+}
