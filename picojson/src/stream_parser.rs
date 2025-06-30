@@ -36,7 +36,11 @@ enum ProcessingState {
     Finished,
 }
 
-/// A streaming JSON parser using DirectBuffer for single-buffer input and escape processing
+/// A pull parser that parses JSON from a stream.
+///
+/// Generic over BitStackConfig for configurable nesting depth.
+/// It is designed to be used with the [Reader] trait, which is used to read data from a stream.
+///
 pub struct StreamParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     /// The tokenizer that processes JSON tokens
     tokenizer: Tokenizer<C::Bucket, C::Counter>,

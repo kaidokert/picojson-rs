@@ -47,7 +47,8 @@ where
 
 // TODO: Can this be implemented for slices as well ?
 
-/// Trait for depth counters - tracks nesting depth
+/// Trait for depth counters - tracks nesting depth.
+///
 /// This is automatically implemented for any type that satisfies the individual bounds.
 pub trait DepthCounter:
     From<u8>
@@ -75,16 +76,23 @@ pub trait BitStackConfig {
     type Counter: DepthCounter + Default;
 }
 
-/// Default configuration using u32 bucket and u8 counter
+/// Default depth configuration using [u32] for tracking bits and [u8] for counting depth.
 pub struct DefaultConfig;
 
 impl BitStackConfig for DefaultConfig {
     type Bucket = u32;
     type Counter = u8;
 }
-
-/// User-facing BitStack configuration struct - the main API users interact with
-/// Usage: `BitStack<u64, u16>` for custom bucket and counter types
+/// BitStack configuration for custom bit depth parsing.
+///
+/// Allows specifying custom types for bit storage and depth counting.
+///
+/// # Type Parameters
+///
+/// * `B` - The bit bucket type used for storing the bit stack. Must implement [`BitBucket`].
+/// * `C` - The counter type used for tracking nesting depth. Must implement [`DepthCounter`].
+///
+/// Example: `BitStack<u64, u16>` for 64-bit nesting depth with 16 counter.
 pub struct BitStackStruct<B, C> {
     _phantom: core::marker::PhantomData<(B, C)>,
 }
@@ -99,11 +107,21 @@ where
 }
 
 /// Array-based BitStack implementation for large storage capacity.
+///
+/// Example use:
+/// ```rust
+/// # use picojson::{SliceParser, ArrayBitStack};
+/// let parser = SliceParser::<ArrayBitStack<10, u32, u16>>::with_config("{}");
+/// ```
+/// This defines a 10-element array of [u32] for depth tracking bits, with a [u16] counter, allowing 320 levels of depth.
 pub type ArrayBitStack<const N: usize, T, D> = BitStackStruct<ArrayBitBucket<N, T>, D>;
 
 /// Array-based BitBucket implementation for large storage capacity.
+///
 /// Provides large BitBucket storage using multiple elements.
 /// This can be used to parse very deeply nested JSON.
+///
+/// Use the [ArrayBitStack] convenience wrapper to create this.
 #[derive(Debug)]
 pub struct ArrayBitBucket<const N: usize, T>(pub [T; N]);
 

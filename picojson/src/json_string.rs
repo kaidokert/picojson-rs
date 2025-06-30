@@ -3,6 +3,7 @@
 use core::ops::Deref;
 
 /// Represents a JSON string.
+///
 /// 'a is the lifetime of the original input buffer.
 /// 'b is the lifetime of the scratch buffer.
 #[derive(Debug, PartialEq, Eq)]

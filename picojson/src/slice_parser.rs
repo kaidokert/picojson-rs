@@ -26,7 +26,8 @@ enum EventResult<'a, 'b> {
     ExtractNumber(bool),
 }
 
-/// A flexible pull parser for JSON that yields events on demand.
+/// A pull parser that parses JSON from a slice.
+///
 /// Generic over BitStack storage type for configurable nesting depth.
 // Lifetime 'a is the input buffer lifetime
 // lifetime 'b is the scratch/copy buffer lifetime
