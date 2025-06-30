@@ -154,11 +154,7 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
     /// Extracts hex digits from buffer and processes them through the collector
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         let current_pos = self.buffer.current_pos();
-        let hex_slice_provider = |start, end| {
-            self.buffer
-                .slice(start, end)
-                .map_err(|_| ParseError::EndOfData)
-        };
+        let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
         let mut utf8_buf = [0u8; 4];
         let (utf8_bytes, escape_start_pos) =

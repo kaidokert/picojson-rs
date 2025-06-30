@@ -540,7 +540,7 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
             let hex_slice_provider = |start, end| {
                 self.direct_buffer
                     .get_string_slice(start, end)
-                    .map_err(|_| ParseError::UnexpectedState("Buffer error in stream parser"))
+                    .map_err(Into::into)
             };
 
             let mut utf8_buf = [0u8; 4];

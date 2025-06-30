@@ -456,10 +456,10 @@ mod tests {
 /// * `current_pos` - The parser's current position in the input buffer, right after the 4 hex digits.
 /// * `unicode_escape_collector` - A mutable reference to the shared `UnicodeEscapeCollector`.
 /// * `hex_slice_provider` - A closure that takes a start and end position and returns the hex digit slice.
-/// * `copy_on_escape_handler` - A closure that handles the final unescaped UTF-8 bytes.
+/// * `utf8_buf` - A buffer to write the UTF-8 encoded result into.
 ///
 /// # Returns
-/// `Ok(())` on success, or a `ParseError` on failure.
+/// A tuple containing the resulting UTF-8 byte slice and the start position of the escape sequence (`\uXXXX`).
 pub(crate) fn process_unicode_escape_sequence<'a, F>(
     current_pos: usize,
     unicode_escape_collector: &mut UnicodeEscapeCollector,
