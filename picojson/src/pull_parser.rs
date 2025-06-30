@@ -33,8 +33,6 @@ pub struct PullParser<'a, 'b, C: BitStackConfig = DefaultConfig> {
     buffer: SliceInputBuffer<'a>,
     parser_state: ParserState,
     copy_on_escape: CopyOnEscape<'a, 'b>,
-    /// Zero-length internal buffer for when no external scratch buffer is provided
-    _internal_scratch: [u8; 0],
     /// Shared Unicode escape collector for \uXXXX sequences
     unicode_escape_collector: UnicodeEscapeCollector,
 }
@@ -57,18 +55,7 @@ impl<'a> PullParser<'a, '_, DefaultConfig> {
     /// let parser = PullParser::new(r#"{"name": "value"}"#);
     /// ```
     pub fn new(input: &'a str) -> Self {
-        let data = input.as_bytes();
-        // Use a mutable reference to the internal zero-length buffer
-        let internal_buffer: &mut [u8] = &mut [];
-        let copy_on_escape = CopyOnEscape::new(data, internal_buffer);
-        PullParser {
-            tokenizer: Tokenizer::new(),
-            buffer: SliceInputBuffer::new(data),
-            parser_state: ParserState::new(),
-            copy_on_escape,
-            _internal_scratch: [],
-            unicode_escape_collector: UnicodeEscapeCollector::new(),
-        }
+        Self::with_config(input)
     }
 }
 
@@ -92,16 +79,7 @@ impl<'a, 'b> PullParser<'a, 'b, DefaultConfig> {
     /// let parser = PullParser::with_buffer(r#"{"msg": "Hello\nWorld"}"#, &mut scratch);
     /// ```
     pub fn with_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
-        let data = input.as_bytes();
-        let copy_on_escape = CopyOnEscape::new(data, scratch_buffer);
-        PullParser {
-            tokenizer: Tokenizer::new(),
-            buffer: SliceInputBuffer::new(data),
-            parser_state: ParserState::new(),
-            copy_on_escape,
-            _internal_scratch: [],
-            unicode_escape_collector: UnicodeEscapeCollector::new(),
-        }
+        Self::with_config_and_buffer(input, scratch_buffer)
     }
 }
 
@@ -112,22 +90,9 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
     /// This parser assumes no string escapes will be encountered. If escapes are found,
     /// parsing will fail. For JSON with escapes, use `with_config_and_buffer`.
     pub fn with_config(input: &'a str) -> Self {
-        let data = input.as_bytes();
-        let internal_buffer: &mut [u8] = &mut [];
-        let copy_on_escape = CopyOnEscape::new(data, internal_buffer);
-        PullParser {
-            tokenizer: Tokenizer::new(),
-            buffer: SliceInputBuffer::new(data),
-            parser_state: ParserState::new(),
-            copy_on_escape,
-            _internal_scratch: [],
-            unicode_escape_collector: UnicodeEscapeCollector::new(),
-        }
+        Self::with_config_and_buffer(input, &mut [])
     }
-}
 
-/// Generic constructor for PullParser with custom configurations
-impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
     /// Creates a new parser with a custom `BitStackConfig` and a user-provided scratch buffer.
     ///
     /// Use this when your JSON contains string escapes (like `\n`, `\"`, `\u0041`).
@@ -145,7 +110,6 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
             buffer: SliceInputBuffer::new(data),
             parser_state: ParserState::new(),
             copy_on_escape,
-            _internal_scratch: [],
             unicode_escape_collector: UnicodeEscapeCollector::new(),
         }
     }

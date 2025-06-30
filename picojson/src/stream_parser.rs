@@ -61,20 +61,7 @@ impl<'b, R: Reader> StreamParser<'b, R, DefaultConfig> {
     /// Uses the default BitStack configuration (u32 bucket, u8 counter)
     /// for most common use cases.
     pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
-        Self {
-            tokenizer: Tokenizer::new(),
-            parser_state: ParserState::new(),
-            reader,
-            direct_buffer: DirectBuffer::new(buffer),
-
-            // Initialize new state machine to Active with default values
-            processing_state: ProcessingState::Active {
-                unescaped_reset_queued: false,
-                in_escape_sequence: false,
-            },
-
-            unicode_escape_collector: UnicodeEscapeCollector::new(),
-        }
+        Self::with_config(reader, buffer)
     }
 }
 
@@ -89,23 +76,23 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
     /// ```
     /// use picojson::{StreamParser, BitStackStruct, ArrayBitStack};
     ///
-    /// // Example Reader implementation
-    /// struct JsonReader<'a> { data: &'a [u8], pos: usize }
-    /// impl<'a> JsonReader<'a> {
-    ///     fn new(data: &'a [u8]) -> Self { Self { data, pos: 0 } }
-    /// }
-    /// impl picojson::Reader for JsonReader<'_> {
-    ///     type Error = ();
-    ///     fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-    ///         let remaining = &self.data[self.pos..];
-    ///         let to_copy = buf.len().min(remaining.len());
-    ///         buf[..to_copy].copy_from_slice(&remaining[..to_copy]);
-    ///         self.pos += to_copy;
-    ///         Ok(to_copy)
-    ///     }
-    /// }
-    ///
-    /// let json = b"{\"test\": 42}";
+    /// # // Example Reader implementation
+    /// # struct JsonReader<'a> { data: &'a [u8], pos: usize }
+    /// # impl<'a> JsonReader<'a> {
+    /// #     fn new(data: &'a [u8]) -> Self { Self { data, pos: 0 } }
+    /// # }
+    /// # impl picojson::Reader for JsonReader<'_> {
+    /// #     type Error = ();
+    /// #     fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
+    /// #         let remaining = &self.data[self.pos..];
+    /// #         let to_copy = buf.len().min(remaining.len());
+    /// #         buf[..to_copy].copy_from_slice(&remaining[..to_copy]);
+    /// #         self.pos += to_copy;
+    /// #         Ok(to_copy)
+    /// #     }
+    /// # }
+    /// #
+    /// # let json = b"{\"test\": 42}";
     /// let reader = JsonReader::new(json);
     /// let mut buffer = [0u8; 256];
     ///
