@@ -38,7 +38,10 @@ fn test_json_number_display_trait() {
     {
         // float-error should return an error when encountering floats
         let result = parser.next_event();
-        assert!(result.is_err(), "Expected error for float with float-error configuration");
+        assert!(
+            result.is_err(),
+            "Expected error for float with float-error configuration"
+        );
     }
     #[cfg(not(feature = "float-error"))]
     {
@@ -171,7 +174,10 @@ fn test_json_number_type_checking_methods() {
     {
         // float-error should return an error when encountering floats
         let result = parser.next_event();
-        assert!(result.is_err(), "Expected error for float with float-error configuration");
+        assert!(
+            result.is_err(),
+            "Expected error for float with float-error configuration"
+        );
     }
     #[cfg(not(feature = "float-error"))]
     {
