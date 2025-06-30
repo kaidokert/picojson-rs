@@ -1,6 +1,7 @@
 # picojson
 
 [![Build and test](https://github.com/kaidokert/picojson-rs/actions/workflows/build.yaml/badge.svg)](https://github.com/kaidokert/picojson-rs/actions/workflows/build.yaml)
+[![Coverage Status](https://coveralls.io/repos/github/kaidokert/picojson-rs/badge.svg?branch=main)](https://coveralls.io/github/kaidokert/picojson-rs?branch=main)
 
 A minimal Rust JSON **pull-parser** for resource-constrained environments.
 
