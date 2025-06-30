@@ -90,31 +90,27 @@ fn test_selective_extraction() {
                     (current_state, _) => current_state,
                 };
             }
-            Event::String(s) => {
-                match (state, product_index) {
-                    (ExtractionState::ExpectingEmail, _) => {
-                        extracted.email = Some(s.as_ref().to_owned());
-                        state = ExtractionState::Idle;
-                    }
-                    (ExtractionState::ExpectingProductId, 1) => {
-                        extracted.second_product_id = Some(s.as_ref().to_owned());
-                        state = ExtractionState::InProductsArray;
-                    }
-                    (ExtractionState::ExpectingProductId, _) => {
-                        state = ExtractionState::InProductsArray;
-                    }
-                    _ => {}
+            Event::String(s) => match (state, product_index) {
+                (ExtractionState::ExpectingEmail, _) => {
+                    extracted.email = Some(s.as_ref().to_owned());
+                    state = ExtractionState::Idle;
                 }
-            }
-            Event::Bool(b) => {
-                match state {
-                    ExtractionState::ExpectingNewDashboardStatus => {
-                        extracted.new_dashboard_status = Some(b);
-                        state = ExtractionState::InFeatureFlags;
-                    }
-                    _ => {}
+                (ExtractionState::ExpectingProductId, 1) => {
+                    extracted.second_product_id = Some(s.as_ref().to_owned());
+                    state = ExtractionState::InProductsArray;
                 }
-            }
+                (ExtractionState::ExpectingProductId, _) => {
+                    state = ExtractionState::InProductsArray;
+                }
+                _ => {}
+            },
+            Event::Bool(b) => match state {
+                ExtractionState::ExpectingNewDashboardStatus => {
+                    extracted.new_dashboard_status = Some(b);
+                    state = ExtractionState::InFeatureFlags;
+                }
+                _ => {}
+            },
             Event::StartArray => {
                 if state == ExtractionState::InProductsArray {
                     array_depth += 1;
@@ -123,17 +119,15 @@ fn test_selective_extraction() {
                     }
                 }
             }
-            Event::EndObject => {
-                match state {
-                    ExtractionState::InProductsArray => {
-                        product_index += 1;
-                    }
-                    ExtractionState::InFeatureFlags => {
-                        state = ExtractionState::Idle;
-                    }
-                    _ => {}
+            Event::EndObject => match state {
+                ExtractionState::InProductsArray => {
+                    product_index += 1;
                 }
-            }
+                ExtractionState::InFeatureFlags => {
+                    state = ExtractionState::Idle;
+                }
+                _ => {}
+            },
             Event::EndArray => {
                 if state == ExtractionState::InProductsArray {
                     array_depth -= 1;

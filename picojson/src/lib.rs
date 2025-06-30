@@ -1,6 +1,6 @@
 //! A minimal JSON pull-parser for resource-constrained environments.
 //!
-//! `picojson` provides low-level, `no_std` compatible pull-parsers that operate without 
+//! `picojson` provides low-level, `no_std` compatible pull-parsers that operate without
 //! recursion or heap allocations, designed for embedded systems and memory-limited scenarios.
 //!
 //! ## Main Types
@@ -29,8 +29,8 @@
 //!
 //! ## String Escapes
 //!
-//! For JSON containing escape sequences (like `\n`, `\"`, `\u0041`), use constructors 
-//! with scratch buffers to handle unescaping. The buffer must be at least as long 
+//! For JSON containing escape sequences (like `\n`, `\"`, `\u0041`), use constructors
+//! with scratch buffers to handle unescaping. The buffer must be at least as long
 //! as the longest contiguous string or number in your JSON:
 //!
 //! ```rust
@@ -42,7 +42,7 @@
 //!
 //! ## More Examples
 //!
-//! For advanced usage including configurable nesting depth, number parsing options, 
+//! For advanced usage including configurable nesting depth, number parsing options,
 //! and stream parsing, see the [examples directory](https://github.com/kaidokert/picojson-rs/tree/main/picojson/examples)
 //! on GitHub.
 
