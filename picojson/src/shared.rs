@@ -244,3 +244,100 @@ impl ParserErrorHandler {
         ParseError::UnexpectedState("Incomplete Unicode escape sequence")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unicode_escape_bounds() {
+        // Test unicode_escape_bounds with typical position after \u1234
+        let current_pos = 10; // Position after reading \u1234
+        let (hex_start, hex_end, escape_start) = ContentRange::unicode_escape_bounds(current_pos);
+
+        assert_eq!(hex_start, 6); // Start of XXXX (10 - 4)
+        assert_eq!(hex_end, 10); // End of XXXX
+        assert_eq!(escape_start, 4); // Start of \uXXXX (10 - 6)
+    }
+
+    #[test]
+    fn test_unicode_escape_bounds_edge_cases() {
+        // Test with position that would underflow
+        let (hex_start, hex_end, escape_start) = ContentRange::unicode_escape_bounds(3);
+        assert_eq!(hex_start, 0); // saturating_sub prevents underflow
+        assert_eq!(hex_end, 3);
+        assert_eq!(escape_start, 0); // saturating_sub prevents underflow
+    }
+
+    #[test]
+    fn test_string_content_bounds_before_escape() {
+        // Test string content bounds calculation
+        let quote_start = 5; // Position of opening quote
+        let current_pos = 15; // Position at backslash
+
+        let (content_start, content_end) =
+            ContentRange::string_content_bounds_before_escape(quote_start, current_pos);
+
+        assert_eq!(content_start, 6); // After opening quote (5 + 1)
+        assert_eq!(content_end, 14); // Before backslash (15 - 1)
+    }
+
+    #[test]
+    fn test_string_content_bounds_edge_cases() {
+        // Test with positions that could underflow
+        let (content_start, content_end) = ContentRange::string_content_bounds_before_escape(0, 0);
+        assert_eq!(content_start, 1);
+        assert_eq!(content_end, 0); // This will result in empty range, which is handled elsewhere
+    }
+
+    #[test]
+    fn test_error_constructors() {
+        // Test state_mismatch error constructor
+        let error = ParserErrorHandler::state_mismatch("string", "end");
+        match error {
+            ParseError::UnexpectedState(msg) => {
+                assert_eq!(msg, "String end without String start");
+            }
+            _ => panic!("Expected UnexpectedState error"),
+        }
+
+        // Test invalid_unicode_length error constructor
+        let error = ParserErrorHandler::invalid_unicode_length();
+        match error {
+            ParseError::UnexpectedState(msg) => {
+                assert_eq!(msg, "Invalid Unicode escape length");
+            }
+            _ => panic!("Expected UnexpectedState error"),
+        }
+
+        // Test incomplete_unicode_escape error constructor
+        let error = ParserErrorHandler::incomplete_unicode_escape();
+        match error {
+            ParseError::UnexpectedState(msg) => {
+                assert_eq!(msg, "Incomplete Unicode escape sequence");
+            }
+            _ => panic!("Expected UnexpectedState error"),
+        }
+    }
+
+    #[test]
+    fn test_utf8_error_conversion() {
+        // Test From<Utf8Error> trait implementation
+        use core::str;
+        // Create a proper invalid UTF-8 sequence (lone continuation byte)
+        let invalid_utf8 = &[0b10000000u8]; // Invalid UTF-8 - continuation byte without start
+
+        match str::from_utf8(invalid_utf8) {
+            Err(utf8_error) => {
+                let parse_error: ParseError = utf8_error.into();
+                match parse_error {
+                    ParseError::InvalidUtf8(_) => {
+                        // Expected - conversion works correctly
+                    }
+                    _ => panic!("Expected InvalidUtf8 error"),
+                }
+            }
+            Ok(_) => panic!("Expected UTF-8 validation to fail"),
+        }
+    }
+}

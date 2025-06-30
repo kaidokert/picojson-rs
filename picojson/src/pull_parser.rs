@@ -84,8 +84,8 @@ impl<'a, 'b> PullParser<'a, 'b, DefaultConfig> {
     /// # Arguments
     /// * `input` - A string slice containing the JSON data to be parsed.
     /// * `scratch_buffer` - A mutable byte slice for temporary string unescaping operations.
-    ///                      This buffer needs to be at least as long as the longest
-    ///                      contiguous token (string, key, number) in the input.
+    ///   This buffer needs to be at least as long as the longest
+    ///   contiguous token (string, key, number) in the input.
     ///
     /// # Example
     /// ```
@@ -138,8 +138,8 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
     /// # Arguments
     /// * `input` - A string slice containing the JSON data to be parsed.
     /// * `scratch_buffer` - A mutable byte slice for temporary string unescaping operations.
-    ///                      This buffer needs to be at least as long as the longest
-    ///                      contiguous token (string, key, number) in the input.
+    ///   This buffer needs to be at least as long as the longest
+    ///   contiguous token (string, key, number) in the input.
     pub fn with_config_and_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
         Self::with_config_and_buffer_from_slice(input.as_bytes(), scratch_buffer)
     }
@@ -439,7 +439,7 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
             } else {
                 // No event available - this shouldn't happen since we ensured have_events() above
                 break Err(ParseError::UnexpectedState(
-                    "No events available after ensuring events exist".into(),
+                    "No events available after ensuring events exist",
                 ));
             }
         }
@@ -449,7 +449,7 @@ impl<'a, 'b, C: BitStackConfig> PullParser<'a, 'b, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::String;
+    use crate::{ArrayBitStack, BitStackStruct, String};
     use test_log::test;
 
     #[test]
@@ -814,5 +814,71 @@ mod tests {
         assert_eq!(parser.next_event(), Ok(Event::EndObject));
         assert_eq!(parser.next_event(), Ok(Event::EndDocument));
         assert_eq!(parser.next_event(), Ok(Event::EndDocument));
+    }
+
+    #[test]
+    fn test_with_config_constructors() {
+        // Test with_config constructor (no escapes)
+        let json = r#"{"simple": "no_escapes"}"#;
+        let mut parser = PullParser::<BitStackStruct<u64, u16>>::with_config(json);
+
+        assert_eq!(parser.next_event(), Ok(Event::StartObject));
+        assert_eq!(
+            parser.next_event(),
+            Ok(Event::Key(String::Borrowed("simple")))
+        );
+        assert_eq!(
+            parser.next_event(),
+            Ok(Event::String(String::Borrowed("no_escapes")))
+        );
+        assert_eq!(parser.next_event(), Ok(Event::EndObject));
+        assert_eq!(parser.next_event(), Ok(Event::EndDocument));
+    }
+
+    #[test]
+    fn test_with_config_and_buffer_constructors() {
+        // Test with_config_and_buffer constructor (with escapes)
+        let json = r#"{"escaped": "hello\nworld"}"#;
+        let mut scratch = [0u8; 64];
+        let mut parser =
+            PullParser::<BitStackStruct<u64, u16>>::with_config_and_buffer(json, &mut scratch);
+
+        assert_eq!(parser.next_event(), Ok(Event::StartObject));
+        assert_eq!(
+            parser.next_event(),
+            Ok(Event::Key(String::Borrowed("escaped")))
+        );
+
+        if let Ok(Event::String(s)) = parser.next_event() {
+            assert_eq!(s.as_ref(), "hello\nworld"); // Escape should be processed
+        } else {
+            panic!("Expected String event");
+        }
+
+        assert_eq!(parser.next_event(), Ok(Event::EndObject));
+        assert_eq!(parser.next_event(), Ok(Event::EndDocument));
+    }
+
+    #[test]
+    fn test_alternative_config_deep_nesting() {
+        // Test that custom BitStack configs can handle deeper nesting
+        let json = r#"{"a":{"b":{"c":{"d":{"e":"deep"}}}}}"#;
+        let mut scratch = [0u8; 64];
+        let mut parser =
+            PullParser::<ArrayBitStack<8, u32, u16>>::with_config_and_buffer(json, &mut scratch);
+
+        // Parse the deep structure
+        let mut depth = 0;
+        while let Ok(event) = parser.next_event() {
+            match event {
+                Event::StartObject => depth += 1,
+                Event::EndObject => depth -= 1,
+                Event::EndDocument => break,
+                _ => {}
+            }
+        }
+
+        // Should have successfully parsed a 5-level deep structure
+        assert_eq!(depth, 0); // All objects should be closed
     }
 }

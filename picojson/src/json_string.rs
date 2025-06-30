@@ -13,7 +13,7 @@ pub enum String<'a, 'b> {
     Unescaped(&'b str),
 }
 
-impl<'a, 'b> String<'a, 'b> {
+impl String<'_, '_> {
     /// Returns the string as a `&str`, whether borrowed or unescaped.
     pub fn as_str(&self) -> &str {
         match self {
@@ -23,7 +23,7 @@ impl<'a, 'b> String<'a, 'b> {
     }
 }
 
-impl<'a, 'b> AsRef<str> for String<'a, 'b> {
+impl AsRef<str> for String<'_, '_> {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
@@ -40,7 +40,7 @@ impl Deref for String<'_, '_> {
     }
 }
 
-impl<'a, 'b> core::fmt::Display for String<'a, 'b> {
+impl core::fmt::Display for String<'_, '_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.as_str())
     }

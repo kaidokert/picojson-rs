@@ -22,7 +22,7 @@ pub trait InputBuffer {
     fn consume_byte(&mut self) -> Result<u8, Error>;
 }
 
-impl<'a> InputBuffer for SliceInputBuffer<'a> {
+impl InputBuffer for SliceInputBuffer<'_> {
     fn is_past_end(&self) -> bool {
         self.pos > self.data.len()
     }
@@ -54,7 +54,7 @@ impl<'a> SliceInputBuffer<'a> {
     }
 }
 
-impl<'a> crate::number_parser::NumberExtractor for SliceInputBuffer<'a> {
+impl crate::number_parser::NumberExtractor for SliceInputBuffer<'_> {
     fn get_number_slice(
         &self,
         start: usize,

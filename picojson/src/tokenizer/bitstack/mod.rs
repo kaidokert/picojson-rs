@@ -135,8 +135,8 @@ where
 
         // Start from the rightmost (least significant) element and work left
         for i in (0..N).rev() {
-            let old_msb = (self.0[i].clone() >> msb_shift) & T::from(1); // Extract MSB that will be lost
-            self.0[i] = (self.0[i].clone() << 1u8) | carry;
+            let old_msb = (self.0[i] >> msb_shift) & T::from(1); // Extract MSB that will be lost
+            self.0[i] = (self.0[i] << 1u8) | carry;
             carry = old_msb;
         }
         // Note: carry from leftmost element is discarded (overflow)
@@ -144,7 +144,7 @@ where
 
     fn pop(&mut self) -> bool {
         // Extract rightmost bit from least significant element
-        let bit = (self.0[N - 1].clone() & T::from(1)) != T::from(0);
+        let bit = (self.0[N - 1] & T::from(1)) != T::from(0);
 
         // Shift all elements right, carrying underflow from left to right
         let mut carry = T::from(0);
@@ -153,8 +153,8 @@ where
 
         // Start from the leftmost (most significant) element and work right
         for i in 0..N {
-            let old_lsb = self.0[i].clone() & T::from(1); // Extract LSB that will be lost
-            self.0[i] = (self.0[i].clone() >> 1u8) | (carry << msb_shift);
+            let old_lsb = self.0[i] & T::from(1); // Extract LSB that will be lost
+            self.0[i] = (self.0[i] >> 1u8) | (carry << msb_shift);
             carry = old_lsb;
         }
 
@@ -163,7 +163,7 @@ where
 
     fn top(&self) -> bool {
         // Return rightmost bit from least significant element without modifying
-        (self.0[N - 1].clone() & T::from(1)) != T::from(0)
+        (self.0[N - 1] & T::from(1)) != T::from(0)
     }
 }
 

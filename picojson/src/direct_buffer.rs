@@ -459,7 +459,7 @@ mod tests {
     }
 }
 
-impl<'b> crate::number_parser::NumberExtractor for DirectBuffer<'b> {
+impl crate::number_parser::NumberExtractor for DirectBuffer<'_> {
     fn get_number_slice(
         &self,
         start: usize,
