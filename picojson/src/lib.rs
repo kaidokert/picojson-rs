@@ -19,10 +19,9 @@
 //! let json = r#"{"name": "value"}"#;
 //! let mut parser = PullParser::new(json);
 //!
-//! while let Ok(event) = parser.next_event() {
-//!     match event {
+//! while let Some(event) = parser.next() {
+//!     match event.expect("Parse error") {
 //!         Event::Key(key) => println!("Found key: {}", key),
-//!         Event::EndDocument => break,
 //!         _ => {}
 //!     }
 //! }
