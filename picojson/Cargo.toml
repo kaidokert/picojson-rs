@@ -10,10 +10,11 @@ A resource-constrained JSON parser for embedded systems.
 """
 repository = "https://github.com/kaidokert/picojson-rs"
 homepage = "https://github.com/kaidokert/picojson-rs"
-keywords = ["json", "static", "no-heap"]
+keywords = ["json", "parser", "embedded", "no-std", "no-heap"]
 categories = [
     "embedded",
     "no-std",
+    "parser-implementations"
 ]
 
 [features]
