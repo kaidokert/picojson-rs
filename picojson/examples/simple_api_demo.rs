@@ -1,12 +1,12 @@
 // Example demonstrating the simple new API
 
-use picojson::{Event, ParseError, PullParser};
+use picojson::{Event, ParseError, PullParser, SliceParser};
 
 fn main() -> Result<(), ParseError> {
     // Test the new simple API
     let json = r#"{"name": "value", "number": 42, "flag": true}"#;
-    let mut parser = PullParser::new(json);
-    println!("Using PullParser::new() - simple API:");
+    let mut parser = SliceParser::new(json);
+    println!("Using SliceParser::new() - simple API:");
     println!("Input: {}", json);
 
     while let Some(event) = parser.next() {

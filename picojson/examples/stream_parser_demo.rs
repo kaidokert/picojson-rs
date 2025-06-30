@@ -1,6 +1,6 @@
 // Example demonstrating StreamParser with a Reader over a fixed-size array
 
-use picojson::{Event, ParseError, Reader, StreamParser};
+use picojson::{Event, ParseError, PullParser, Reader, StreamParser};
 
 /// Simple Reader implementation that reads from a fixed-size byte array
 /// This simulates reading from a stream, network socket, or any other byte source

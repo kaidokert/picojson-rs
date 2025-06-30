@@ -1,6 +1,6 @@
 # Configurable Number Handling
 
-The stax JSON parser provides comprehensive configurability for number handling, making it suitable for both full-featured and embedded environments.
+The JSON parser provides comprehensive configurability for number handling, making it suitable for both full-featured and embedded environments.
 
 ## Feature Flags
 
@@ -29,7 +29,7 @@ Choose what happens when floats are encountered:
 ### Full Featured (Default)
 ```toml
 [dependencies]
-stax = { path = "../stax", features = ["int64", "float"] }
+picojson = { path = "../picojson", features = ["int64", "float"] }
 ```
 - 64-bit integers, full float support
 - Best for desktop/server applications
@@ -37,7 +37,7 @@ stax = { path = "../stax", features = ["int64", "float"] }
 ### Embedded Friendly
 ```toml
 [dependencies]
-stax = { path = "../stax", features = ["int32", "float-error"] }
+picojson = { path = "../picojson", features = ["int32", "float-error"] }
 ```
 - 32-bit integers (no 64-bit math)
 - Error on floats (fail fast)
@@ -46,7 +46,7 @@ stax = { path = "../stax", features = ["int32", "float-error"] }
 ### Embedded with Float Tolerance
 ```toml
 [dependencies]
-stax = { path = "../stax", features = ["int32", "float-truncate"] }
+picojson = { path = "../picojson", features = ["int32", "float-truncate"] }
 ```
 - 32-bit integers
 - Truncate simple decimals to integers (1.7 → 1)
@@ -55,7 +55,7 @@ stax = { path = "../stax", features = ["int32", "float-truncate"] }
 ### Legacy Float Disabled
 ```toml
 [dependencies]
-stax = { path = "../stax", features = ["int64"] }
+picojson = { path = "../picojson", features = ["int64"] }
 ```
 - 64-bit integers
 - Floats return `FloatDisabled` with raw string preserved

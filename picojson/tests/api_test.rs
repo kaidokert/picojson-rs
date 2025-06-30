@@ -1,11 +1,11 @@
 // Test the new API entry points
 
-use picojson::{Event, ParseError, PullParser, String};
+use picojson::{Event, ParseError, PullParser, SliceParser, String};
 
 #[test]
 fn test_new_no_escapes() {
     let json = r#"{"name": "value", "number": 42, "bool": true}"#;
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     // Should parse successfully since there are no escapes
     // Events: StartObject, Key, String, Key, Number, Key, Bool, EndObject
@@ -33,7 +33,7 @@ fn test_new_no_escapes() {
 #[test]
 fn test_new_with_escapes_fails() {
     let json = r#"{"message": "Hello\nWorld"}"#; // Contains escape sequence
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     // Should parse until it hits the escape
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
@@ -55,7 +55,7 @@ fn test_new_with_escapes_fails() {
 fn test_with_buffer_handles_escapes() {
     let json = r#"{"message": "Hello\nWorld"}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     // Should parse successfully with escape handling
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
@@ -83,7 +83,7 @@ fn test_new_with_numbers_and_arrays() {
     #[cfg(not(feature = "float-error"))]
     let json = r#"[1, 2.5, true, false, null]"#; // Include float for other configs
 
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     // Should handle all basic types without issues
     assert_eq!(parser.next_event(), Ok(Event::StartArray));
@@ -100,7 +100,7 @@ fn test_new_with_numbers_and_arrays() {
 fn test_mixed_string_types() {
     let json = r#"{"simple": "no_escapes", "complex": "with\tescapes"}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     // Events: StartObject, Key("simple"), String("no_escapes"), Key("complex"), String("with\tescapes"), EndObject
     assert_eq!(parser.next_event(), Ok(Event::StartObject));

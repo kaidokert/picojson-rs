@@ -1,12 +1,12 @@
 // Debug root-level number parsing issue
-use picojson::{Event, PullParser};
+use picojson::{Event, PullParser, SliceParser};
 
 fn test_json(input: &str, description: &str) {
     println!("\n=== Testing: {} ===", description);
     println!("Input: '{}'", input);
 
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     let mut event_count = 0;
     loop {

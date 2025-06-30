@@ -3,7 +3,7 @@
 use crate::direct_buffer::DirectBuffer;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};
-use crate::ujson;
+use crate::{ujson, PullParser};
 use ujson::{EventToken, Tokenizer};
 
 use ujson::{BitStackConfig, DefaultConfig};
@@ -36,7 +36,11 @@ enum ProcessingState {
     Finished,
 }
 
-/// A streaming JSON parser using DirectBuffer for single-buffer input and escape processing
+/// A pull parser that parses JSON from a stream.
+///
+/// Generic over BitStackConfig for configurable nesting depth.
+/// It is designed to be used with the [Reader] trait, which is used to read data from a stream.
+///
 pub struct StreamParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     /// The tokenizer that processes JSON tokens
     tokenizer: Tokenizer<C::Bucket, C::Counter>,
@@ -119,18 +123,8 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
 
 /// Shared methods for StreamParser with any BitStackConfig
 impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
-    /// Iterator-compatible method that returns None when parsing is complete.
-    /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
-    /// and Some(Err(error)) for parsing errors.
-    pub fn next(&mut self) -> Option<Result<Event, ParseError>> {
-        match self.next_event() {
-            Ok(Event::EndDocument) => None,
-            other => Some(other),
-        }
-    }
-
     /// Get the next JSON event from the stream
-    pub fn next_event(&mut self) -> Result<Event, ParseError> {
+    fn next_event_impl(&mut self) -> Result<Event, ParseError> {
         // Apply any queued unescaped content reset from previous call
         self.apply_unescaped_reset_if_queued();
 
@@ -598,6 +592,12 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         if should_reset {
             self.direct_buffer.clear_unescaped();
         }
+    }
+}
+
+impl<'b, R: Reader, C: BitStackConfig> PullParser for StreamParser<'b, R, C> {
+    fn next_event(&mut self) -> Result<Event, ParseError> {
+        self.next_event_impl()
     }
 }
 

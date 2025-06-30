@@ -11,7 +11,7 @@ A minimal Rust JSON **pull-parser** for resource-constrained environments.
 
 ## Features
 
-- **Pull-style Parsing**: Process JSON from byte slices (`PullParser`) or any source that implements a `Reader` trait (`StreamParser`).
+- **Pull-style Parsing**: Process JSON from byte slices (`SliceParser`) or any source that implements a `Reader` trait (`StreamParser`).
 - **Zero Allocations**: The parser does not perform any heap allocations. All memory, including an optional scratch buffer for value copying, is provided by the caller.
 - **No Recursion**: The parsing logic is implemented with an iterative loop, ensuring a predictable and flat call stack.
 - **`no_std` by Default**: Designed for bare-metal and embedded use cases.
@@ -37,14 +37,14 @@ The design prioritizes a small resource footprint and predictable deterministic 
 
 ### Parsing from a Slice
 
-Use `PullParser` when the entire JSON document is in memory. A scratch buffer is required to handle potential string escapes.
+Use `SliceParser` when the entire JSON document is in memory. A scratch buffer is required to handle potential string escapes.
 
 ```rust
-use picojson::{PullParser, Event, String};
+use picojson::{SliceParser, Event, String};
 
 let json = r#"{"message": "Hello\nWorld"}"#;
 let mut scratch = [0u8; 1024];
-let mut parser = PullParser::with_buffer(json, &mut scratch);
+let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
 loop {
     match parser.next_event()? {

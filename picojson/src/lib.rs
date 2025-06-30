@@ -5,7 +5,7 @@
 //!
 //! ## Main Types
 //!
-//! - [`PullParser`] - Parses JSON from byte slices or strings with zero-copy when possible
+//! - [`SliceParser`] - Parses JSON from byte slices or strings with zero-copy when possible
 //! - [`StreamParser`] - Parses JSON from any [`Reader`] source, buffering as needed
 //!
 //! Both parsers emit [`Event`]s representing JSON structure and values, allowing fine-grained
@@ -14,10 +14,10 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use picojson::{PullParser, Event, String};
+//! use picojson::{SliceParser, Event, String, PullParser};
 //!
 //! let json = r#"{"name": "value"}"#;
-//! let mut parser = PullParser::new(json);
+//! let mut parser = SliceParser::new(json);
 //!
 //! while let Some(event) = parser.next() {
 //!     match event.expect("Parse error") {
@@ -34,10 +34,10 @@
 //! as the longest contiguous string or number in your JSON:
 //!
 //! ```rust
-//! # use picojson::PullParser;
+//! # use picojson::SliceParser;
 //! let json = r#"{"msg": "Hello\nWorld"}"#;
 //! let mut scratch = [0u8; 32];
-//! let parser = PullParser::with_buffer(json, &mut scratch);
+//! let parser = SliceParser::with_buffer(json, &mut scratch);
 //! ```
 //!
 //! ## More Examples
@@ -67,10 +67,10 @@ mod direct_buffer;
 
 mod stream_parser;
 
-mod pull_parser;
+mod slice_parser;
 
 mod shared;
-pub use shared::{Event, ParseError};
+pub use shared::{Event, ParseError, PullParser};
 
 mod slice_input_buffer;
 
@@ -83,7 +83,7 @@ pub use json_string::String;
 
 mod number_parser;
 
-pub use pull_parser::PullParser;
+pub use slice_parser::SliceParser;
 pub use stream_parser::{Reader, StreamParser};
 
 impl From<slice_input_buffer::Error> for ParseError {
