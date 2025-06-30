@@ -23,16 +23,12 @@ pub enum NumberResult {
     /// Integer too large for configured type (use raw string for exact representation)
     IntegerOverflow,
     /// Float value (only available with float feature)
-    #[cfg(feature = "float")]
     Float(f64),
     /// Float parsing disabled - behavior depends on configuration
-    #[cfg(not(feature = "float"))]
     FloatDisabled,
     /// Float encountered but skipped due to float-skip configuration
-    #[cfg(all(not(feature = "float"), feature = "float-skip"))]
     FloatSkipped,
     /// Float truncated to integer due to float-truncate configuration
-    #[cfg(all(not(feature = "float"), feature = "float-truncate"))]
     FloatTruncated(ConfiguredInt),
 }
 
@@ -50,7 +46,7 @@ pub enum JsonNumber<'a, 'b> {
     Copied { raw: &'b str, parsed: NumberResult },
 }
 
-impl<'a, 'b> JsonNumber<'a, 'b> {
+impl JsonNumber<'_, '_> {
     /// Get the parsed NumberResult.
     pub fn parsed(&self) -> &NumberResult {
         match self {
@@ -115,7 +111,7 @@ impl<'a, 'b> JsonNumber<'a, 'b> {
     }
 }
 
-impl<'a, 'b> AsRef<str> for JsonNumber<'a, 'b> {
+impl AsRef<str> for JsonNumber<'_, '_> {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
@@ -129,7 +125,7 @@ impl Deref for JsonNumber<'_, '_> {
     }
 }
 
-impl<'a, 'b> core::fmt::Display for JsonNumber<'a, 'b> {
+impl core::fmt::Display for JsonNumber<'_, '_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Display strategy: Show parsed value when available, fall back to raw string
         // This provides the most meaningful representation across all configurations
@@ -177,10 +173,12 @@ pub(super) fn parse_float(s: &str) -> NumberResult {
 pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
     #[cfg(feature = "float-error")]
     {
+        let _ = s; // Acknowledge parameter usage
         Err(ParseError::FloatNotAllowed)
     }
     #[cfg(feature = "float-skip")]
     {
+        let _ = s; // Acknowledge parameter usage
         Ok(NumberResult::FloatSkipped)
     }
     #[cfg(feature = "float-truncate")]
@@ -209,6 +207,7 @@ pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
         feature = "float-truncate"
     )))]
     {
+        let _ = s; // Acknowledge parameter usage
         Ok(NumberResult::FloatDisabled)
     }
 }
@@ -282,12 +281,12 @@ mod tests {
     #[cfg(feature = "float")]
     fn test_json_number_float() {
         let number = JsonNumber::Borrowed {
-            raw: "3.14159",
-            parsed: NumberResult::Float(3.14159),
+            raw: "3.25",
+            parsed: NumberResult::Float(3.25),
         };
-        assert_eq!(number.as_str(), "3.14159");
+        assert_eq!(number.as_str(), "3.25");
         assert_eq!(number.as_int(), None);
-        assert_eq!(number.as_f64(), Some(3.14159));
+        assert_eq!(number.as_f64(), Some(3.25));
         assert!(!number.is_integer());
         assert!(number.is_float());
     }

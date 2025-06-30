@@ -1110,8 +1110,8 @@ mod tests {
         (consumed, &store[..index])
     }
 
-    fn collect_with_result<'a, 'b, 'c>(
-        parser: &'c mut Tokenizer,
+    fn collect_with_result<'a, 'b>(
+        parser: &mut Tokenizer,
         data: &'b [u8],
         store: &'a mut [Event],
     ) -> Result<(usize, &'a [Event]), Error> {

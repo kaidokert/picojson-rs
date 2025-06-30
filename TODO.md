@@ -1,15 +1,15 @@
 ## TODO list
-- API cleanup, rename things
 - Constify what's possible
 - Remove `.unwrap()` calls
 - Remove unnecessary `'static` lifetimes
 - Dependency cleanup
 - Clippy cleanup
+- Unify code in PullParser and StreamParser
 - Address and remove `// TODO` comments
-- Put all shippable features in one crate ( tokenizer, pull + push parsers )
 - Clean up reference docs
 - Provide user guide docs
 - Direct defmt support
 - Stack size benchmarks
 - Code size benchmarks
 - Sax-style push parser
+- See if we can bring an Iterator impl back

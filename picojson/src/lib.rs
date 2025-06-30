@@ -53,13 +53,11 @@
 // Compile-time configuration validation
 mod config_check;
 
-mod tokenizer;
-// Temporary internal alias, not exported
-use tokenizer as ujson;
-pub use tokenizer::ArrayBitStack;
+mod ujson;
+pub use ujson::ArrayBitStack;
 
-pub use tokenizer::ArrayBitBucket;
-pub use tokenizer::{BitBucket, BitStackConfig, BitStackStruct, DefaultConfig, DepthCounter};
+pub use ujson::ArrayBitBucket;
+pub use ujson::{BitBucket, BitStackConfig, BitStackStruct, DefaultConfig, DepthCounter};
 
 mod copy_on_escape;
 

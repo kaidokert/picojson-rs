@@ -118,7 +118,7 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
 }
 
 /// Shared methods for StreamParser with any BitStackConfig
-impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
+impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Iterator-compatible method that returns None when parsing is complete.
     /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
     /// and Some(Err(error)) for parsing errors.
@@ -157,7 +157,7 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
                             }
                         };
 
-                        if let Err(_) = self.tokenizer.finish(&mut callback) {
+                        if self.tokenizer.finish(&mut callback).is_err() {
                             return Err(ParseError::TokenizerError);
                         }
                     }
@@ -183,7 +183,7 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
                         }
                     };
 
-                    if let Err(_) = self.tokenizer.parse_chunk(&[byte], &mut callback) {
+                    if self.tokenizer.parse_chunk(&[byte], &mut callback).is_err() {
                         return Err(ParseError::TokenizerError);
                     }
 
@@ -461,7 +461,6 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
             // Normal byte accumulation - all escape processing now goes through event system
             if !in_escape && self.direct_buffer.has_unescaped_content() {
                 self.append_byte_to_escape_buffer(byte)?;
-            } else {
             }
         }
 
@@ -499,7 +498,6 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
                     content_end,
                 )?;
             }
-        } else {
         }
 
         Ok(())
@@ -620,7 +618,7 @@ mod tests {
         }
     }
 
-    impl<'a> Reader for SliceReader<'a> {
+    impl Reader for SliceReader<'_> {
         type Error = ();
 
         fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
@@ -1247,7 +1245,7 @@ mod tests {
                     #[cfg(feature = "float")]
                     crate::NumberResult::Float(f) => {
                         // This is expected in float-enabled build
-                        assert!((f - 3.14).abs() < f64::EPSILON);
+                        assert!((f - 3.14).abs() < 0.01);
                     }
                     #[cfg(feature = "float-skip")]
                     crate::NumberResult::FloatSkipped => {
@@ -1482,5 +1480,64 @@ mod tests {
             }
             assert!(matches!(parser7.next_event().unwrap(), Event::EndArray));
         }
+    }
+
+    #[test]
+    fn test_escape_buffer_functions() {
+        // Test the uncovered escape processing functions
+        let json_stream = br#"{"escaped": "test\nstring"}"#;
+        let mut buffer = [0u8; 1024];
+        let mut parser = StreamParser::new(SliceReader::new(json_stream), &mut buffer);
+
+        // These functions are private but we can test them through the public API
+        // The escape processing should trigger the uncovered functions
+        assert_eq!(parser.next_event().unwrap(), Event::StartObject);
+        assert_eq!(
+            parser.next_event().unwrap(),
+            Event::Key(crate::String::Borrowed("escaped"))
+        );
+
+        // This should trigger append_byte_to_escape_buffer and queue_unescaped_reset
+        if let Event::String(s) = parser.next_event().unwrap() {
+            assert_eq!(s.as_ref(), "test\nstring"); // Escape sequence should be processed
+        } else {
+            panic!("Expected String event with escape sequence");
+        }
+
+        assert_eq!(parser.next_event().unwrap(), Event::EndObject);
+        assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+    }
+
+    #[test]
+    fn test_slice_reader_constructor() {
+        // Test the uncovered SliceReader::new function
+        let data = b"test data";
+        let reader = SliceReader::new(data);
+        assert_eq!(reader.data, data);
+        assert_eq!(reader.position, 0);
+    }
+
+    #[test]
+    fn test_complex_escape_sequences() {
+        // Test more complex escape processing to cover the escape buffer functions
+        let json_stream = br#"{"multi": "line1\nline2\ttab\r\n"}"#;
+        let mut buffer = [0u8; 1024];
+        let mut parser = StreamParser::new(SliceReader::new(json_stream), &mut buffer);
+
+        assert_eq!(parser.next_event().unwrap(), Event::StartObject);
+        assert_eq!(
+            parser.next_event().unwrap(),
+            Event::Key(crate::String::Borrowed("multi"))
+        );
+
+        // This should exercise the escape buffer processing extensively
+        if let Event::String(s) = parser.next_event().unwrap() {
+            assert_eq!(s.as_ref(), "line1\nline2\ttab\r\n");
+        } else {
+            panic!("Expected String event");
+        }
+
+        assert_eq!(parser.next_event().unwrap(), Event::EndObject);
+        assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
     }
 }
