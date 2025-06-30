@@ -4,7 +4,7 @@
 
 A minimal Rust JSON **pull-parser** for resource-constrained environments.
 
-`picojson` provides a low-level, `no_std` compatible pull-parser that operates without recursion or heap allocations. It is designed for scenarios where memory is limited and direct control over parsing is required, such as embedded systems or high-performance streaming applications.
+`picojson` provides a low-level, `no_std` compatible pull-parser that operates without recursion or heap allocations. It is designed for scenarios where memory is limited and direct control over parsing is required, such as embedded systems.
 
 ## Features
 
@@ -20,7 +20,7 @@ A minimal Rust JSON **pull-parser** for resource-constrained environments.
 
 The core of `picojson` is a minimal, non-recursive tokenizer that uses a bitstack (1 bit per nesting level) to track object/array depth. The parsers build upon this to provide a higher-level event stream.
 
-The design prioritizes a small resource footprint and predictable performance over raw execution speed.
+The design prioritizes a small resource footprint and predictable deterministic execution over speed.
 
 ### Value Handling: No copy and Copy-on-Write
 
