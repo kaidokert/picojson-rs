@@ -43,16 +43,16 @@ Use `SliceParser` when the entire JSON document is in memory. A scratch buffer i
 use picojson::{SliceParser, Event, String};
 
 let json = r#"{"message": "Hello\nWorld"}"#;
-let mut scratch = [0u8; 1024];
+let mut scratch = [0u8; 32];
 let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
 loop {
     match parser.next_event()? {
         Event::Key(key) => { // key is a picojson::String
-            println!("Key: {}", &*key);
+            println!("Key: {}", key);
         }
         Event::String(value) => {
-            println!("Value: {}", &*value);
+            println!("Value: {}", value);
         }
         Event::EndDocument => break,
         _ => {}
