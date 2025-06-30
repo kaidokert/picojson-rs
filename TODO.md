@@ -1,15 +1,16 @@
 ## TODO list
-- Constify what's possible
-- Remove `.unwrap()` calls
-- Remove unnecessary `'static` lifetimes
-- Dependency cleanup
-- Clippy cleanup
-- Unify code in PullParser and StreamParser
-- Address and remove `// TODO` comments
-- Clean up reference docs
-- Provide user guide docs
-- Direct defmt support
-- Stack size benchmarks
-- Code size benchmarks
-- Sax-style push parser
-- See if we can bring an Iterator impl back
+- [ ] Constify what's possible
+- [ ] Remove `.unwrap()` calls
+- [ ] Remove unnecessary `'static` lifetimes
+- [ ] Dependency cleanup
+- [ ] Clippy cleanup
+- [ ] Unify code in SliceParser and StreamParser
+- [ ] Address and remove `// TODO` comments
+- [ ] Clean up reference docs
+- [ ] Provide user guide docs
+- [ ] Direct defmt support
+- [ ] Stack size benchmarks
+- [ ] Code size benchmarks
+- [ ] Sax-style push parser
+- [x] See if we can bring an Iterator impl back
+    - Can't practically be done with borrowing return values

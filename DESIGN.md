@@ -5,7 +5,7 @@
 
 ## 1. Goals and Philosophy
 
-This document outlines the design for the `stax` crate, a high-level, allocation-free JSON pull-parser.
+This document outlines the design for the `picojson` crate, a high-level, allocation-free JSON pull-parser.
 
 The primary philosophy is to build upon the lean, compact, and low-level `ujson` tokenizer to provide an ergonomic and highly efficient API for consumers.
 
@@ -15,32 +15,9 @@ The core design goals are:
 - **Correctness**: The parser must correctly handle all aspects of the JSON spec, including complex string escapes.
 - **Footprint**: As minimal resource footprint as possible. This may come at the cost of execution speed.
 
-## 2. Core API Design: The `Iterator` Trait
+## 2. Core API Design: The `PullParser` Trait
 
-To provide the most idiomatic API, `PullParser` will implement the standard `Iterator` trait. This allows consumers to process JSON events using a simple `for` loop, integrating seamlessly with the rest of the Rust ecosystem.
-
-```rust
-// The user-facing API will be clean and simple:
-let mut scratch = [0; 1024];
-let parser = PullParser::with_buffer(json_input, &mut scratch);
-
-for event_result in parser {
-    let event = event_result?;
-    // ... process event
-}
-```
-
-The iterator's item will be a `Result` to allow for robust error handling.
-
-```rust
-impl<'a, 'b> Iterator for PullParser<'a, 'b> {
-    type Item = Result<Event<'a, 'b>, ParseError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // ... parsing logic ...
-    }
-}
-```
+Standard `Iterator` trait cannot be implemented because of borrowed return values. So the crate provides a `PullParser` trait instead.
 
 ## 3. Memory Management: External Scratch Buffer
 
@@ -51,7 +28,7 @@ This design was chosen over an internal, fixed-size buffer to avoid complex life
 The parser's constructor will have the following signature:
 
 ```rust
-impl<'a, 'b> PullParser<'a, 'b> {
+impl<'a, 'b> SliceParser<'a, 'b> {
     /// Creates a new parser for the given JSON input.
     ///
     /// - `input`: A string slice containing the JSON data to be parsed.
@@ -106,7 +83,7 @@ Here is a summary of the core public-facing data structures.
 
 ```rust
 // The main parser struct
-pub struct PullParser<'a, 'b> { /* ... private fields ... */ }
+pub struct SliceParser<'a, 'b> { /* ... private fields ... */ }
 
 // The custom "Cow-like" string type
 #[derive(Debug, PartialEq, Eq)]
@@ -157,7 +134,7 @@ make our own, and auto-implement it for arrays and slices or for anything that l
 
 ## 7. TODO: Working with returned values
 
-String values in stax now have Deref, AsRef and Format support, so using them in default examples
+String values in picojson now have Deref, AsRef and Format support, so using them in default examples
 with things like println! is convenient and easy.
 
 Same should be done with Number, but it's a little more tricky to design, given the configuration
@@ -165,6 +142,6 @@ variability
 
 ## 8. TODO: Add direct defmt support for user API
 
-For any user of the Stax parser with defmt:: enabled, all the formatting should do sensible
+For any user of the pull parser with defmt:: enabled, all the formatting should do sensible
 default things. Most tricky is number formatting. The objective is to have clean, ergonomic, readable
 examples

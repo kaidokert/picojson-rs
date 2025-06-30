@@ -1,11 +1,11 @@
 // Integration test for JsonNumber ergonomic APIs
-use picojson::{Event, PullParser};
+use picojson::{Event, PullParser, SliceParser};
 
 #[test]
 fn test_json_number_display_trait() {
     let json = r#"{"int": 42, "big": 12345678901234567890, "float": 3.25}"#;
     let mut scratch = [0u8; 128];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     // Skip to first number
     assert_eq!(parser.next_event().unwrap(), Event::StartObject);
@@ -63,7 +63,7 @@ fn test_json_number_display_trait() {
 fn test_json_number_deref_trait() {
     let json = r#"[123, -456]"#;
     let mut scratch = [0u8; 64];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event().unwrap(), Event::StartArray);
 
@@ -91,7 +91,7 @@ fn test_json_number_deref_trait() {
 fn test_json_number_as_ref_trait() {
     let json = r#"{"zero": 0, "negative": -999}"#;
     let mut scratch = [0u8; 64];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event().unwrap(), Event::StartObject);
     assert!(matches!(parser.next_event().unwrap(), Event::Key(_)));
@@ -130,7 +130,7 @@ fn test_json_number_as_ref_trait() {
 fn test_json_number_parse_method() {
     let json = r#"{"value": 42}"#;
     let mut scratch = [0u8; 64];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event().unwrap(), Event::StartObject);
     assert!(matches!(parser.next_event().unwrap(), Event::Key(_)));
@@ -157,7 +157,7 @@ fn test_json_number_parse_method() {
 fn test_json_number_type_checking_methods() {
     let json = r#"[42, 3.25]"#;
     let mut scratch = [0u8; 64];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event().unwrap(), Event::StartArray);
 
@@ -195,7 +195,7 @@ fn test_json_number_type_checking_methods() {
 fn test_json_number_as_f64_method() {
     let json = r#"[42, 3.25, 1e10]"#;
     let mut scratch = [0u8; 64];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event().unwrap(), Event::StartArray);
 
@@ -225,7 +225,7 @@ fn test_json_number_as_f64_method() {
 fn test_json_number_as_int_method() {
     let json = r#"[42, -123, 12345678901234567890]"#;
     let mut scratch = [0u8; 64];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event().unwrap(), Event::StartArray);
 

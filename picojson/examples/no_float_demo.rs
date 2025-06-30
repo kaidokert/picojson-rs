@@ -8,7 +8,7 @@
 // cargo run --example no_float_demo --features int32,float-error             # Error on floats (embedded-friendly)
 // cargo run --example no_float_demo --features float                         # Full float support
 
-use picojson::{Event, NumberResult, PullParser, String};
+use picojson::{Event, NumberResult, PullParser, SliceParser, String};
 
 fn main() {
     // Full JSON with scientific notation
@@ -61,7 +61,7 @@ fn main() {
         println!();
 
         let mut scratch = [0u8; 1024];
-        let mut parser = PullParser::with_buffer(json, &mut scratch);
+        let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
         parse_and_display(&mut parser);
 
@@ -73,7 +73,7 @@ fn main() {
     print_summary();
 }
 
-fn parse_and_display(parser: &mut PullParser) {
+fn parse_and_display(parser: &mut SliceParser) {
     loop {
         match parser.next_event() {
             Ok(Event::Number(num)) => {

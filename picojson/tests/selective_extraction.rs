@@ -1,5 +1,5 @@
 // Demo of selective extraction of data from a JSON document.
-use picojson::{Event, PullParser};
+use picojson::{Event, PullParser, SliceParser};
 
 // A more complex, "real-world" JSON document
 const REAL_WORLD_JSON: &str = r#"
@@ -61,7 +61,7 @@ enum ExtractionState {
 #[test]
 fn test_selective_extraction() {
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(REAL_WORLD_JSON, &mut scratch);
+    let mut parser = SliceParser::with_buffer(REAL_WORLD_JSON, &mut scratch);
 
     let mut extracted = ExtractedData::default();
     let mut state = ExtractionState::Idle;
@@ -69,10 +69,10 @@ fn test_selective_extraction() {
     let mut array_depth = 0;
 
     loop {
-        let event = match parser.next_event() {
-            Ok(Event::EndDocument) => break,
-            Ok(event) => event,
-            Err(e) => panic!("Parse error: {:?}", e),
+        let event = match parser.next() {
+            Some(Ok(event)) => event,
+            Some(Err(e)) => panic!("Parse error: {:?}", e),
+            None => break, // EndDocument reached
         };
 
         match event {

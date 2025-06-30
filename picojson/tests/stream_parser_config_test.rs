@@ -1,5 +1,5 @@
 // Integration test for StreamParser configurability
-use picojson::{ArrayBitStack, BitStackStruct, Event, Reader, StreamParser};
+use picojson::{ArrayBitStack, BitStackStruct, Event, PullParser, Reader, StreamParser};
 
 /// Test Reader that reads from a byte slice in small chunks
 struct ChunkReader<'a> {

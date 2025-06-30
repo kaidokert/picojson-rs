@@ -1,11 +1,11 @@
 // Additional error handling tests for the API
 
-use picojson::{Event, ParseError, PullParser, String};
+use picojson::{Event, ParseError, PullParser, SliceParser, String};
 
 #[test]
 fn test_malformed_json_missing_quotes() {
     let json = r#"{name: "value"}"#; // Missing quotes around key
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
 
@@ -21,7 +21,7 @@ fn test_malformed_json_missing_quotes() {
 #[test]
 fn test_malformed_json_unterminated_string() {
     let json = r#"{"unterminated": "missing quote}"#; // Missing closing quote
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(
@@ -45,7 +45,7 @@ fn test_malformed_json_unterminated_string() {
 fn test_malformed_json_invalid_escape() {
     let json = r#"{"bad_escape": "invalid\x"}"#; // Invalid escape sequence
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(
@@ -69,7 +69,7 @@ fn test_malformed_json_invalid_escape() {
 fn test_malformed_json_invalid_unicode_escape() {
     let json = r#"{"bad_unicode": "test\uXYZ"}"#; // Invalid Unicode hex
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(json, &mut scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut scratch);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(
@@ -93,7 +93,7 @@ fn test_malformed_json_invalid_unicode_escape() {
 fn test_buffer_overflow_error() {
     let json = r#"{"large_string": "This is a very long string with escapes\nand more escapes\tand even more content that might overflow a small buffer"}"#;
     let mut small_scratch = [0u8; 10]; // Deliberately small buffer
-    let mut parser = PullParser::with_buffer(json, &mut small_scratch);
+    let mut parser = SliceParser::with_buffer(json, &mut small_scratch);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(
@@ -113,7 +113,7 @@ fn test_buffer_overflow_error() {
 #[test]
 fn test_empty_input_error() {
     let json = "";
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     // Should handle empty input gracefully
     match parser.next_event() {
@@ -133,7 +133,7 @@ fn test_empty_input_error() {
 #[test]
 fn test_incomplete_json_error() {
     let json = r#"{"incomplete""#; // Incomplete JSON
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
 
@@ -164,7 +164,7 @@ fn test_incomplete_json_error() {
 #[test]
 fn test_malformed_json_unexpected_comma() {
     let json = r#"{"key": "value",}"#; // Trailing comma
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
@@ -191,7 +191,7 @@ fn test_malformed_json_unexpected_comma() {
 #[test]
 fn test_malformed_json_invalid_number() {
     let json = r#"{"number": 123.456.789}"#; // Invalid number format
-    let mut parser = PullParser::new(json);
+    let mut parser = SliceParser::new(json);
 
     assert_eq!(parser.next_event(), Ok(Event::StartObject));
     assert_eq!(

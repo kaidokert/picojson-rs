@@ -1,14 +1,14 @@
 // Comprehensive tests for configurable number handling
 // These tests demonstrate the various compilation configurations
 
-use picojson::{Event, NumberResult, PullParser};
+use picojson::{Event, NumberResult, PullParser, SliceParser};
 
 #[test]
 #[cfg(feature = "int32")]
 fn test_int32_overflow() {
     let input = r#"{"value": 9999999999}"#; // Larger than i32::MAX (2,147,483,647)
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
     assert!(matches!(parser.next_event(), Ok(Event::Key(_))));
@@ -28,7 +28,7 @@ fn test_int32_overflow() {
 fn test_int64_handles_large_numbers() {
     let input = r#"{"value": 9999999999}"#; // Within i64 range
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
     assert!(matches!(parser.next_event(), Ok(Event::Key(_))));
@@ -48,7 +48,7 @@ fn test_int64_handles_large_numbers() {
 fn test_float_error_behavior() {
     let input = r#"{"value": 3.14}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     // Should parse normally until we hit the float
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
@@ -68,7 +68,7 @@ fn test_float_error_behavior() {
 fn test_float_truncate_to_i32() {
     let input = r#"[1.7, 2.9, 3.1]"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartArray)));
 
@@ -114,7 +114,7 @@ fn test_float_truncate_to_i32() {
 fn test_float_truncate_to_i64() {
     let input = r#"[1.7, 2.9, 3.1]"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartArray)));
 
@@ -133,7 +133,7 @@ fn test_float_truncate_to_i64() {
 fn test_float_truncate_scientific_notation() {
     let input = r#"{"value": 1.5e2}"#; // Scientific notation should error in truncate mode
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
     assert!(matches!(parser.next_event(), Ok(Event::Key(_))));
@@ -163,7 +163,7 @@ fn test_float_truncate_scientific_notation() {
 fn test_default_float_disabled_behavior() {
     let input = r#"{"value": 3.14}"#;
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
     assert!(matches!(parser.next_event(), Ok(Event::Key(_))));
@@ -188,7 +188,7 @@ fn test_default_float_disabled_behavior() {
 fn test_mixed_numbers_with_i32() {
     let input = r#"{"small": 42, "large": 999999999999}"#; // large > i32::MAX
     let mut scratch = [0u8; 1024];
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));
     assert!(matches!(parser.next_event(), Ok(Event::Key(_))));
@@ -230,7 +230,7 @@ fn test_embedded_friendly_config() {
 
     let input = r#"{"sensor": 42, "status": 1}"#;
     let mut scratch = [0u8; 256]; // Small buffer for embedded
-    let mut parser = PullParser::with_buffer(input, &mut scratch);
+    let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     // Should parse integers normally
     assert!(matches!(parser.next_event(), Ok(Event::StartObject)));

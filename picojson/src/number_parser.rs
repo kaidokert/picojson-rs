@@ -22,7 +22,7 @@ pub trait NumberExtractor {
     fn is_empty(&self) -> bool;
 }
 
-/// Unified number parsing logic shared between PullParser and StreamParser.
+/// Unified number parsing logic shared between SliceParser and StreamParser.
 ///
 /// This function encapsulates the common pattern:
 /// 1. Extract number slice from buffer

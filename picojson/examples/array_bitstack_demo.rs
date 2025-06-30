@@ -1,6 +1,6 @@
 // Example demonstrating ArrayBitStack for large nesting depths
 
-use picojson::{ArrayBitStack, Event, ParseError, PullParser};
+use picojson::{ArrayBitStack, Event, ParseError, PullParser, SliceParser};
 
 fn main() -> Result<(), ParseError> {
     println!("=== ArrayBitStack Demo ===\n");
@@ -16,7 +16,7 @@ fn main() -> Result<(), ParseError> {
 
     let mut scratch = [0u8; 2048];
     let mut parser =
-        PullParser::<ArrayBitStack<3, u32, u16>>::with_config_and_buffer(&deep_json, &mut scratch);
+        SliceParser::<ArrayBitStack<3, u32, u16>>::with_config_and_buffer(&deep_json, &mut scratch);
     let mut depth = 0;
     let mut max_depth = 0;
 
@@ -110,8 +110,10 @@ fn main() -> Result<(), ParseError> {
     println!("   JSON structure: Objects with arrays containing objects with data");
 
     let mut scratch = [0u8; 1024];
-    let mut parser =
-        PullParser::<ArrayBitStack<8, u8, u8>>::with_config_and_buffer(&complex_json, &mut scratch);
+    let mut parser = SliceParser::<ArrayBitStack<8, u8, u8>>::with_config_and_buffer(
+        &complex_json,
+        &mut scratch,
+    );
     let mut depth = 0;
     let mut max_depth = 0;
 

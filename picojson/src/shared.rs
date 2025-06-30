@@ -99,6 +99,24 @@ impl Default for ParserState {
     }
 }
 
+/// Trait for parsers that can be used in a pull-based manner.
+///
+/// This trait is implemented by both `PullParser` and `StreamParser`.
+pub trait PullParser {
+    /// Iterator-like method that returns None when parsing is complete.
+    /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
+    /// and Some(Err(error)) for parsing errors.
+    fn next(&mut self) -> Option<Result<Event, ParseError>> {
+        match self.next_event() {
+            Ok(Event::EndDocument) => None,
+            other => Some(other),
+        }
+    }
+    /// Returns the next JSON event or an error if parsing fails.
+    /// Parsing continues until `EndDocument` is returned or an error occurs.
+    fn next_event(&mut self) -> Result<Event, ParseError>;
+}
+
 /// Utility for calculating common content range boundaries in JSON parsing.
 /// Provides consistent position arithmetic for string/number content extraction.
 pub(crate) struct ContentRange;
