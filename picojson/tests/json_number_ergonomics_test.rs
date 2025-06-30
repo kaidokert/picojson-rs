@@ -34,14 +34,25 @@ fn test_json_number_display_trait() {
     assert!(matches!(parser.next_event().unwrap(), Event::Key(_)));
 
     // Test Display trait on float (configuration dependent)
-    if let Event::Number(num) = parser.next_event().unwrap() {
-        let displayed = format!("{}", num);
-        #[cfg(feature = "float")]
-        assert_eq!(displayed, "3.25");
-        #[cfg(not(feature = "float"))]
-        assert_eq!(displayed, "3.25"); // Raw string when float disabled
-    } else {
-        panic!("Expected Number event");
+    #[cfg(feature = "float-error")]
+    {
+        // float-error should return an error when encountering floats
+        let result = parser.next_event();
+        assert!(result.is_err(), "Expected error for float with float-error configuration");
+    }
+    #[cfg(not(feature = "float-error"))]
+    {
+        if let Event::Number(num) = parser.next_event().unwrap() {
+            let displayed = format!("{}", num);
+            #[cfg(feature = "float")]
+            assert_eq!(displayed, "3.25");
+            #[cfg(all(not(feature = "float"), feature = "float-truncate"))]
+            assert_eq!(displayed, "3"); // Float truncated to integer
+            #[cfg(all(not(feature = "float"), not(feature = "float-truncate")))]
+            assert_eq!(displayed, "3.25"); // Raw string when float disabled
+        } else {
+            panic!("Expected Number event");
+        }
     }
 }
 
@@ -156,11 +167,20 @@ fn test_json_number_type_checking_methods() {
     }
 
     // Test float type checking (configuration dependent)
-    if let Event::Number(num) = parser.next_event().unwrap() {
-        assert!(!num.is_integer());
-        assert!(num.is_float());
-    } else {
-        panic!("Expected Number event");
+    #[cfg(feature = "float-error")]
+    {
+        // float-error should return an error when encountering floats
+        let result = parser.next_event();
+        assert!(result.is_err(), "Expected error for float with float-error configuration");
+    }
+    #[cfg(not(feature = "float-error"))]
+    {
+        if let Event::Number(num) = parser.next_event().unwrap() {
+            assert!(!num.is_integer());
+            assert!(num.is_float());
+        } else {
+            panic!("Expected Number event");
+        }
     }
 }
 
