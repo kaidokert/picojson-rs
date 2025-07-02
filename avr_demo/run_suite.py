@@ -3,10 +3,23 @@ import re
 import argparse
 import json
 
+def get_depths_from_build_rs():
+    """Parses build.rs to extract the DEPTHS constant."""
+    try:
+        with open("build.rs", "r") as f:
+            content = f.read()
+            match = re.search(r"const DEPTHS: &\[usize\] = &\[(.*?)\];", content, re.DOTALL)
+            if match:
+                depths_str = match.group(1).replace('\n', '').replace(',', ' ').split()
+                return [int(d) for d in depths_str]
+    except (IOError, ValueError) as e:
+        print(f"Could not read or parse DEPTHS from build.rs: {e}", file=sys.stderr)
+        return [] # Return a default or empty list
+
 # --- Test Configuration ---
 
 # The different nesting depths to test, matching the Cargo features.
-DEPTHS = [7, 9, 31, 63, 127, 255, 511, 513, 1023, 1025]
+DEPTHS = get_depths_from_build_rs()
 
 # The test configurations to run.
 # (Test Name, Cargo Example Name, Extra Features)
@@ -27,13 +40,16 @@ def run_stack_analysis():
 
             # Construct the cargo command
             features = [f"depth-{depth}"] + extra_features
-            feature_flags = " ".join([f"--features {f}" for f in features])
-            command = f"cargo run --release --no-default-features {feature_flags} --example {example}"
+            command = ["cargo", "run", "--release", "--no-default-features"]
+            if features:
+                command.append("--features")
+                command.append(",".join(features))
+            command.extend(["--example", example])
 
             # Execute the command
             try:
-                print(f"Running command: {command}")
-                output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+                print(f"Running command: {' '.join(command)}")
+                output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
 
                 # Parse the output
                 if "JSON parsing failed!" in output:
@@ -47,6 +63,9 @@ def run_stack_analysis():
                 else:
                     result_str = "Stack Overflow"
 
+            except UnicodeDecodeError:
+                # Handle case where output contains binary garbage (stack overflow)
+                result_str = "Stack Overflow (Binary Output)"
             except subprocess.CalledProcessError as e:
                 result_str = f"Build Failed: {e.output}"
 
@@ -85,13 +104,15 @@ def run_bloat_analysis():
         print(f"Running bloat for {name}...")
 
         # Construct the cargo bloat command
-        features = extra_features
-        feature_flags = " ".join([f"--features {f}" for f in features])
-        command = f"cargo bloat --release {feature_flags} --example {example} --message-format=json"
+        command = ["cargo", "bloat", "--release", "--message-format=json"]
+        if extra_features:
+            command.append("--features")
+            command.append(",".join(extra_features))
+        command.extend(["--example", example])
 
         try:
-            print(f"Running command: {command}")
-            output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+            print(f"Running command: {' '.join(command)}")
+            output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
             # Get the last line of output, which should be the JSON
             json_output = output.strip().split('\n')[-1]
             data = json.loads(json_output)
