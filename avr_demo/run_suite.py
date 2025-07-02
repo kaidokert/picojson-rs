@@ -2,6 +2,7 @@ import subprocess
 import re
 import argparse
 import json
+import sys
 
 def get_depths_from_build_rs():
     """Parses build.rs to extract the DEPTHS constant."""
@@ -12,9 +13,12 @@ def get_depths_from_build_rs():
             if match:
                 depths_str = match.group(1).replace('\n', '').replace(',', ' ').split()
                 return [int(d) for d in depths_str]
+            else:
+                # No match found - return empty list for consistency
+                return []
     except (IOError, ValueError) as e:
         print(f"Could not read or parse DEPTHS from build.rs: {e}", file=sys.stderr)
-        return [] # Return a default or empty list
+        return []  # Return a default or empty list
 
 # --- Test Configuration ---
 
