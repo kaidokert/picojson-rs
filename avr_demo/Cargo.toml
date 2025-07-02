@@ -1,0 +1,55 @@
+[package]
+name = "avr_demo"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+autotests = false
+autobenches = false
+
+[dependencies]
+picojson = { path = "../picojson", default-features = false, features = ["int32"]}
+panic-halt = "1.0"
+ufmt = "0.2"
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde-json-core = { version = "0.6", default-features = false }
+
+[dependencies.arduino-hal]
+git = "https://github.com/rahix/avr-hal"
+rev = "ravedude-0.2.0"
+features = ["arduino-uno"]
+
+[profile.dev]
+panic = "abort"
+lto = true
+opt-level = "s"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+debug = true
+lto = true
+opt-level = "s"
+
+[features]
+default = ["depth-7", "pico-tiny"]
+
+depth-7 = []
+depth-9 = []
+depth-31 = []
+depth-33 = []
+depth-63 = []
+depth-65 = []
+depth-127 = []
+depth-129 = []
+depth-255 = []
+depth-257 = []
+depth-511 = []
+depth-513 = []
+depth-1023 = []
+depth-1025 = []
+
+debug-trace = []
+
+pico-small = []
+pico-huge = []
+pico-tiny = []

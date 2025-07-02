@@ -1,0 +1,10 @@
+[build]
+target = "avr-none"
+rustflags = ["-C", "target-cpu=atmega2560"]
+
+[unstable]
+build-std = ["core"]
+
+[target.avr-none]
+# Run simavr through wrapper so WSL can be used on Windows
+runner = "python simavr_wrapper.py -t 3 -m atmega2560 -f 16000000"

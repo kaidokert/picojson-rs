@@ -1,3 +1,5 @@
 [workspace]
 resolver = "2"
 members = ["picojson", "demos"]
+
+exclude = ["avr_demo"]
