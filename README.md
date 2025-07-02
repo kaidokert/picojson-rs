@@ -81,7 +81,7 @@ let mut parser = StreamParser::new(MyReader::new(json_stream), &mut buffer);
 // ... event loop ...
 ```
 
-See the [API docs](https://docs.rs/picojson/) and [examples](https://github.com/kaidokert/picojson-rs/tree/main/picojson/examples) for more details.
+See the [API docs](https://docs.rs/picojson/) and [examples](https://github.com/kaidokert/picojson-rs/tree/main/picojson/examples) for more details. Some test results can be found on the [project site](https://kaidokert.github.io/picojson-rs/).
 
 ## Configuration
 
