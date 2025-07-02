@@ -255,9 +255,10 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
 
     fn check_trailing_comma(&mut self, data: u8) -> Result<(), Error> {
         // Check for trailing comma if we're at a closing bracket/brace
-        if (data == b']' || data == b'}') && self.context.after_comma.is_some() {
-            let (c, pos) = self.context.after_comma.unwrap();
-            return Error::new(ErrKind::TrailingComma, c, pos);
+        if let Some((c, pos)) = self.context.after_comma {
+            if data == b']' || data == b'}' {
+                return Error::new(ErrKind::TrailingComma, c, pos);
+            }
         }
 
         // Only reset after_comma for non-whitespace characters
@@ -851,10 +852,10 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'}',
                 ) => {
-                    if self.context.after_comma.is_some() {
+                    if let Some((comma_char, _)) = self.context.after_comma {
                         return Error::new(
                             ErrKind::TrailingComma,
-                            self.context.after_comma.unwrap().0,
+                            comma_char,
                             pos,
                         );
                     }
@@ -875,8 +876,11 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Object::CommaOrEnd,
                     },
                     b',',
-                ) => State::Object {
-                    expect: Object::Key,
+                ) => {
+                    self.context.after_comma = Some((data[pos], pos));
+                    State::Object {
+                        expect: Object::Key,
+                    }
                 },
                 (
                     State::Object {
@@ -1866,6 +1870,51 @@ mod conformance {
                 (Event::End(EventToken::Key), 4),
                 (Event::Begin(EventToken::Number), 6),
                 (Event::End(EventToken::Number), 7)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conformance_trailing_object_comma_after_string() {
+        check!(
+            b"{\"key\":\"value\",}",
+            Error::new(ErrKind::TrailingComma, b',', 15),
+            &[
+                (Event::ObjectStart, 0),
+                (Event::Begin(EventToken::Key), 1),
+                (Event::End(EventToken::Key), 5),
+                (Event::Begin(EventToken::String), 7),
+                (Event::End(EventToken::String), 13)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conformance_trailing_object_comma_after_bool() {
+        check!(
+            b"{\"flag\":true,}",
+            Error::new(ErrKind::TrailingComma, b',', 13),
+            &[
+                (Event::ObjectStart, 0),
+                (Event::Begin(EventToken::Key), 1),
+                (Event::End(EventToken::Key), 6),
+                (Event::Begin(EventToken::True), 8),
+                (Event::End(EventToken::True), 11)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_conformance_trailing_object_comma_after_null() {
+        check!(
+            b"{\"value\":null,}",
+            Error::new(ErrKind::TrailingComma, b',', 14),
+            &[
+                (Event::ObjectStart, 0),
+                (Event::Begin(EventToken::Key), 1),
+                (Event::End(EventToken::Key), 7),
+                (Event::Begin(EventToken::Null), 9),
+                (Event::End(EventToken::Null), 12)
             ]
         );
     }

@@ -27,13 +27,16 @@ impl InputBuffer for SliceInputBuffer<'_> {
         self.pos > self.data.len()
     }
     fn consume_byte(&mut self) -> Result<u8, Error> {
-        if self.pos >= self.data.len() {
-            self.pos += 1; // Still increment position like original logic
-            return Err(Error::ReachedEnd);
+        match self.data.get(self.pos) {
+            Some(&byte) => {
+                self.pos += 1;
+                Ok(byte)
+            }
+            None => {
+                self.pos += 1; // Still increment position like original logic
+                Err(Error::ReachedEnd)
+            }
         }
-        let byte = self.data[self.pos];
-        self.pos += 1;
-        Ok(byte)
     }
 }
 impl<'a> SliceInputBuffer<'a> {
@@ -47,10 +50,7 @@ impl<'a> SliceInputBuffer<'a> {
 
     /// Gets a slice of the data from start to end positions, with bounds checking.
     pub fn slice(&self, start: usize, end: usize) -> Result<&'a [u8], Error> {
-        if start > end || end > self.data.len() {
-            return Err(Error::InvalidSliceBounds);
-        }
-        Ok(&self.data[start..end])
+        self.data.get(start..end).ok_or(Error::InvalidSliceBounds)
     }
 }
 
