@@ -160,11 +160,77 @@ pub(super) fn is_integer(s: &str) -> bool {
     !s.as_bytes().iter().any(|&b| IS_FLOAT_CHAR[b as usize])
 }
 
-/// Parses an integer string into NumberResult using configured integer type.
+// Division-free digit conversion table for embedded targets
+const DIGIT_VALUES: [u8; 256] = {
+    let mut table = [255; 256]; // 255 = invalid digit marker
+    table[b'0' as usize] = 0;
+    table[b'1' as usize] = 1;
+    table[b'2' as usize] = 2;
+    table[b'3' as usize] = 3;
+    table[b'4' as usize] = 4;
+    table[b'5' as usize] = 5;
+    table[b'6' as usize] = 6;
+    table[b'7' as usize] = 7;
+    table[b'8' as usize] = 8;
+    table[b'9' as usize] = 9;
+    table
+};
+
+/// Division-free integer parsing for embedded targets (avoids expensive compiler intrinsics)
+/// Similar to serde-json-core's approach
 pub(super) fn parse_integer(s: &str) -> NumberResult {
-    match ConfiguredInt::from_str(s) {
-        Ok(val) => NumberResult::Integer(val),
-        Err(_) => NumberResult::IntegerOverflow,
+    if s.is_empty() {
+        return NumberResult::IntegerOverflow;
+    }
+
+    let bytes = s.as_bytes();
+    let mut start_idx = 0;
+    let mut negative = false;
+
+    // Handle sign
+    if bytes[0] == b'-' {
+        negative = true;
+        start_idx = 1;
+        if bytes.len() == 1 {
+            return NumberResult::IntegerOverflow;
+        }
+    } else if bytes[0] == b'+' {
+        start_idx = 1;
+        if bytes.len() == 1 {
+            return NumberResult::IntegerOverflow;
+        }
+    }
+
+    let mut result: ConfiguredInt = 0;
+    
+    // Parse digits using addition/multiplication (no division)
+    for &byte in &bytes[start_idx..] {
+        let digit_value = DIGIT_VALUES[byte as usize];
+        if digit_value == 255 {
+            return NumberResult::IntegerOverflow; // Invalid digit
+        }
+
+        // Check for overflow before multiplication
+        if let Some(new_result) = result.checked_mul(10) {
+            if let Some(final_result) = new_result.checked_add(digit_value as ConfiguredInt) {
+                result = final_result;
+            } else {
+                return NumberResult::IntegerOverflow;
+            }
+        } else {
+            return NumberResult::IntegerOverflow;
+        }
+    }
+
+    // Apply sign
+    if negative {
+        if let Some(neg_result) = result.checked_neg() {
+            NumberResult::Integer(neg_result)
+        } else {
+            NumberResult::IntegerOverflow
+        }
+    } else {
+        NumberResult::Integer(result)
     }
 }
 
