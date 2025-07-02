@@ -50,6 +50,8 @@ depth-1025 = []
 
 debug-trace = []
 
+no-fmt = []  # Disable ufmt output for binary size comparison
+
 pico-small = []
 pico-huge = []
 pico-tiny = []

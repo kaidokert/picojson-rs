@@ -32,15 +32,22 @@ fn main() -> ! {
 
     match result {
         Ok((doc, _)) => {
-            uwriteln!(&mut serial, "Parsed doc id: {}", doc.id).ok();
-            uwriteln!(&mut serial, "Parsed test_depth: {}", doc.test_depth).ok();
+            #[cfg(not(feature = "no-fmt"))]
+            {
+                uwriteln!(&mut serial, "Parsed doc id: {}", doc.id).ok();
+                uwriteln!(&mut serial, "Parsed test_depth: {}", doc.test_depth).ok();
+            }
         }
         Err(_) => {
+            #[cfg(not(feature = "no-fmt"))]
             uwriteln!(&mut serial, "JSON parsing failed!").ok();
         }
     }
-    uwriteln!(&mut serial, "Max stack usage: {} bytes", stack_used).ok();
-    uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
+    #[cfg(not(feature = "no-fmt"))]
+    {
+        uwriteln!(&mut serial, "Max stack usage: {} bytes", stack_used).ok();
+        uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
+    }
 
     // Exit the simulator
     unsafe { core::arch::asm!("sleep") };
