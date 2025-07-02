@@ -146,9 +146,18 @@ impl core::fmt::Display for JsonNumber<'_, '_> {
     }
 }
 
+// Const lookup table for float indicators - replaces runtime string searching
+const IS_FLOAT_CHAR: [bool; 256] = {
+    let mut table = [false; 256];
+    table[b'.' as usize] = true;
+    table[b'e' as usize] = true;
+    table[b'E' as usize] = true;
+    table
+};
+
 /// Detects if a number string represents an integer (no decimal point or exponent).
 pub(super) fn is_integer(s: &str) -> bool {
-    !s.contains('.') && !s.contains('e') && !s.contains('E')
+    !s.as_bytes().iter().any(|&b| IS_FLOAT_CHAR[b as usize])
 }
 
 /// Parses an integer string into NumberResult using configured integer type.
@@ -185,7 +194,7 @@ pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
     {
         // Scientific notation (1e3, 2.5e-1) would require float math to evaluate properly.
         // For embedded targets avoiding float math, we error on scientific notation.
-        if s.contains(['e', 'E']) {
+        if s.as_bytes().iter().any(|&b| b == b'e' || b == b'E') {
             return Err(ParseError::InvalidNumber);
         }
 

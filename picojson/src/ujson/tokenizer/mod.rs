@@ -77,7 +77,7 @@ enum State {
     Idle,
     String { state: String, key: bool },
     Number { state: Num },
-    Token { token: Token },
+    Token { progress: TokenProgress },
     Object { expect: Object },
     Array { expect: Array },
     Finished,
@@ -93,7 +93,7 @@ enum String {
     Unicode3,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Num {
     Sign,
     LeadingZero,
@@ -105,31 +105,17 @@ enum Num {
     AfterExponent,
 }
 
-#[derive(Debug, Clone)]
-enum True {
-    R,
-    U,
-    E,
-}
-#[derive(Debug, Clone)]
-enum False {
-    A,
-    L,
-    S,
-    E,
-}
-#[derive(Debug, Clone)]
-enum Null {
-    U,
-    L1,
-    L2,
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TokenType {
+    True,
+    False,
+    Null,
 }
 
 #[derive(Debug, Clone)]
-enum Token {
-    True(True),
-    False(False),
-    Null(Null),
+struct TokenProgress {
+    token_type: TokenType,
+    position: usize, // Current position in token string
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,7 +132,7 @@ enum Array {
     CommaOrEnd,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EventToken {
     True,
     False,
@@ -245,6 +231,207 @@ impl Default for Tokenizer {
 }
 
 impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
+    // Const lookup table for escape sequences - replaces runtime match
+    const ESCAPE_TOKENS: [Option<EventToken>; 256] = {
+        let mut table = [None; 256];
+        table[b'"' as usize] = Some(EventToken::EscapeQuote);
+        table[b'\\' as usize] = Some(EventToken::EscapeBackslash);
+        table[b'/' as usize] = Some(EventToken::EscapeSlash);
+        table[b'b' as usize] = Some(EventToken::EscapeBackspace);
+        table[b'f' as usize] = Some(EventToken::EscapeFormFeed);
+        table[b'n' as usize] = Some(EventToken::EscapeNewline);
+        table[b'r' as usize] = Some(EventToken::EscapeCarriageReturn);
+        table[b't' as usize] = Some(EventToken::EscapeTab);
+        table
+    };
+
+    // Character classification tables for faster parsing
+    const IS_DIGIT: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = b'0';
+        while i <= b'9' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        table
+    };
+
+    const IS_WHITESPACE: [bool; 256] = {
+        let mut table = [false; 256];
+        table[b' ' as usize] = true;
+        table[b'\t' as usize] = true;
+        table[b'\n' as usize] = true;
+        table[b'\r' as usize] = true;
+        table
+    };
+
+    const IS_HEX_DIGIT: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = b'0';
+        while i <= b'9' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        let mut i = b'a';
+        while i <= b'f' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        let mut i = b'A';
+        while i <= b'F' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        table
+    };
+
+    // Token strings for const validation
+    const TOKEN_STRINGS: [&'static [u8]; 3] = [
+        b"true",  // TokenType::True
+        b"false", // TokenType::False  
+        b"null",  // TokenType::Null
+    ];
+
+    const TOKEN_EVENTS: [EventToken; 3] = [
+        EventToken::True,
+        EventToken::False,
+        EventToken::Null,
+    ];
+
+    // Number state transition table: [current_state][character] -> next_state
+    const NUM_TRANSITIONS: [[Option<Num>; 256]; 8] = {
+        let mut table = [[None; 256]; 8];
+        
+        // Sign state (index 0)
+        table[0][b'0' as usize] = Some(Num::LeadingZero);
+        let mut i = b'1';
+        while i <= b'9' {
+            table[0][i as usize] = Some(Num::BeforeDecimalPoint);
+            i += 1;
+        }
+        
+        // LeadingZero state (index 1)
+        table[1][b'.' as usize] = Some(Num::Decimal);
+        table[1][b'e' as usize] = Some(Num::Exponent);
+        table[1][b'E' as usize] = Some(Num::Exponent);
+        
+        // BeforeDecimalPoint state (index 2)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[2][i as usize] = Some(Num::BeforeDecimalPoint);
+            i += 1;
+        }
+        table[2][b'.' as usize] = Some(Num::Decimal);
+        table[2][b'e' as usize] = Some(Num::Exponent);
+        table[2][b'E' as usize] = Some(Num::Exponent);
+        
+        // Decimal state (index 3)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[3][i as usize] = Some(Num::AfterDecimalPoint);
+            i += 1;
+        }
+        
+        // AfterDecimalPoint state (index 4)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[4][i as usize] = Some(Num::AfterDecimalPoint);
+            i += 1;
+        }
+        table[4][b'e' as usize] = Some(Num::Exponent);
+        table[4][b'E' as usize] = Some(Num::Exponent);
+        
+        // Exponent state (index 5)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[5][i as usize] = Some(Num::AfterExponent);
+            i += 1;
+        }
+        table[5][b'+' as usize] = Some(Num::ExponentSign);
+        table[5][b'-' as usize] = Some(Num::ExponentSign);
+        
+        // ExponentSign state (index 6)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[6][i as usize] = Some(Num::AfterExponent);
+            i += 1;
+        }
+        
+        // AfterExponent state (index 7)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[7][i as usize] = Some(Num::AfterExponent);
+            i += 1;
+        }
+        
+        table
+    };
+
+    // Convert Num enum to table index for NUM_TRANSITIONS
+    const fn num_to_index(num: &Num) -> usize {
+        match num {
+            Num::Sign => 0,
+            Num::LeadingZero => 1,
+            Num::BeforeDecimalPoint => 2,
+            Num::Decimal => 3,
+            Num::AfterDecimalPoint => 4,
+            Num::Exponent => 5,
+            Num::ExponentSign => 6,
+            Num::AfterExponent => 7,
+        }
+    }
+
+    // Process number state transition using const table
+    fn process_number_transition(&self, current_num: &Num, ch: u8) -> Option<Num> {
+        let index = Self::num_to_index(current_num);
+        Self::NUM_TRANSITIONS[index][ch as usize]
+    }
+
+    // Check if current number state can be terminated (not in the middle of parsing)
+    fn is_valid_number_terminal_state(&self, num_state: &Num) -> bool {
+        match num_state {
+            // These states represent valid complete numbers
+            Num::LeadingZero | Num::BeforeDecimalPoint | Num::AfterDecimalPoint | Num::AfterExponent => true,
+            // These states are incomplete and cannot be terminated
+            Num::Sign | Num::Decimal | Num::Exponent | Num::ExponentSign => false,
+        }
+    }
+
+    // Convert TokenType to array index
+    const fn token_type_to_index(token_type: TokenType) -> usize {
+        match token_type {
+            TokenType::True => 0,
+            TokenType::False => 1,
+            TokenType::Null => 2,
+        }
+    }
+
+    // Process token character using const lookup
+    fn process_token_char(&self, progress: &TokenProgress, ch: u8) -> Result<Option<TokenProgress>, EventToken> {
+        let index = Self::token_type_to_index(progress.token_type);
+        let token_string = Self::TOKEN_STRINGS[index];
+        
+        // Check if character matches expected position
+        if progress.position < token_string.len() && ch == token_string[progress.position] {
+            let new_position = progress.position + 1;
+            
+            // Check if token is complete
+            if new_position == token_string.len() {
+                // Token complete - return the event token
+                Err(Self::TOKEN_EVENTS[index])
+            } else {
+                // Continue parsing
+                Ok(Some(TokenProgress {
+                    token_type: progress.token_type,
+                    position: new_position,
+                }))
+            }
+        } else {
+            // Invalid character for this token
+            Ok(None)
+        }
+    }
+
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,
@@ -369,27 +556,28 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
         pos: usize,
         callback: &mut dyn FnMut(Event, usize),
     ) -> Result<State, Error> {
-        match token {
+        let token_type = match token {
             b't' => {
                 callback(Event::Begin(EventToken::True), pos);
-                Ok(State::Token {
-                    token: Token::True(True::R),
-                })
+                TokenType::True
             }
             b'f' => {
                 callback(Event::Begin(EventToken::False), pos);
-                Ok(State::Token {
-                    token: Token::False(False::A),
-                })
+                TokenType::False
             }
             b'n' => {
                 callback(Event::Begin(EventToken::Null), pos);
-                Ok(State::Token {
-                    token: Token::Null(Null::U),
-                })
+                TokenType::Null
             }
-            _ => Error::new(ErrKind::InvalidToken, token, pos),
-        }
+            _ => return Error::new(ErrKind::InvalidToken, token, pos),
+        };
+        
+        Ok(State::Token {
+            progress: TokenProgress {
+                token_type,
+                position: 1, // Already consumed first character
+            },
+        })
     }
 
     fn parse_chunk_inner<F>(&mut self, data: &[u8], mut callback: &mut F) -> Result<usize, Error>
@@ -407,158 +595,43 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
             }
 
             self.state = match (&self.state, data[pos]) {
-                (State::Number { state: Num::Sign }, b'0') => State::Number {
-                    state: Num::LeadingZero,
-                },
-                (State::Number { state: Num::Sign }, b'1'..=b'9') => State::Number {
-                    state: Num::BeforeDecimalPoint,
-                },
-                (State::Number { state: Num::Sign }, _) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
-                }
-                (
-                    State::Number {
-                        state: Num::LeadingZero,
-                    },
-                    b'e' | b'E',
-                ) => State::Number {
-                    state: Num::Exponent,
-                },
-                (
-                    State::Number {
-                        state: Num::LeadingZero,
-                    },
-                    b'.',
-                ) => State::Number {
-                    state: Num::Decimal,
-                },
-                (
-                    State::Number {
-                        state: Num::BeforeDecimalPoint,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::BeforeDecimalPoint,
-                },
-                (
-                    State::Number {
-                        state: Num::BeforeDecimalPoint,
-                    },
-                    b'.',
-                ) => State::Number {
-                    state: Num::Decimal,
-                },
-                (
-                    State::Number {
-                        state: Num::BeforeDecimalPoint,
-                    },
-                    b'e' | b'E',
-                ) => State::Number {
-                    state: Num::Exponent,
-                },
-                (
-                    State::Number {
-                        state: Num::Decimal,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterDecimalPoint,
-                },
-                (
-                    State::Number {
-                        state: Num::Decimal,
-                    },
-                    _,
-                ) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
-                }
-                (
-                    State::Number {
-                        state: Num::AfterDecimalPoint,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterDecimalPoint,
-                },
-                (
-                    State::Number {
-                        state: Num::AfterDecimalPoint,
-                    },
-                    b'e' | b'E',
-                ) => State::Number {
-                    state: Num::Exponent,
-                },
-                (
-                    State::Number {
-                        state: Num::Exponent,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterExponent,
-                },
-                (
-                    State::Number {
-                        state: Num::Exponent,
-                    },
-                    b'+' | b'-',
-                ) => State::Number {
-                    state: Num::ExponentSign,
-                },
-                (
-                    State::Number {
-                        state: Num::Exponent,
-                    },
-                    _,
-                ) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
-                }
-                (
-                    State::Number {
-                        state: Num::ExponentSign,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterExponent,
-                },
-                (
-                    State::Number {
-                        state: Num::ExponentSign,
-                    },
-                    _,
-                ) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
-                }
-                (
-                    State::Number {
-                        state: Num::AfterExponent,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterExponent,
-                },
-                (State::Number { state: _ }, b',') => {
-                    callback(Event::End(EventToken::Number), pos);
-                    self.context.after_comma = Some((data[pos], pos));
-                    self.saw_a_comma_now_what()
-                }
-                (State::Number { state: _ }, b' ' | b'\t' | b'\n' | b'\r') => {
-                    callback(Event::End(EventToken::Number), pos);
-                    self.maybe_exit_level()
-                }
-                (State::Number { state: _ }, b']') => {
-                    callback(Event::End(EventToken::NumberAndArray), pos);
-                    callback(Event::ArrayEnd, pos);
-                    self.context.exit_array(pos)?;
-                    self.maybe_exit_level()
-                }
-                (State::Number { state: _ }, b'}') => {
-                    callback(Event::End(EventToken::NumberAndObject), pos);
-                    callback(Event::ObjectEnd, pos);
-                    self.context.exit_object(pos)?;
-                    self.maybe_exit_level()
-                }
-                (State::Number { state: _ }, _) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
+                // Table-driven number parsing
+                (State::Number { state: num_state }, ch) => {
+                    // Try table transition first
+                    if let Some(next_state) = self.process_number_transition(num_state, ch) {
+                        State::Number { state: next_state }
+                    }
+                    // Handle number termination cases - but only for valid terminal states
+                    else if self.is_valid_number_terminal_state(num_state) {
+                        if ch == b',' {
+                            callback(Event::End(EventToken::Number), pos);
+                            self.context.after_comma = Some((ch, pos));
+                            self.saw_a_comma_now_what()
+                        }
+                        else if Self::IS_WHITESPACE[ch as usize] {
+                            callback(Event::End(EventToken::Number), pos);
+                            self.maybe_exit_level()
+                        }
+                        else if ch == b']' {
+                            callback(Event::End(EventToken::NumberAndArray), pos);
+                            callback(Event::ArrayEnd, pos);
+                            self.context.exit_array(pos)?;
+                            self.maybe_exit_level()
+                        }
+                        else if ch == b'}' {
+                            callback(Event::End(EventToken::NumberAndObject), pos);
+                            callback(Event::ObjectEnd, pos);
+                            self.context.exit_object(pos)?;
+                            self.maybe_exit_level()
+                        }
+                        else {
+                            return Error::new(ErrKind::InvalidNumber, ch, pos);
+                        }
+                    }
+                    else {
+                        // Invalid transition from current state
+                        return Error::new(ErrKind::InvalidNumber, ch, pos);
+                    }
                 }
                 (
                     State::String {
@@ -606,49 +679,38 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => self.state.clone(),
-                // Handle simple escape sequences with lookup table
+                // Handle simple escape sequences with const lookup table
                 (
                     State::String {
                         state: String::Escaping,
                         key,
                     },
-                    escape_char @ (b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't'),
+                    escape_char,
                 ) => {
-                    let escape_token = match escape_char {
-                        b'"' => EventToken::EscapeQuote,
-                        b'\\' => EventToken::EscapeBackslash,
-                        b'/' => EventToken::EscapeSlash,
-                        b'b' => EventToken::EscapeBackspace,
-                        b'f' => EventToken::EscapeFormFeed,
-                        b'n' => EventToken::EscapeNewline,
-                        b'r' => EventToken::EscapeCarriageReturn,
-                        b't' => EventToken::EscapeTab,
-                        _ => unreachable!(),
-                    };
-                    callback(Event::Begin(escape_token.clone()), pos);
-                    callback(Event::End(escape_token), pos);
-                    State::String {
-                        state: String::Normal,
-                        key: *key,
+                    if let Some(escape_token) = Self::ESCAPE_TOKENS[escape_char as usize] {
+                        callback(Event::Begin(escape_token), pos);
+                        callback(Event::End(escape_token), pos);
+                        State::String {
+                            state: String::Normal,
+                            key: *key,
+                        }
+                    } else if escape_char == b'u' {
+                        // Handle unicode escape sequence
+                        State::String {
+                            state: String::Unicode0,
+                            key: *key,
+                        }
+                    } else {
+                        return Error::new(ErrKind::InvalidStringEscape, escape_char, pos);
                     }
                 }
-                (
-                    State::String {
-                        state: String::Escaping,
-                        key,
-                    },
-                    b'u',
-                ) => State::String {
-                    state: String::Unicode0,
-                    key: *key,
-                },
                 (
                     State::String {
                         state: String::Unicode0,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => {
                     callback(Event::Begin(EventToken::UnicodeEscape), pos);
                     State::String {
                         state: String::Unicode1,
@@ -660,8 +722,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Unicode1,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => State::String {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => State::String {
                     state: String::Unicode2,
                     key: *key,
                 },
@@ -670,8 +732,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Unicode2,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => State::String {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => State::String {
                     state: String::Unicode3,
                     key: *key,
                 },
@@ -680,8 +742,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Unicode3,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => {
                     callback(Event::End(EventToken::UnicodeEscape), pos);
                     State::String {
                         state: String::Normal,
@@ -714,8 +776,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     | State::Object { expect: _ }
                     | State::Array { expect: _ }
                     | State::Finished,
-                    b' ' | b'\t' | b'\n' | b'\r',
-                ) => self.state.clone(),
+                    ch,
+                ) if Self::IS_WHITESPACE[ch as usize] => self.state.clone(),
                 (
                     State::Idle
                     | State::Object {
@@ -810,8 +872,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     | State::Array {
                         expect: Array::ItemOrEnd,
                     },
-                    b'1'..=b'9',
-                ) => {
+                    ch,
+                ) if Self::IS_DIGIT[ch as usize] && ch != b'0' => {
                     callback(Event::Begin(EventToken::Number), pos);
                     State::Number {
                         state: Num::BeforeDecimalPoint,
@@ -909,101 +971,29 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     self.context.exit_array(pos)?;
                     self.maybe_exit_level()
                 }
-                (
-                    State::Token {
-                        token: Token::True(True::R),
-                    },
-                    b'r',
-                ) => State::Token {
-                    token: Token::True(True::U),
-                },
-                (
-                    State::Token {
-                        token: Token::True(True::U),
-                    },
-                    b'u',
-                ) => State::Token {
-                    token: Token::True(True::E),
-                },
-                (
-                    State::Token {
-                        token: Token::True(True::E),
-                    },
-                    b'e',
-                ) => {
-                    callback(Event::End(EventToken::True), pos);
-                    self.maybe_exit_level()
-                }
-                (
-                    State::Token {
-                        token: Token::False(False::A),
-                    },
-                    b'a',
-                ) => State::Token {
-                    token: Token::False(False::L),
-                },
-                (
-                    State::Token {
-                        token: Token::False(False::L),
-                    },
-                    b'l',
-                ) => State::Token {
-                    token: Token::False(False::S),
-                },
-                (
-                    State::Token {
-                        token: Token::False(False::S),
-                    },
-                    b's',
-                ) => State::Token {
-                    token: Token::False(False::E),
-                },
-                (
-                    State::Token {
-                        token: Token::False(False::E),
-                    },
-                    b'e',
-                ) => {
-                    callback(Event::End(EventToken::False), pos);
-                    self.maybe_exit_level()
-                }
-                (
-                    State::Token {
-                        token: Token::Null(Null::U),
-                    },
-                    b'u',
-                ) => State::Token {
-                    token: Token::Null(Null::L1),
-                },
-                (
-                    State::Token {
-                        token: Token::Null(Null::L1),
-                    },
-                    b'l',
-                ) => State::Token {
-                    token: Token::Null(Null::L2),
-                },
-                (
-                    State::Token {
-                        token: Token::Null(Null::L2),
-                    },
-                    b'l',
-                ) => {
-                    callback(Event::End(EventToken::Null), pos);
-                    self.maybe_exit_level()
+                // Table-driven token parsing
+                (State::Token { progress }, ch) => {
+                    match self.process_token_char(progress, ch) {
+                        Ok(Some(new_progress)) => {
+                            // Continue parsing token
+                            State::Token { progress: new_progress }
+                        }
+                        Ok(None) => {
+                            // Invalid character for this token
+                            return Error::new(ErrKind::InvalidToken, ch, pos);
+                        }
+                        Err(event_token) => {
+                            // Token completed
+                            callback(Event::End(event_token), pos);
+                            self.maybe_exit_level()
+                        }
+                    }
                 }
 
                 // Wrong tokens
                 (State::Idle, _) => {
                     return Error::new(ErrKind::InvalidRoot, data[pos], pos);
                 }
-                (
-                    State::String {
-                        state: String::Escaping,
-                        key: _,
-                    },
-                    _,
-                ) => return Error::new(ErrKind::InvalidStringEscape, data[pos], pos),
                 (
                     State::Object {
                         expect: Object::Key,
@@ -1032,9 +1022,6 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     _,
                 ) => return Error::new(ErrKind::ExpectedArrayItem, data[pos], pos),
                 (State::Finished, _) => return Error::new(ErrKind::ContentEnded, data[pos], pos),
-                (State::Token { token: _ }, _) => {
-                    return Error::new(ErrKind::InvalidToken, data[pos], pos)
-                }
             };
             pos += 1;
         }
