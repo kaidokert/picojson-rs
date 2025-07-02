@@ -1,6 +1,8 @@
 ## TODO list
 - [ ] Constify what's possible
 - [ ] Remove `.unwrap()` calls
+- [ ] Remove all bounds checked slice indexing that could panic!
+- [ ] Verify we are fully panic! free
 - [ ] Remove unnecessary `'static` lifetimes
 - [ ] Dependency cleanup
 - [ ] Clippy cleanup

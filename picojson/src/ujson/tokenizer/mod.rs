@@ -255,9 +255,10 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
 
     fn check_trailing_comma(&mut self, data: u8) -> Result<(), Error> {
         // Check for trailing comma if we're at a closing bracket/brace
-        if (data == b']' || data == b'}') && self.context.after_comma.is_some() {
-            let (c, pos) = self.context.after_comma.unwrap();
-            return Error::new(ErrKind::TrailingComma, c, pos);
+        if let Some((c, pos)) = self.context.after_comma {
+            if data == b']' || data == b'}' {
+                return Error::new(ErrKind::TrailingComma, c, pos);
+            }
         }
 
         // Only reset after_comma for non-whitespace characters
@@ -851,10 +852,10 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'}',
                 ) => {
-                    if self.context.after_comma.is_some() {
+                    if let Some((comma_char, _)) = self.context.after_comma {
                         return Error::new(
                             ErrKind::TrailingComma,
-                            self.context.after_comma.unwrap().0,
+                            comma_char,
                             pos,
                         );
                     }
