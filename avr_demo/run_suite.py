@@ -150,11 +150,28 @@ def main():
         choices=["stack", "bloat"],
         help="The analysis tool to run: 'stack' for stack size analysis, 'bloat' for binary size analysis."
     )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick mode: only test the first depth (7) for faster iteration"
+    )
     args = parser.parse_args()
 
     if args.tool == "stack":
+        # Use only first depth if quick mode is enabled
+        global DEPTHS
+        if args.quick:
+            original_depths = DEPTHS
+            DEPTHS = [DEPTHS[0]] if DEPTHS else [7]  # Use first depth or fallback to 7
+            print(f"Quick mode: Testing only depth {DEPTHS[0]}")
+
         results = run_stack_analysis()
         print_stack_report(results)
+
+        # Restore original depths
+        if args.quick:
+            DEPTHS = original_depths
+
     elif args.tool == "bloat":
         results = run_bloat_analysis()
         print_bloat_report(results)

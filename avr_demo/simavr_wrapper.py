@@ -50,22 +50,56 @@ def run_simavr_windows(binary, simavr_args, timeout_seconds=None):
         return 1
 
 def main():
-    parser = argparse.ArgumentParser(description="A wrapper for running simavr on Linux and Windows (via WSL).")
-    parser.add_argument("-t", "--timeout", type=int, help="Timeout in seconds for the simulation.")
-    parser.add_argument("binary", help="The ELF binary to simulate.")
-    parser.add_argument("simavr_args", nargs=argparse.REMAINDER, help="Arguments to pass to simavr.")
-    args = parser.parse_args()
+    # Custom parsing needed because argparse can't handle mixed arguments properly
+    # We need to extract -t/--timeout but pass everything else to simavr
+    timeout_seconds = None
+    simavr_args = []
+    binary = None
 
-    if not os.path.exists(args.binary):
-        print(f"Error: Binary file '{args.binary}' not found.", file=sys.stderr)
+    i = 1  # Skip script name
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+
+        if arg in ['-t', '--timeout']:
+            if i + 1 >= len(sys.argv):
+                print("Error: -t/--timeout requires a value", file=sys.stderr)
+                sys.exit(1)
+            try:
+                timeout_seconds = int(sys.argv[i + 1])
+                if timeout_seconds <= 0:
+                    raise ValueError()
+            except ValueError:
+                print("Error: timeout value must be a positive integer", file=sys.stderr)
+                sys.exit(1)
+            i += 2  # Skip both the flag and its value
+        elif arg.endswith('.elf') or arg.endswith('.bin') or arg.endswith('.hex'):
+            # This looks like a binary file
+            binary = arg
+            i += 1
+        else:
+            # This is a simavr argument
+            simavr_args.append(arg)
+            i += 1
+
+    # If no binary was found, assume the last argument is the binary
+    if binary is None and simavr_args:
+        binary = simavr_args.pop()
+
+    if binary is None:
+        print("Error: No binary file specified", file=sys.stderr)
+        print("Usage: simavr_wrapper.py [-t timeout] [simavr_args...] <binary.elf>", file=sys.stderr)
+        sys.exit(1)
+
+    if not os.path.exists(binary):
+        print(f"Error: Binary file '{binary}' not found.", file=sys.stderr)
         sys.exit(1)
 
     system = platform.system().lower()
 
     if system == "linux":
-        exit_code = run_simavr_linux(args.binary, args.simavr_args, args.timeout)
+        exit_code = run_simavr_linux(binary, simavr_args, timeout_seconds)
     elif system == "windows":
-        exit_code = run_simavr_windows(args.binary, args.simavr_args, args.timeout)
+        exit_code = run_simavr_windows(binary, simavr_args, timeout_seconds)
     else:
         print(f"Error: Unsupported operating system: {system}", file=sys.stderr)
         sys.exit(1)
