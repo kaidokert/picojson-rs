@@ -14,58 +14,57 @@ struct ParseContext<T: BitBucket, D> {
 }
 
 impl<T: BitBucket, D: DepthCounter> ParseContext<T, D> {
-    // We can expect an unsigned with From<u8> requirement
-    // So this math usually works
-    fn max_depth() -> D {
-        D::from(0u8).not()
-    }
     fn new() -> Self {
         ParseContext {
-            depth: 0u8.into(),
+            depth: D::zero(),
             stack: T::default(),
             after_comma: None,
         }
     }
     fn enter_object(&mut self, data: u8, pos: usize) -> Result<(), Error> {
-        if self.depth == Self::max_depth() {
+        let (new_depth, overflow) = self.depth.increment();
+        if overflow {
             return Error::new(ErrKind::MaxDepthReached, data, pos);
         }
         self.stack.push(true);
-        self.depth += 1u8.into();
+        self.depth = new_depth;
         Ok(())
     }
     fn exit_object(&mut self, pos: usize) -> Result<(), Error> {
-        if self.depth == 0u8.into() {
+        if self.depth.is_zero() {
             return Error::new(ErrKind::UnopenedObject, b'}', pos);
         }
         self.stack.pop();
-        self.depth -= 1u8.into();
+        let (new_depth, _underflow) = self.depth.decrement();
+        self.depth = new_depth;
         Ok(())
     }
     fn enter_array(&mut self, data: u8, pos: usize) -> Result<(), Error> {
-        if self.depth == Self::max_depth() {
+        let (new_depth, overflow) = self.depth.increment();
+        if overflow {
             return Error::new(ErrKind::MaxDepthReached, data, pos);
         }
         self.stack.push(false);
-        self.depth += 1u8.into();
+        self.depth = new_depth;
         Ok(())
     }
     fn exit_array(&mut self, pos: usize) -> Result<(), Error> {
-        if self.depth == 0u8.into() {
+        if self.depth.is_zero() {
             return Error::new(ErrKind::UnopenedArray, b']', pos);
         }
         self.stack.pop();
-        self.depth -= 1u8.into();
+        let (new_depth, _underflow) = self.depth.decrement();
+        self.depth = new_depth;
         Ok(())
     }
     fn is_object(&self) -> bool {
-        if self.depth == 0u8.into() {
+        if self.depth.is_zero() {
             return false;
         }
         self.stack.top()
     }
     fn is_array(&self) -> bool {
-        if self.depth == 0u8.into() {
+        if self.depth.is_zero() {
             return false;
         }
         !self.stack.top()
@@ -283,7 +282,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
         F: FnMut(Event, usize) + ?Sized,
     {
         // we check that parser was idle, at zero nesting depth
-        if self.context.depth != 0u8.into() {
+        if !self.context.depth.is_zero() {
             return Error::new(ErrKind::UnfinishedStream, b' ', self.total_consumed);
         }
         if self.total_consumed == 0 {
@@ -343,7 +342,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
             State::Array {
                 expect: Array::CommaOrEnd,
             }
-        } else if self.context.depth == 0u8.into() {
+        } else if self.context.depth.is_zero() {
             State::Finished
         } else {
             State::Idle
@@ -853,11 +852,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     b'}',
                 ) => {
                     if let Some((comma_char, _)) = self.context.after_comma {
-                        return Error::new(
-                            ErrKind::TrailingComma,
-                            comma_char,
-                            pos,
-                        );
+                        return Error::new(ErrKind::TrailingComma, comma_char, pos);
                     }
                     self.context.exit_object(pos)?;
                     callback(Event::ObjectEnd, pos);
@@ -881,7 +876,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     State::Object {
                         expect: Object::Key,
                     }
-                },
+                }
                 (
                     State::Object {
                         expect: Object::CommaOrEnd,
