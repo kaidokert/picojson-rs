@@ -287,7 +287,7 @@ def run_panic_analysis(specific_examples=None):
     examples = specific_examples or get_available_examples()
     results = {}
 
-    print(f"\n=== Panic Reference Analysis ===")
+    print("\n=== Panic Reference Analysis ===")
     print(f"Checking {len(examples)} example(s): {', '.join(examples)}")
 
     for example in examples:
