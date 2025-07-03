@@ -7,5 +7,6 @@ components = [
     "rustfmt",
     "rust-src",
     "rust-analyzer",
+    "llvm-tools"
 ]
 profile = "minimal"

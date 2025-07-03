@@ -3,6 +3,7 @@ import re
 import argparse
 import json
 import sys
+import os
 
 def get_depths_from_build_rs():
     """Parses build.rs to extract the DEPTHS constant."""
@@ -144,6 +145,206 @@ def print_bloat_report(results):
         row = f"| {name} | {size} |"
         print(row)
 
+def run_panic_checker(example_name, profile="panic_checks", verbose=False, no_default_features=False, features=None):
+    """Run panic checker on a specific example."""
+    # Panic-related patterns to search for (specific function names only)
+    panic_patterns = [
+        r'panic_fmt',
+        r'panic_const',
+        r'panic_nounwind',
+        r'panic_impl',
+        r'assert_failed',
+        r'unwrap_failed',
+        r'expect_failed',
+        r'slice_end_index_len_fail',
+        r'slice_start_index_len_fail',
+        r'slice_index_len_fail',
+        r'panic_for_nonpositive_argument',
+        r'panic_bounds_check',
+        r'unreachable_unchecked',
+        r'core::panicking::',
+        r'panic!',
+        r'unwrap\(\)',
+        r'expect\(',
+    ]
+
+    print(f"🔍 Checking example '{example_name}' for panic references...")
+
+    try:
+        # Build the objdump command
+        cmd = [
+            "cargo", "objdump",
+            "--profile", profile
+        ]
+
+        # Add feature flags if specified
+        if no_default_features:
+            cmd.append("--no-default-features")
+        if features:
+            cmd.extend(["--features", features])
+
+        cmd.extend([
+            "--example", example_name,
+            "--", "-dS"
+        ])
+
+        if verbose:
+            print(f"Running: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120  # 2 minute timeout
+        )
+
+        if result.returncode != 0:
+            print(f"❌ Error running objdump: {result.stderr}", file=sys.stderr)
+            return False
+
+        # Filter objdump output to only include content after .elf file format line
+        lines = result.stdout.split('\n')
+        start_idx = None
+
+        for i, line in enumerate(lines):
+            if '.elf:' in line and 'file format' in line:
+                start_idx = i
+                break
+
+        if start_idx is None:
+            print("Warning: Could not find .elf file format marker", file=sys.stderr)
+            filtered_output = result.stdout
+        else:
+            filtered_output = '\n'.join(lines[start_idx:])
+
+        # Save filtered assembly output to file
+        output_dir = f"target/avr-none/{profile}/examples"
+        os.makedirs(output_dir, exist_ok=True)
+        asm_file = f"{output_dir}/{example_name}.asm"
+
+        try:
+            with open(asm_file, 'w') as f:
+                f.write(filtered_output)
+            print(f"💾 Assembly saved to: {asm_file}")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not save assembly file: {e}")
+
+        # Check for panic patterns and track function context
+        found_panics = []
+        lines = filtered_output.split('\n')
+        current_function = None
+
+        for line_num, line in enumerate(lines, 1):
+            # Track function/symbol boundaries (lines that contain < and > with function names)
+            function_header_line = False
+            if '<' in line and '>' in line and line.endswith(':'):
+                # Extract function name from lines like "0000034c <core::option::unwrap_failed::h71083ebf777fe1d3>:"
+                # Handle nested angle brackets like "<<avr_hal_generic::delay::Delay<SPEED>...>>"
+                match = re.search(r'<(.+)>:', line)
+                if match:
+                    current_function = match.group(1)
+                    function_header_line = True
+
+            # Check for panic patterns
+            for pattern in panic_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    # Build context info - but NOT for function header lines themselves
+                    if function_header_line:
+                        context_info = ""  # Don't add context to function headers
+                    else:
+                        context_info = f" [from {current_function}]" if current_function else ""
+
+                    found_panics.append(f"Line {line_num}: {line.strip()}{context_info}")
+                    if verbose:
+                        print(f"Found panic pattern '{pattern}' at line {line_num}: {line.strip()}{context_info}")
+                    break  # Only report each line once
+
+        if found_panics:
+            print(f"❌ FAIL: Found {len(found_panics)} panic reference(s) in '{example_name}':")
+            for ref in found_panics:
+                # Extract line number from the format "Line X: content"
+                line_match = ref.split(": ", 1)
+                if len(line_match) == 2:
+                    line_part = line_match[0]  # "Line X"
+                    content = line_match[1]    # actual content
+                    line_num = line_part.replace("Line ", "")
+                    # Output in IDE-friendly format: filename:line_number: message
+                    print(f"{asm_file}:{line_num}: {content}")
+                else:
+                    print(f"  {ref}")
+            return False
+        else:
+            print(f"✅ PASS: No panic references found in '{example_name}'")
+            return True
+
+    except subprocess.TimeoutExpired:
+        print("❌ Error: objdump command timed out", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"❌ Error running objdump: {e}", file=sys.stderr)
+        return False
+
+def get_available_examples():
+    """Auto-discover available examples from the examples/ directory."""
+    examples = []
+    examples_dir = "examples"
+
+    if os.path.exists(examples_dir):
+        for file in os.listdir(examples_dir):
+            if file.endswith('.rs'):
+                example_name = file[:-3]  # Remove .rs extension
+                examples.append(example_name)
+
+    return sorted(examples)
+
+def run_panic_analysis(specific_examples=None):
+    """Run panic checker on specified examples or all available ones."""
+    if specific_examples:
+        examples = specific_examples
+    else:
+        examples = get_available_examples()
+
+    results = {}
+
+    print(f"\n=== Panic Reference Analysis ===")
+    print(f"Checking {len(examples)} example(s): {', '.join(examples)}")
+
+    for example in examples:
+        # Check if example exists
+        example_path = f"examples/{example}.rs"
+        if not os.path.exists(example_path):
+            print(f"⚠️  Skipping {example} - file not found")
+            results[example] = "Not Found"
+            continue
+
+        success = run_panic_checker(example, verbose=False)
+        results[example] = "✅ PASS" if success else "❌ FAIL"
+        print()  # Add spacing between examples
+
+    return results
+
+def print_panic_report(results):
+    """Print a summary of panic check results."""
+    header = "| Example | Panic Check Result |"
+    separator = "|---|---|"
+    print("\n--- Panic Analysis Summary ---")
+    print(header)
+    print(separator)
+
+    for example, result in results.items():
+        print(f"| {example} | {result} |")
+
+    # Overall status
+    failed_count = sum(1 for r in results.values() if "FAIL" in r)
+    total_count = len([r for r in results.values() if r != "Not Found"])
+
+    if failed_count > 0:
+        print(f"\n❌ OVERALL: {failed_count}/{total_count} examples have panic references")
+        return False
+    else:
+        print(f"\n✅ OVERALL: All {total_count} examples are panic-free!")
+        return True
+
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(description="Run test suites for the picojson-rs crate.")
@@ -151,13 +352,36 @@ def main():
         "tool",
         nargs='?',
         default="stack",
-        choices=["stack", "bloat"],
-        help="The analysis tool to run: 'stack' for stack size analysis, 'bloat' for binary size analysis."
+        choices=["stack", "bloat", "panic"],
+        help="The analysis tool to run: 'stack' for stack size analysis, 'bloat' for binary size analysis, 'panic' for panic reference checking."
     )
     parser.add_argument(
         "--quick",
         action="store_true",
         help="Quick mode: only test the first depth (7) for faster iteration"
+    )
+    parser.add_argument(
+        "--example",
+        help="For panic checking: specify a single example to check (e.g., 'minimal')"
+    )
+    parser.add_argument(
+        "--examples",
+        action="store_true",
+        help="For panic checking: check all available examples"
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Verbose output for panic checking"
+    )
+    parser.add_argument(
+        "--no-default-features",
+        action="store_true",
+        help="For panic checking: disable default features (equivalent to cargo --no-default-features)"
+    )
+    parser.add_argument(
+        "--features",
+        help="For panic checking: comma-separated list of features to enable (equivalent to cargo --features)"
     )
     args = parser.parse_args()
 
@@ -179,6 +403,34 @@ def main():
     elif args.tool == "bloat":
         results = run_bloat_analysis()
         print_bloat_report(results)
+
+    elif args.tool == "panic":
+        if args.example:
+            # Check single example
+            success = run_panic_checker(
+                args.example,
+                verbose=args.verbose,
+                no_default_features=args.no_default_features,
+                features=args.features
+            )
+            sys.exit(0 if success else 1)
+        elif args.examples:
+            # Check all available examples
+            results = run_panic_analysis()
+            success = print_panic_report(results)
+            sys.exit(0 if success else 1)
+        else:
+            # Show available examples and usage
+            available = get_available_examples()
+            print("Available examples for panic checking:")
+            for example in available:
+                print(f"  - {example}")
+            print(f"\nUsage:")
+            print(f"  python run_suite.py panic --example <name>                                    # Check specific example")
+            print(f"  python run_suite.py panic --example <name> --no-default-features             # Check without default features")
+            print(f"  python run_suite.py panic --example <name> --features depth-7,pico-tiny      # Check with specific features")
+            print(f"  python run_suite.py panic --examples                                          # Check all examples")
+            sys.exit(0)
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,6 @@
+# Profile specific rustflags for panic checking
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "avr_demo"
 version = "0.1.0"
@@ -9,7 +12,7 @@ autobenches = false
 [dependencies]
 picojson = { path = "../picojson", default-features = false, features = ["int32"]}
 panic-halt = "1.0"
-ufmt = "0.2"
+ufmt = { version = "0.2", optional = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde-json-core = { version = "0.6", default-features = false }
 
@@ -20,8 +23,21 @@ features = ["arduino-uno"]
 
 [profile.dev]
 panic = "abort"
-lto = true
-opt-level = "s"
+
+# Build profile for investigatinc panics in the code
+# We don't want to optimize away any code, but do
+# enable dead code elimination.
+[profile.panic_checks]
+inherits = "dev"
+panic = "abort"
+opt-level = 1         # Mminimal code size optimizations, mostly just DCE
+lto = "fat"             # Make sure it's off unless you want fat LTO DCE
+codegen-units = 1       # helps DCE across units
+strip = "none"          # Keep symbols
+debug = "full"
+incremental = false
+overflow-checks = true  # Enable ( it's a default, but we want to be explicit )
+rustflags = ["-Z", "ub-checks=no"] # Disable builtin undefined behavior checks
 
 [profile.release]
 panic = "abort"
@@ -31,7 +47,7 @@ lto = true
 opt-level = "s"
 
 [features]
-default = ["depth-7", "pico-tiny"]
+default = ["depth-7", "pico-tiny", "ufmt"]
 
 depth-7 = []
 depth-9 = []

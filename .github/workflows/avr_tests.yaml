@@ -24,6 +24,8 @@ jobs:
 
       - name: Install cargo-bloat
         run: cargo install cargo-bloat
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
 
       - name: Run Stack Analysis
         working-directory: avr_demo
@@ -32,3 +34,22 @@ jobs:
       - name: Run Bloat Analysis
         working-directory: avr_demo
         run: python run_suite.py bloat
+
+  avr_panic_check:
+    name: AVR Panic Prevention
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
+
+      - name: Run Panic Check (Minimal Example)
+        working-directory: avr_demo
+        run: python run_suite.py panic --example minimal

@@ -853,11 +853,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     b'}',
                 ) => {
                     if let Some((comma_char, _)) = self.context.after_comma {
-                        return Error::new(
-                            ErrKind::TrailingComma,
-                            comma_char,
-                            pos,
-                        );
+                        return Error::new(ErrKind::TrailingComma, comma_char, pos);
                     }
                     self.context.exit_object(pos)?;
                     callback(Event::ObjectEnd, pos);
@@ -881,7 +877,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     State::Object {
                         expect: Object::Key,
                     }
-                },
+                }
                 (
                     State::Object {
                         expect: Object::CommaOrEnd,
