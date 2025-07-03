@@ -145,8 +145,53 @@ def print_bloat_report(results):
         row = f"| {name} | {size} |"
         print(row)
 
-def run_panic_checker(example_name, profile="panic_checks", verbose=False, no_default_features=False, features=None):
-    """Run panic checker on a specific example."""
+def _run_objdump(example_name, profile, verbose, no_default_features, features):
+    """Executes the cargo objdump command and returns the process result."""
+    cmd = ["cargo", "objdump", "--profile", profile]
+    if no_default_features:
+        cmd.append("--no-default-features")
+    if features:
+        cmd.extend(["--features", features])
+    cmd.extend(["--example", example_name, "--", "-dS"])
+
+    if verbose:
+        print(f"Running: {' '.join(cmd)}")
+
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=120  # 2 minute timeout
+    )
+
+def _filter_objdump_output(stdout):
+    """Extracts relevant sections from the objdump output."""
+    lines = stdout.split('\n')
+    start_idx = None
+    for i, line in enumerate(lines):
+        if '.elf:' in line and 'file format' in line:
+            start_idx = i
+            break
+    if start_idx is None:
+        print("Warning: Could not find .elf file format marker", file=sys.stderr)
+        return stdout
+    return '\n'.join(lines[start_idx:])
+
+def _save_assembly_output(example_name, profile, content):
+    """Writes the filtered output to a file and returns the file path."""
+    output_dir = f"target/avr-none/{profile}/examples"
+    os.makedirs(output_dir, exist_ok=True)
+    asm_file = f"{output_dir}/{example_name}.asm"
+    try:
+        with open(asm_file, 'w') as f:
+            f.write(content)
+        print(f"💾 Assembly saved to: {asm_file}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not save assembly file: {e}")
+    return asm_file
+
+def _analyze_panic_patterns(content, verbose):
+    """Scans the output for panic patterns and returns found references."""
     # Panic-related patterns to search for (specific function names only)
     panic_patterns = [
         r'panic_fmt',
@@ -167,115 +212,55 @@ def run_panic_checker(example_name, profile="panic_checks", verbose=False, no_de
         r'unwrap\(\)',
         r'expect\(',
     ]
+    found_panics = []
+    lines = content.split('\n')
+    current_function = None
+    for line_num, line in enumerate(lines, 1):
+        function_header_line = False
+        if '<' in line and '>' in line and line.endswith(':'):
+            match = re.search(r'<(.+)>:', line)
+            if match:
+                current_function = match.group(1)
+                function_header_line = True
+        for pattern in panic_patterns:
+            if re.search(pattern, line, re.IGNORECASE):
+                context_info = "" if function_header_line else f" [from {current_function}]" if current_function else ""
+                found_panics.append(f"Line {line_num}: {line.strip()}{context_info}")
+                if verbose:
+                    print(f"Found panic pattern '{pattern}' at line {line_num}: {line.strip()}{context_info}")
+                break
+    return found_panics
 
+def _report_panic_results(example_name, asm_file, found_panics):
+    """Prints the results and returns the final boolean."""
+    if found_panics:
+        print(f"❌ FAIL: Found {len(found_panics)} panic reference(s) in '{example_name}':")
+        for ref in found_panics:
+            line_match = ref.split(": ", 1)
+            if len(line_match) == 2:
+                line_part, content = line_match
+                line_num = line_part.replace("Line ", "")
+                print(f"{asm_file}:{line_num}: {content}")
+            else:
+                print(f"  {ref}")
+        return False
+    else:
+        print(f"✅ PASS: No panic references found in '{example_name}'")
+        return True
+
+def run_panic_checker(example_name, profile="panic_checks", verbose=False, no_default_features=False, features=None):
+    """Run panic checker on a specific example."""
     print(f"🔍 Checking example '{example_name}' for panic references...")
-
     try:
-        # Build the objdump command
-        cmd = [
-            "cargo", "objdump",
-            "--profile", profile
-        ]
-
-        # Add feature flags if specified
-        if no_default_features:
-            cmd.append("--no-default-features")
-        if features:
-            cmd.extend(["--features", features])
-
-        cmd.extend([
-            "--example", example_name,
-            "--", "-dS"
-        ])
-
-        if verbose:
-            print(f"Running: {' '.join(cmd)}")
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120  # 2 minute timeout
-        )
-
+        result = _run_objdump(example_name, profile, verbose, no_default_features, features)
         if result.returncode != 0:
             print(f"❌ Error running objdump: {result.stderr}", file=sys.stderr)
             return False
 
-        # Filter objdump output to only include content after .elf file format line
-        lines = result.stdout.split('\n')
-        start_idx = None
-
-        for i, line in enumerate(lines):
-            if '.elf:' in line and 'file format' in line:
-                start_idx = i
-                break
-
-        if start_idx is None:
-            print("Warning: Could not find .elf file format marker", file=sys.stderr)
-            filtered_output = result.stdout
-        else:
-            filtered_output = '\n'.join(lines[start_idx:])
-
-        # Save filtered assembly output to file
-        output_dir = f"target/avr-none/{profile}/examples"
-        os.makedirs(output_dir, exist_ok=True)
-        asm_file = f"{output_dir}/{example_name}.asm"
-
-        try:
-            with open(asm_file, 'w') as f:
-                f.write(filtered_output)
-            print(f"💾 Assembly saved to: {asm_file}")
-        except Exception as e:
-            print(f"⚠️  Warning: Could not save assembly file: {e}")
-
-        # Check for panic patterns and track function context
-        found_panics = []
-        lines = filtered_output.split('\n')
-        current_function = None
-
-        for line_num, line in enumerate(lines, 1):
-            # Track function/symbol boundaries (lines that contain < and > with function names)
-            function_header_line = False
-            if '<' in line and '>' in line and line.endswith(':'):
-                # Extract function name from lines like "0000034c <core::option::unwrap_failed::h71083ebf777fe1d3>:"
-                # Handle nested angle brackets like "<<avr_hal_generic::delay::Delay<SPEED>...>>"
-                match = re.search(r'<(.+)>:', line)
-                if match:
-                    current_function = match.group(1)
-                    function_header_line = True
-
-            # Check for panic patterns
-            for pattern in panic_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    # Build context info - but NOT for function header lines themselves
-                    if function_header_line:
-                        context_info = ""  # Don't add context to function headers
-                    else:
-                        context_info = f" [from {current_function}]" if current_function else ""
-
-                    found_panics.append(f"Line {line_num}: {line.strip()}{context_info}")
-                    if verbose:
-                        print(f"Found panic pattern '{pattern}' at line {line_num}: {line.strip()}{context_info}")
-                    break  # Only report each line once
-
-        if found_panics:
-            print(f"❌ FAIL: Found {len(found_panics)} panic reference(s) in '{example_name}':")
-            for ref in found_panics:
-                # Extract line number from the format "Line X: content"
-                line_match = ref.split(": ", 1)
-                if len(line_match) == 2:
-                    line_part = line_match[0]  # "Line X"
-                    content = line_match[1]    # actual content
-                    line_num = line_part.replace("Line ", "")
-                    # Output in IDE-friendly format: filename:line_number: message
-                    print(f"{asm_file}:{line_num}: {content}")
-                else:
-                    print(f"  {ref}")
-            return False
-        else:
-            print(f"✅ PASS: No panic references found in '{example_name}'")
-            return True
+        filtered_output = _filter_objdump_output(result.stdout)
+        asm_file = _save_assembly_output(example_name, profile, filtered_output)
+        found_panics = _analyze_panic_patterns(filtered_output, verbose)
+        return _report_panic_results(example_name, asm_file, found_panics)
 
     except subprocess.TimeoutExpired:
         print("❌ Error: objdump command timed out", file=sys.stderr)
@@ -299,7 +284,7 @@ def get_available_examples():
 
 def run_panic_analysis(specific_examples=None):
     """Run panic checker on specified examples or all available ones."""
-    examples = specific_examples if specific_examples else get_available_examples()
+    examples = specific_examples or get_available_examples()
     results = {}
 
     print(f"\n=== Panic Reference Analysis ===")
