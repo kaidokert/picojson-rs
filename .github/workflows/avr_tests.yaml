@@ -50,6 +50,18 @@ jobs:
       - name: Install cargo-binutils
         run: cargo install cargo-binutils
 
+      - name: Build the demos in Release mode
+        working-directory: avr_demo
+        run: cargo build --release --examples
+
+      - name: Build the demos in Dev mode
+        working-directory: avr_demo
+        run: cargo build --examples
+
+      - name: Build the demos in panic check profile
+        working-directory: avr_demo
+        run: cargo build --example --profile panic_checks minimal
+
       - name: Run Panic Check (Minimal Example)
         working-directory: avr_demo
         run: python run_suite.py panic --example minimal

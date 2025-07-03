@@ -30,14 +30,18 @@ panic = "abort"
 [profile.panic_checks]
 inherits = "dev"
 panic = "abort"
-opt-level = 1         # Mminimal code size optimizations, mostly just DCE
-lto = "fat"             # Make sure it's off unless you want fat LTO DCE
+opt-level = 1         # Minimal code size optimizations, mostly just DCE
+lto = "fat"           # Enable fat LTO for better dead code elimination
 codegen-units = 1       # helps DCE across units
 strip = "none"          # Keep symbols
 debug = "full"
 incremental = false
 overflow-checks = true  # Enable ( it's a default, but we want to be explicit )
-rustflags = ["-Z", "ub-checks=no"] # Disable builtin undefined behavior checks
+# Disable the compiler's built-in undefined behavior checks.
+# These checks can insert their own panic paths, creating noise in our analysis.
+# We are focused on panics from application logic (e.g., unwrap, bounds checks),
+# so disabling these helps narrow the focus. This is an unstable flag.
+rustflags = ["-Z", "ub-checks=no"]
 
 [profile.release]
 panic = "abort"

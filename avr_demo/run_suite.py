@@ -331,7 +331,7 @@ def print_panic_report(results):
         print(f"| {example} | {result} |")
 
     # Overall status
-    failed_count = sum(bool("FAIL" in r)
+    failed_count = sum("FAIL" in r for r in results.values())
     total_count = len([r for r in results.values() if r != "Not Found"])
 
     if failed_count > 0:
@@ -340,6 +340,18 @@ def print_panic_report(results):
     else:
         print(f"\n✅ OVERALL: All {total_count} examples are panic-free!")
         return True
+
+def _print_panic_usage():
+    """Prints the usage instructions for the panic checker."""
+    available = get_available_examples()
+    print("Available examples for panic checking:")
+    for example in available:
+        print(f"  - {example}")
+    print("\nUsage:")
+    print("  python run_suite.py panic --example <name>                                    # Check specific example")
+    print("  python run_suite.py panic --example <name> --no-default-features             # Check without default features")
+    print("  python run_suite.py panic --example <name> --features depth-7,pico-tiny      # Check with specific features")
+    print("  python run_suite.py panic --examples                                          # Check all examples")
 
 def main():
     """Main entry point for the script."""
@@ -417,15 +429,7 @@ def main():
             sys.exit(0 if success else 1)
         else:
             # Show available examples and usage
-            available = get_available_examples()
-            print("Available examples for panic checking:")
-            for example in available:
-                print(f"  - {example}")
-            print(f"\nUsage:")
-            print(f"  python run_suite.py panic --example <name>                                    # Check specific example")
-            print(f"  python run_suite.py panic --example <name> --no-default-features             # Check without default features")
-            print(f"  python run_suite.py panic --example <name> --features depth-7,pico-tiny      # Check with specific features")
-            print(f"  python run_suite.py panic --examples                                          # Check all examples")
+            _print_panic_usage()
             sys.exit(0)
 
 if __name__ == "__main__":
