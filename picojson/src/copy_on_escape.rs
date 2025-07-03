@@ -152,7 +152,7 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
     ///
     /// # Returns
     /// The final String (either borrowed or unescaped)
-    pub fn end_string(&mut self, pos: usize) -> Result<String, ParseError> {
+    pub fn end_string(&mut self, pos: usize) -> Result<String<'_, '_>, ParseError> {
         if self.using_scratch {
             // Copy final span from last_copied_pos to end
             self.copy_span_to_scratch(pos, 0)?;

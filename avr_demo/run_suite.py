@@ -29,10 +29,10 @@ DEPTHS = get_depths_from_build_rs()
 # The test configurations to run.
 # (Test Name, Cargo Example Name, Extra Features)
 CONFIGS = [
-    ("serde", "test_serde", []),
-    ("picojson-tiny", "test_picojson", ["pico-tiny"]),
-    ("picojson-small", "test_picojson", ["pico-small"]),
-    ("picojson-huge", "test_picojson", ["pico-huge"]),
+    ("serde", "test_serde", ["ufmt"]),
+    ("picojson-tiny", "test_picojson", ["pico-tiny","ufmt"]),
+    ("picojson-small", "test_picojson", ["pico-small","ufmt"]),
+    ("picojson-huge", "test_picojson", ["pico-huge","ufmt"]),
 ]
 
 def run_stack_analysis():

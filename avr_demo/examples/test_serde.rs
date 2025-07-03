@@ -5,7 +5,17 @@
 use avr_demo::stack_measurement::*;
 use panic_halt as _;
 use serde::Deserialize;
+
+// Conditional import of uwriteln! - stub out if ufmt feature is not enabled
+#[cfg(feature = "ufmt")]
 use ufmt::uwriteln;
+
+#[cfg(not(feature = "ufmt"))]
+macro_rules! uwriteln {
+    ($($args:tt)*) => {
+        Ok::<(), core::convert::Infallible>(())
+    };
+}
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -19,9 +29,12 @@ const JSON_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/test.json"));
 
 #[arduino_hal::entry]
 fn main() -> ! {
-    let dp = arduino_hal::Peripherals::take().unwrap();
-    let pins = arduino_hal::pins!(dp);
-    let mut serial = arduino_hal::default_serial!(dp, pins, 57600);
+    #[cfg(feature = "ufmt")]
+    let mut serial = {
+        let dp = arduino_hal::Peripherals::take().unwrap();
+        let pins = arduino_hal::pins!(dp);
+        arduino_hal::default_serial!(dp, pins, 57600)
+    };
 
     unsafe { fill_stack_with_watermark() };
 
@@ -34,6 +47,7 @@ fn main() -> ! {
         Ok((doc, _)) => {
             uwriteln!(&mut serial, "Parsed doc id: {}", doc.id).ok();
             uwriteln!(&mut serial, "Parsed test_depth: {}", doc.test_depth).ok();
+            uwriteln!(&mut serial, "Parsed status: {}", doc.status).ok();
         }
         Err(_) => {
             uwriteln!(&mut serial, "JSON parsing failed!").ok();

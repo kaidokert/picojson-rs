@@ -106,7 +106,7 @@ pub trait PullParser {
     /// Iterator-like method that returns None when parsing is complete.
     /// This method returns None when EndDocument is reached, Some(Ok(event)) for successful events,
     /// and Some(Err(error)) for parsing errors.
-    fn next(&mut self) -> Option<Result<Event, ParseError>> {
+    fn next(&mut self) -> Option<Result<Event<'_, '_>, ParseError>> {
         match self.next_event() {
             Ok(Event::EndDocument) => None,
             other => Some(other),
@@ -114,7 +114,7 @@ pub trait PullParser {
     }
     /// Returns the next JSON event or an error if parsing fails.
     /// Parsing continues until `EndDocument` is returned or an error occurs.
-    fn next_event(&mut self) -> Result<Event, ParseError>;
+    fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError>;
 }
 
 /// Utility for calculating common content range boundaries in JSON parsing.

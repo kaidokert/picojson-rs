@@ -124,7 +124,7 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
 /// Shared methods for StreamParser with any BitStackConfig
 impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Get the next JSON event from the stream
-    fn next_event_impl(&mut self) -> Result<Event, ParseError> {
+    fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
         // Apply any queued unescaped content reset from previous call
         self.apply_unescaped_reset_if_queued();
 
@@ -321,12 +321,12 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Extract number from parser state without 'static lifetime cheating
-    fn extract_number_from_state(&mut self) -> Result<Event, ParseError> {
+    fn extract_number_from_state(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.extract_number_from_state_with_context(false)
     }
 
     /// Extract string after all buffer operations are complete
-    fn extract_string_from_state(&mut self) -> Result<Event, ParseError> {
+    fn extract_string_from_state(&mut self) -> Result<Event<'_, '_>, ParseError> {
         let crate::shared::State::String(start_pos) = self.parser_state.state else {
             return Err(ParserErrorHandler::state_mismatch("string", "extract"));
         };
@@ -341,7 +341,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Helper to create an unescaped string from DirectBuffer
-    fn create_unescaped_string(&mut self) -> Result<Event, ParseError> {
+    fn create_unescaped_string(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.queue_unescaped_reset();
         let unescaped_slice = self.direct_buffer.get_unescaped_slice()?;
         let str_content = ParserErrorHandler::bytes_to_utf8_str(unescaped_slice)?;
@@ -349,7 +349,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Helper to create a borrowed string from DirectBuffer
-    fn create_borrowed_string(&mut self, start_pos: usize) -> Result<Event, ParseError> {
+    fn create_borrowed_string(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let current_pos = self.direct_buffer.current_position();
         let (content_start, content_end) =
             ContentRange::string_content_bounds(start_pos, current_pos);
@@ -362,7 +362,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Extract key after all buffer operations are complete
-    fn extract_key_from_state(&mut self) -> Result<Event, ParseError> {
+    fn extract_key_from_state(&mut self) -> Result<Event<'_, '_>, ParseError> {
         let crate::shared::State::Key(start_pos) = self.parser_state.state else {
             return Err(ParserErrorHandler::state_mismatch("key", "extract"));
         };
@@ -377,7 +377,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Helper to create an unescaped key from DirectBuffer
-    fn create_unescaped_key(&mut self) -> Result<Event, ParseError> {
+    fn create_unescaped_key(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.queue_unescaped_reset();
         let unescaped_slice = self.direct_buffer.get_unescaped_slice()?;
         let str_content = ParserErrorHandler::bytes_to_utf8_str(unescaped_slice)?;
@@ -385,7 +385,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Helper to create a borrowed key from DirectBuffer
-    fn create_borrowed_key(&mut self, start_pos: usize) -> Result<Event, ParseError> {
+    fn create_borrowed_key(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let current_pos = self.direct_buffer.current_position();
         let (content_start, content_end) =
             ContentRange::string_content_bounds(start_pos, current_pos);
@@ -401,7 +401,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     fn extract_number_from_state_with_context(
         &mut self,
         from_container_end: bool,
-    ) -> Result<Event, ParseError> {
+    ) -> Result<Event<'_, '_>, ParseError> {
         let crate::shared::State::Number(start_pos) = self.parser_state.state else {
             return Err(ParserErrorHandler::state_mismatch("number", "extract"));
         };
@@ -596,7 +596,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 }
 
 impl<'b, R: Reader, C: BitStackConfig> PullParser for StreamParser<'b, R, C> {
-    fn next_event(&mut self) -> Result<Event, ParseError> {
+    fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.next_event_impl()
     }
 }
