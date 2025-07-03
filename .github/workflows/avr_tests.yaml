@@ -65,7 +65,7 @@ jobs:
 
       - name: Build the demos in panic check profile
         working-directory: avr_demo
-        run: cargo build --example --profile panic_checks minimal
+        run: cargo build --profile panic_checks --example minimal
 
       - name: Run Panic Check (Minimal Example)
         working-directory: avr_demo
