@@ -23,6 +23,8 @@ features = ["arduino-uno"]
 
 [profile.dev]
 panic = "abort"
+lto = true
+opt-level = "s"
 
 # Build profile for investigating panics in the code
 # We don't want to optimize away any code, but do
