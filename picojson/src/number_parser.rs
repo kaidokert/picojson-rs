@@ -33,7 +33,7 @@ pub fn parse_number_event<T: NumberExtractor>(
     extractor: &T,
     start_pos: usize,
     from_container_end: bool,
-) -> Result<Event, ParseError> {
+) -> Result<Event<'_, '_>, ParseError> {
     let current_pos = extractor.current_position();
 
     // Determine if we should exclude a delimiter from the number

@@ -175,7 +175,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         &mut self,
         start: usize,
         from_container_end: bool,
-    ) -> Result<Event, ParseError> {
+    ) -> Result<Event<'_, '_>, ParseError> {
         crate::number_parser::parse_number_event(&self.buffer, start, from_container_end)
     }
 
@@ -184,7 +184,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
     fn handle_simple_escape_token(
         &mut self,
         escape_token: &EventToken,
-    ) -> Result<Option<Event>, ParseError> {
+    ) -> Result<Option<Event<'_, '_>>, ParseError> {
         // Use unified escape token processing
         let unescaped_char = EscapeProcessor::process_escape_token(escape_token)?;
 
@@ -193,7 +193,10 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
     }
 
     /// Handles escape sequence events by delegating to CopyOnEscape if we're inside a string or key
-    fn handle_escape_event(&mut self, escape_char: u8) -> Result<Option<Event>, ParseError> {
+    fn handle_escape_event(
+        &mut self,
+        escape_char: u8,
+    ) -> Result<Option<Event<'_, '_>>, ParseError> {
         if let State::String(_) | State::Key(_) = self.parser_state.state {
             self.copy_on_escape
                 .handle_escape(self.buffer.current_pos(), escape_char)?;
@@ -254,7 +257,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
 
     /// Returns the next JSON event or an error if parsing fails.
     /// Parsing continues until `EndDocument` is returned or an error occurs.
-    fn next_event_impl(&mut self) -> Result<Event, ParseError> {
+    fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
         if self.buffer.is_past_end() {
             return Ok(Event::EndDocument);
         }
@@ -443,7 +446,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
 }
 
 impl<'a, 'b, C: BitStackConfig> PullParser for SliceParser<'a, 'b, C> {
-    fn next_event(&mut self) -> Result<Event, ParseError> {
+    fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.next_event_impl()
     }
 }

@@ -4,8 +4,21 @@
 
 use avr_demo::stack_measurement::*;
 use panic_halt as _;
-use picojson::{self, ArrayBitStack, Event, ParseError, PullParser, SliceParser};
+use picojson::{self, Event, ParseError, PullParser, SliceParser};
+
+#[allow(unused_imports)]
+use picojson::ArrayBitStack;
+
+// Conditional import of uwriteln! - stub out if ufmt feature is not enabled
+#[cfg(feature = "ufmt")]
 use ufmt::uwriteln;
+
+#[cfg(not(feature = "ufmt"))]
+macro_rules! uwriteln {
+    ($($args:tt)*) => {
+        Ok::<(), core::convert::Infallible>(())
+    };
+}
 
 // Conditionally define the configuration based on features.
 #[cfg(feature = "pico-small")]
@@ -51,8 +64,8 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
                 if key_is_status {
                     let s = value.as_str();
                     status_len = s.len();
-                    if status_len <= scratch.len() {
-                        scratch[..status_len].copy_from_slice(s.as_bytes());
+                    if let Some(target_slice) = scratch.get_mut(..status_len) {
+                        target_slice.copy_from_slice(s.as_bytes());
                     }
                 }
                 key_is_id = false;
@@ -74,19 +87,29 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
             None => break,
         }
     }
+    let status_str = match scratch
+        .get(..status_len)
+        .and_then(|slice| core::str::from_utf8(slice).ok())
+    {
+        Some(s) => s,
+        None => "",
+    };
 
     Ok(Doc {
         id,
         test_depth,
-        status: core::str::from_utf8(&scratch[..status_len]).unwrap_or(""),
+        status: status_str,
     })
 }
 
 #[arduino_hal::entry]
 fn main() -> ! {
-    let dp = arduino_hal::Peripherals::take().unwrap();
-    let pins = arduino_hal::pins!(dp);
-    let mut serial = arduino_hal::default_serial!(dp, pins, 57600);
+    #[cfg(feature = "ufmt")]
+    let mut serial = {
+        let dp = arduino_hal::Peripherals::take().unwrap();
+        let pins = arduino_hal::pins!(dp);
+        arduino_hal::default_serial!(dp, pins, 57600)
+    };
 
     unsafe { fill_stack_with_watermark() };
 
@@ -99,6 +122,7 @@ fn main() -> ! {
         Ok(doc) => {
             uwriteln!(&mut serial, "Parsed doc id: {}", doc.id).ok();
             uwriteln!(&mut serial, "Parsed test_depth: {}", doc.test_depth).ok();
+            uwriteln!(&mut serial, "Parsed status: {}", doc.status).ok();
         }
         Err(_) => {
             uwriteln!(&mut serial, "JSON parsing failed!").ok();
