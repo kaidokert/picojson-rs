@@ -290,20 +290,16 @@ def get_available_examples():
     examples_dir = "examples"
 
     if os.path.exists(examples_dir):
-        for file in os.listdir(examples_dir):
-            if file.endswith('.rs'):
-                example_name = file[:-3]  # Remove .rs extension
-                examples.append(example_name)
-
+        examples.extend(
+            file[:-3]
+            for file in os.listdir(examples_dir)
+            if file.endswith('.rs')
+        )
     return sorted(examples)
 
 def run_panic_analysis(specific_examples=None):
     """Run panic checker on specified examples or all available ones."""
-    if specific_examples:
-        examples = specific_examples
-    else:
-        examples = get_available_examples()
-
+    examples = specific_examples if specific_examples else get_available_examples()
     results = {}
 
     print(f"\n=== Panic Reference Analysis ===")
@@ -335,7 +331,7 @@ def print_panic_report(results):
         print(f"| {example} | {result} |")
 
     # Overall status
-    failed_count = sum(1 for r in results.values() if "FAIL" in r)
+    failed_count = sum(bool("FAIL" in r)
     total_count = len([r for r in results.values() if r != "Not Found"])
 
     if failed_count > 0:

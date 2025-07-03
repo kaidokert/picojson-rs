@@ -24,7 +24,7 @@ features = ["arduino-uno"]
 [profile.dev]
 panic = "abort"
 
-# Build profile for investigatinc panics in the code
+# Build profile for investigating panics in the code
 # We don't want to optimize away any code, but do
 # enable dead code elimination.
 [profile.panic_checks]
