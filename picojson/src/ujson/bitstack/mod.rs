@@ -49,26 +49,44 @@ where
 
 /// Trait for depth counters - tracks nesting depth.
 ///
-/// This is automatically implemented for any type that satisfies the individual bounds.
-pub trait DepthCounter:
-    From<u8>
-    + core::cmp::PartialEq<Self>
-    + core::ops::AddAssign<Self>
-    + core::ops::SubAssign<Self>
-    + core::ops::Not<Output = Self>
-    + core::fmt::Debug
-{
+/// This trait provides overflow-safe operations for tracking JSON nesting depth.
+/// Implemented for all unsigned integer types.
+pub trait DepthCounter: core::fmt::Debug + Copy {
+    /// Create a zero depth value
+    fn zero() -> Self;
+
+    /// Increment depth, returning (new_value, overflow_occurred)
+    fn increment(self) -> (Self, bool);
+
+    /// Decrement depth, returning (new_value, underflow_occurred)
+    fn decrement(self) -> (Self, bool);
+
+    /// Check if depth is zero
+    fn is_zero(self) -> bool;
 }
 
-impl<T> DepthCounter for T where
-    T: From<u8>
-        + core::cmp::PartialEq<T>
-        + core::ops::AddAssign<T>
-        + core::ops::SubAssign<T>
-        + core::ops::Not<Output = T>
-        + core::fmt::Debug
-{
+macro_rules! impl_depth_counter {
+    ($($t:ty),*) => {
+        $(
+            impl DepthCounter for $t {
+                #[inline]
+                fn zero() -> Self { 0 }
+
+                #[inline]
+                fn increment(self) -> (Self, bool) { self.overflowing_add(1) }
+
+                #[inline]
+                fn decrement(self) -> (Self, bool) { self.overflowing_sub(1) }
+
+                #[inline]
+                fn is_zero(self) -> bool { self == 0 }
+            }
+        )*
+    };
 }
+
+// Implement for all unsigned integer types
+impl_depth_counter!(u8, u16, u32, u64, u128, usize);
 
 /// Configuration trait for BitStack systems - defines bucket and counter types.
 pub trait BitStackConfig {
