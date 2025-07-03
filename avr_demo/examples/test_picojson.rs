@@ -87,13 +87,10 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
             None => break,
         }
     }
-    let status_str = match scratch
+    let status_str = scratch
         .get(..status_len)
         .and_then(|slice| core::str::from_utf8(slice).ok())
-    {
-        Some(s) => s,
-        None => "",
-    };
+        .unwrap_or("");
 
     Ok(Doc {
         id,
