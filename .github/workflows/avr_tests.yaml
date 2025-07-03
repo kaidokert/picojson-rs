@@ -20,10 +20,12 @@ jobs:
       - name: Install simavr and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y simavr avarice gcc-avr avr-libc
+          sudo apt-get install -y simavr gcc-avr avr-libc
 
       - name: Install cargo-bloat
         run: cargo install cargo-bloat
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
 
       - name: Run Stack Analysis
         working-directory: avr_demo
@@ -32,3 +34,39 @@ jobs:
       - name: Run Bloat Analysis
         working-directory: avr_demo
         run: python run_suite.py bloat
+
+  avr_panic_check:
+    name: AVR Panic Prevention
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - name: Install simavr and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y simavr gcc-avr avr-libc
+
+      - name: Install cargo-binutils
+        run: cargo install cargo-binutils
+
+      - name: Build the demos in Release mode
+        working-directory: avr_demo
+        run: cargo build --release --examples
+
+      - name: Build the demos in Dev mode
+        working-directory: avr_demo
+        run: cargo build --examples
+
+      - name: Build the demos in panic check profile
+        working-directory: avr_demo
+        run: cargo build --profile panic_checks --example minimal
+
+      - name: Run Panic Check (Minimal Example)
+        working-directory: avr_demo
+        run: python run_suite.py panic --example minimal
