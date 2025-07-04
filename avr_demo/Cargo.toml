@@ -11,7 +11,6 @@ autobenches = false
 
 [dependencies]
 picojson = { path = "../picojson", default-features = false}
-panic-halt = "1.0"
 ufmt = { version = "0.2", optional = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde-json-core = { version = "0.6", default-features = false }
@@ -53,7 +52,7 @@ lto = true
 opt-level = "s"
 
 [features]
-default = ["depth-7", "pico-tiny", "ufmt", "int32"]
+default = ["depth-7", "pico-tiny", "ufmt", "int8"]
 
 int8 = [ "picojson/int8"]
 int32 = [ "picojson/int32"]
@@ -72,8 +71,6 @@ depth-511 = []
 depth-513 = []
 depth-1023 = []
 depth-1025 = []
-
-debug-trace = []
 
 pico-small = []
 pico-huge = []

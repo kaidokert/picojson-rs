@@ -102,13 +102,13 @@ mod tests {
 
     #[test]
     fn test_parse_number_event_with_container() {
-        let data = b"456}"; // Number followed by container end
-        let extractor = MockExtractor::new(data, 4, false); // Position after '}'
+        let data = b"56}"; // Number followed by container end
+        let extractor = MockExtractor::new(data, 3, false); // Position after '}'
 
         let result = parse_number_event(&extractor, 0, true).unwrap();
         if let Event::Number(num) = result {
-            assert_eq!(num.as_str(), "456"); // Should exclude the '}'
-            assert_eq!(num.as_int(), Some(456));
+            assert_eq!(num.as_str(), "56"); // Should exclude the '}'
+            assert_eq!(num.as_int(), Some(56));
         } else {
             panic!("Expected Number event");
         }
@@ -116,13 +116,13 @@ mod tests {
 
     #[test]
     fn test_parse_number_event_at_eof() {
-        let data = b"789";
-        let extractor = MockExtractor::new(data, 3, true); // At EOF
+        let data = b"89";
+        let extractor = MockExtractor::new(data, 2, true); // At EOF
 
         let result = parse_number_event(&extractor, 0, false).unwrap();
         if let Event::Number(num) = result {
-            assert_eq!(num.as_str(), "789"); // Should include full number
-            assert_eq!(num.as_int(), Some(789));
+            assert_eq!(num.as_str(), "89"); // Should include full number
+            assert_eq!(num.as_int(), Some(89));
         } else {
             panic!("Expected Number event");
         }
