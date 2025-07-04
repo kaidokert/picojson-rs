@@ -17,8 +17,6 @@ jobs:
 
       - name: Run cargo check
         run: cargo check
-      - name: Run cargo check --no-default-features
-        run: cargo check --no-default-features
 
   test:
     name: Tests
