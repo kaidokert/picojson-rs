@@ -2,7 +2,7 @@
 #![no_std]
 #![no_main]
 
-use panic_halt as _;
+use avr_demo::panic_handler;
 
 #[arduino_hal::entry]
 fn main() -> ! {
