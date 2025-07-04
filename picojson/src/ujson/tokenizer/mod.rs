@@ -329,7 +329,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
         F: FnMut(Event, usize) + ?Sized,
     {
         let consumed = self.parse_chunk_inner(data, callback)?;
-        self.total_consumed += consumed;
+        self.total_consumed = self.total_consumed.wrapping_add(consumed);
         Ok(consumed)
     }
 
@@ -395,18 +395,18 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     fn parse_chunk_inner<F>(&mut self, data: &[u8], mut callback: &mut F) -> Result<usize, Error>
     where
         F: FnMut(Event, usize) + ?Sized,
-    {
+    { 
         let mut pos = 0;
-        while pos < data.len() {
+        while let Some(&current_byte) = data.get(pos) {
             // Special case - this needs to be done for every Array match arm
             if let State::Array {
                 expect: Array::ItemOrEnd,
             } = &self.state
             {
-                self.check_trailing_comma(data[pos])?;
+                self.check_trailing_comma(current_byte)?;
             }
 
-            self.state = match (&self.state, data[pos]) {
+            self.state = match (&self.state, current_byte) {
                 (State::Number { state: Num::Sign }, b'0') => State::Number {
                     state: Num::LeadingZero,
                 },
@@ -414,7 +414,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     state: Num::BeforeDecimalPoint,
                 },
                 (State::Number { state: Num::Sign }, _) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
+                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
                 }
                 (
                     State::Number {
@@ -470,7 +470,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
+                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
                 }
                 (
                     State::Number {
@@ -510,7 +510,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
+                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
                 }
                 (
                     State::Number {
@@ -526,7 +526,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
+                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
                 }
                 (
                     State::Number {
@@ -538,7 +538,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                 },
                 (State::Number { state: _ }, b',') => {
                     callback(Event::End(EventToken::Number), pos);
-                    self.context.after_comma = Some((data[pos], pos));
+                    self.context.after_comma = Some((current_byte, pos));
                     self.saw_a_comma_now_what()
                 }
                 (State::Number { state: _ }, b' ' | b'\t' | b'\n' | b'\r') => {
@@ -558,7 +558,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     self.maybe_exit_level()
                 }
                 (State::Number { state: _ }, _) => {
-                    return Error::new(ErrKind::InvalidNumber, data[pos], pos);
+                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
                 }
                 (
                     State::String {
@@ -597,7 +597,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'\x00'..=b'\x1F',
                 ) => {
-                    return Error::new(ErrKind::UnescapedControlCharacter, data[pos], pos);
+                    return Error::new(ErrKind::UnescapedControlCharacter, current_byte, pos);
                 }
                 (
                     State::String {
@@ -623,7 +623,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         b'n' => EventToken::EscapeNewline,
                         b'r' => EventToken::EscapeCarriageReturn,
                         b't' => EventToken::EscapeTab,
-                        _ => unreachable!(),
+                        // This branch should never be reached due to the pattern guard above
+                        _ => return Error::new(ErrKind::InvalidStringEscape, current_byte, pos),
                     };
                     callback(Event::Begin(escape_token.clone()), pos);
                     callback(Event::End(escape_token), pos);
@@ -707,7 +708,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => {
-                    return Error::new(ErrKind::InvalidUnicodeEscape, data[pos], pos);
+                    return Error::new(ErrKind::InvalidUnicodeEscape, current_byte, pos);
                 }
                 (
                     State::Idle
@@ -726,7 +727,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'[',
                 ) => {
-                    self.context.enter_array(data[pos], pos)?;
+                    self.context.enter_array(current_byte, pos)?;
                     callback(Event::ArrayStart, pos);
                     State::Array {
                         expect: Array::ItemOrEnd,
@@ -742,7 +743,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'{',
                 ) => {
-                    self.context.enter_object(data[pos], pos)?;
+                    self.context.enter_object(current_byte, pos)?;
                     callback(Event::ObjectStart, pos);
                     State::Object {
                         expect: Object::Key,
@@ -773,7 +774,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Array::ItemOrEnd,
                     },
                     b't' | b'f' | b'n',
-                ) => self.start_token(data[pos], pos, &mut callback)?,
+                ) => self.start_token(current_byte, pos, &mut callback)?,
                 (
                     State::Idle
                     | State::Object {
@@ -822,7 +823,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Object::Value,
                     },
                     _,
-                ) => return Error::new(ErrKind::ExpectedObjectValue, data[pos], pos),
+                ) => return Error::new(ErrKind::ExpectedObjectValue, current_byte, pos),
                 (
                     State::Array {
                         expect: Array::ItemOrEnd,
@@ -872,7 +873,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b',',
                 ) => {
-                    self.context.after_comma = Some((data[pos], pos));
+                    self.context.after_comma = Some((current_byte, pos));
                     State::Object {
                         expect: Object::Key,
                     }
@@ -893,7 +894,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b',',
                 ) => {
-                    self.context.after_comma = Some((data[pos], pos));
+                    self.context.after_comma = Some((current_byte, pos));
                     State::Array {
                         expect: Array::ItemOrEnd,
                     }
@@ -994,7 +995,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
 
                 // Wrong tokens
                 (State::Idle, _) => {
-                    return Error::new(ErrKind::InvalidRoot, data[pos], pos);
+                    return Error::new(ErrKind::InvalidRoot, current_byte, pos);
                 }
                 (
                     State::String {
@@ -1002,25 +1003,25 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         key: _,
                     },
                     _,
-                ) => return Error::new(ErrKind::InvalidStringEscape, data[pos], pos),
+                ) => return Error::new(ErrKind::InvalidStringEscape, current_byte, pos),
                 (
                     State::Object {
                         expect: Object::Key,
                     },
                     _,
-                ) => return Error::new(ErrKind::ExpectedObjectKey, data[pos], pos),
+                ) => return Error::new(ErrKind::ExpectedObjectKey, current_byte, pos),
                 (
                     State::Object {
                         expect: Object::Colon,
                     },
                     _,
-                ) => return Error::new(ErrKind::ExpectedColon, data[pos], pos),
+                ) => return Error::new(ErrKind::ExpectedColon, current_byte, pos),
                 (
                     State::Object {
                         expect: Object::CommaOrEnd,
                     },
                     _,
-                ) => return Error::new(ErrKind::ExpectedObjectValue, data[pos], pos),
+                ) => return Error::new(ErrKind::ExpectedObjectValue, current_byte, pos),
                 (
                     State::Array {
                         expect: Array::ItemOrEnd,
@@ -1029,13 +1030,13 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Array::CommaOrEnd,
                     },
                     _,
-                ) => return Error::new(ErrKind::ExpectedArrayItem, data[pos], pos),
-                (State::Finished, _) => return Error::new(ErrKind::ContentEnded, data[pos], pos),
+                ) => return Error::new(ErrKind::ExpectedArrayItem, current_byte, pos),
+                (State::Finished, _) => return Error::new(ErrKind::ContentEnded, current_byte, pos),
                 (State::Token { token: _ }, _) => {
-                    return Error::new(ErrKind::InvalidToken, data[pos], pos)
+                    return Error::new(ErrKind::InvalidToken, current_byte, pos)
                 }
             };
-            pos += 1;
+            pos = pos.saturating_add(1);
         }
         Ok(pos)
     }
