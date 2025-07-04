@@ -29,9 +29,15 @@ jobs:
           - name: Default (int64 + float)
             features: ""
 
-          # No features baseline
-          - name: No features
-            features: --no-default-features
+          # int8 configurations
+          - name: int8 + float
+            features: --no-default-features --features "int8,float"
+          - name: int8 + float-skip
+            features: --no-default-features --features "int8,float-skip"
+          - name: int8 + float-error
+            features: --no-default-features --features "int8,float-error"
+          - name: int8 + float-truncate
+            features: --no-default-features --features "int8,float-truncate"
 
           # int32 configurations
           - name: int32 + float
