@@ -23,7 +23,7 @@ fn main() {
     // Show configuration being used
     #[cfg(feature = "int32")]
     println!("Configuration: Using i32 integers (embedded-friendly)");
-    #[cfg(not(feature = "int32"))]
+    #[cfg(feature = "int64")]
     println!("Configuration: Using i64 integers (full range)");
 
     #[cfg(feature = "float")]
@@ -144,7 +144,7 @@ fn print_summary() {
     println!("\n=== Summary ===");
     #[cfg(feature = "int32")]
     println!("- Using i32 integers (no 64-bit math routines needed)");
-    #[cfg(not(feature = "int32"))]
+    #[cfg(feature = "int64")]
     println!("- Using i64 integers (full range)");
 
     #[cfg(feature = "float")]

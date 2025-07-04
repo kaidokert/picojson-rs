@@ -71,7 +71,7 @@ impl<'a> DirectBuffer<'a> {
         if self.tokenize_pos >= self.data_end {
             return Err(DirectBufferError::EndOfData);
         }
-        self.tokenize_pos += 1;
+        self.tokenize_pos = self.tokenize_pos.wrapping_add(1);
         Ok(())
     }
 
@@ -91,12 +91,13 @@ impl<'a> DirectBuffer<'a> {
 
     /// Mark that Reader filled `bytes_read` bytes
     pub fn mark_filled(&mut self, bytes_read: usize) -> Result<(), DirectBufferError> {
-        if self.data_end + bytes_read > self.buffer.len() {
+        let new_data_end = self.data_end.wrapping_add(bytes_read);
+        if new_data_end > self.buffer.len() {
             return Err(DirectBufferError::InvalidState(
                 "Attempted to mark more bytes than buffer space",
             ));
         }
-        self.data_end += bytes_read;
+        self.data_end = new_data_end;
         Ok(())
     }
 
@@ -118,7 +119,7 @@ impl<'a> DirectBuffer<'a> {
 
         // Copy existing content if there is any
         if copy_end > copy_start && copy_start < self.data_end {
-            let span_len = copy_end - copy_start;
+            let span_len = copy_end.saturating_sub(copy_start);
 
             // Ensure the span fits in the buffer - return error instead of silent truncation
             if span_len > self.buffer.len() {
@@ -128,7 +129,7 @@ impl<'a> DirectBuffer<'a> {
             // Copy within the same buffer: move data from [copy_start..copy_end] to [0..span_len]
             // Use copy_within to handle overlapping ranges safely
             self.buffer
-                .copy_within(copy_start..copy_start + span_len, 0);
+                .copy_within(copy_start..copy_start.wrapping_add(span_len), 0);
             self.unescaped_len = span_len;
         }
 
@@ -173,7 +174,7 @@ impl<'a> DirectBuffer<'a> {
         }
 
         self.buffer[self.unescaped_len] = byte;
-        self.unescaped_len += 1;
+        self.unescaped_len = self.unescaped_len.wrapping_add(1);
         Ok(())
     }
 

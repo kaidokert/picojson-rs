@@ -152,7 +152,7 @@ def _run_objdump(example_name, profile, verbose, no_default_features, features):
         cmd.append("--no-default-features")
     if features:
         cmd.extend(["--features", features])
-    cmd.extend(["--example", example_name, "--", "-dS"])
+    cmd.extend(["--example", example_name, "--", "-dS","-l","-z","--show-all-symbols"])
 
     if verbose:
         print(f"Running: {' '.join(cmd)}")
@@ -216,6 +216,12 @@ def _analyze_panic_patterns(content, verbose):
     lines = content.split('\n')
     current_function = None
     for line_num, line in enumerate(lines, 1):
+        # Skip disassembler comments that contain false positive int_log10 references
+        if re.match(r'^ *;.*int_log10::panic_for_nonpositive_argument', line):
+            if verbose:
+                print(f"Skipping false positive at line {line_num}: {line.strip()}")
+            continue
+
         function_header_line = False
         if '<' in line and '>' in line and line.endswith(':'):
             match = re.search(r'<(.+)>:', line)

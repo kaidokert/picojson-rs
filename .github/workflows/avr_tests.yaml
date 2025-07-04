@@ -70,3 +70,7 @@ jobs:
       - name: Run Panic Check (Minimal Example)
         working-directory: avr_demo
         run: python run_suite.py panic --example minimal
+
+      - name: Run Panic Check (Minimal Example)
+        working-directory: avr_demo
+        run: python run_suite.py panic --example test_picojson

@@ -5,7 +5,7 @@ use crate::{shared::ParserErrorHandler, ParseError};
 /// Shared utilities for processing JSON escape sequences.
 /// This module contains pure functions for escape processing that can be used
 /// by both CopyOnEscape and StreamingBuffer components.
-pub(crate) struct EscapeProcessor;
+pub struct EscapeProcessor;
 use crate::ujson;
 use ujson::EventToken;
 
@@ -95,8 +95,8 @@ impl EscapeProcessor {
     pub fn validate_hex_digit(byte: u8) -> Result<u32, ParseError> {
         match byte {
             b'0'..=b'9' => Ok((byte - b'0') as u32),
-            b'a'..=b'f' => Ok((byte - b'a' + 10) as u32),
-            b'A'..=b'F' => Ok((byte - b'A' + 10) as u32),
+            b'a'..=b'f' => Ok(byte.wrapping_sub(b'a').wrapping_add(10) as u32),
+            b'A'..=b'F' => Ok(byte.wrapping_sub(b'A').wrapping_add(10) as u32),
             _ => Err(ParseError::InvalidUnicodeHex),
         }
     }
@@ -142,7 +142,7 @@ impl EscapeProcessor {
 /// Shared Unicode escape hex digit collector for both parsers.
 /// Provides a common interface for collecting the 4 hex digits in \uXXXX sequences.
 #[derive(Debug)]
-pub(crate) struct UnicodeEscapeCollector {
+pub struct UnicodeEscapeCollector {
     /// Buffer to collect the 4 hex digits
     hex_buffer: [u8; 4],
     /// Current position in the hex buffer (0-4)
@@ -175,8 +175,12 @@ impl UnicodeEscapeCollector {
             ));
         }
 
-        self.hex_buffer[self.hex_pos] = digit;
-        self.hex_pos += 1;
+        // Safe assignment using get_mut
+        if let Some(slot) = self.hex_buffer.get_mut(self.hex_pos) {
+            *slot = digit;
+        }
+
+        self.hex_pos = self.hex_pos.saturating_add(1);
 
         Ok(self.hex_pos == 4)
     }

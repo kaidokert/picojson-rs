@@ -395,7 +395,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     fn parse_chunk_inner<F>(&mut self, data: &[u8], mut callback: &mut F) -> Result<usize, Error>
     where
         F: FnMut(Event, usize) + ?Sized,
-    { 
+    {
         let mut pos = 0;
         while let Some(&current_byte) = data.get(pos) {
             // Special case - this needs to be done for every Array match arm
@@ -1031,7 +1031,9 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => return Error::new(ErrKind::ExpectedArrayItem, current_byte, pos),
-                (State::Finished, _) => return Error::new(ErrKind::ContentEnded, current_byte, pos),
+                (State::Finished, _) => {
+                    return Error::new(ErrKind::ContentEnded, current_byte, pos)
+                }
                 (State::Token { token: _ }, _) => {
                     return Error::new(ErrKind::InvalidToken, current_byte, pos)
                 }

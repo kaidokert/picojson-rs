@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::shared::{Event, ParseError, ParserErrorHandler};
+use crate::shared::{Event, ParseError};
 use crate::JsonNumber;
 
 /// Trait for extracting number slices from different buffer implementations.
@@ -45,12 +45,12 @@ pub fn parse_number_event<T: NumberExtractor>(
         current_pos
     };
 
-    // Extract number bytes and convert to string
+    // Extract number bytes and parse directly
     let number_bytes = extractor.get_number_slice(start_pos, number_end)?;
-    let number_str = ParserErrorHandler::bytes_to_utf8_str(number_bytes)?;
+    let parsed_result = crate::parse_number_from_str(number_bytes)?;
 
-    // Parse number using shared logic
-    let parsed_result = crate::parse_number_from_str(number_str)?;
+    // Convert to string for JsonNumber event
+    let number_str = crate::shared::from_utf8(number_bytes)?;
 
     // Create event
     Ok(Event::Number(JsonNumber::Borrowed {
@@ -62,6 +62,7 @@ pub fn parse_number_event<T: NumberExtractor>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::ParserErrorHandler;
 
     // Mock extractor for testing
     struct MockExtractor {
