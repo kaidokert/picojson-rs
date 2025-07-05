@@ -212,7 +212,6 @@ impl ContentRange {
 pub(crate) struct ParserErrorHandler;
 
 #[cfg(not(feature = "unsafe-utf8"))]
-#[inline(never)]
 pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     match core::str::from_utf8(v) {
         Ok(s) => Ok(s),
@@ -220,7 +219,6 @@ pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     }
 }
 #[cfg(feature = "unsafe-utf8")]
-#[inline(never)]
 pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     unsafe { Ok(core::str::from_utf8_unchecked(v)) }
 }

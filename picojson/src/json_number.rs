@@ -157,7 +157,6 @@ impl core::fmt::Display for JsonNumber<'_, '_> {
 
 /// Detects if a number byte slice represents an integer (no decimal point or exponent).
 /// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
-#[inline(never)]
 pub fn is_integer(bytes: &[u8]) -> bool {
     for &b in bytes {
         if b == b'.' || b == b'e' || b == b'E' {
@@ -169,7 +168,6 @@ pub fn is_integer(bytes: &[u8]) -> bool {
 
 /// Parses an integer byte slice into NumberResult using configured integer type.
 /// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
-#[inline(never)]
 pub const fn parse_integer(bytes: &[u8]) -> NumberResult {
     #[cfg(feature = "int8")]
     let result = from_ascii_i8(bytes);
@@ -187,7 +185,6 @@ pub const fn parse_integer(bytes: &[u8]) -> NumberResult {
 /// Parses a float byte slice into NumberResult (only available with float feature).
 /// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
 #[cfg(feature = "float")]
-#[inline(never)]
 pub fn parse_float(bytes: &[u8]) -> NumberResult {
     // Convert bytes to str - JSON numbers are guaranteed ASCII
     let s = match crate::shared::from_utf8(bytes) {
@@ -203,7 +200,6 @@ pub fn parse_float(bytes: &[u8]) -> NumberResult {
 /// Parses a float byte slice when float feature is disabled - behavior depends on configuration.
 /// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
 #[cfg(not(feature = "float"))]
-#[inline(never)]
 pub fn parse_float(bytes: &[u8]) -> Result<NumberResult, ParseError> {
     // Convert bytes to str - JSON numbers are guaranteed ASCII
     let s = match crate::shared::from_utf8(bytes) {
@@ -256,7 +252,6 @@ pub fn parse_float(bytes: &[u8]) -> Result<NumberResult, ParseError> {
 ///
 /// This is the main entry point for parsing numbers with all the configured
 /// behavior (int32/int64, float support, etc.).
-#[inline(never)]
 pub fn parse_number_from_str(bytes: &[u8]) -> Result<NumberResult, ParseError> {
     if is_integer(bytes) {
         Ok(parse_integer(bytes))
