@@ -43,12 +43,14 @@ pub struct StreamBuffer<'a> {
     escape_reserve: usize,
 }
 
+const MIN_ESCAPE_RESERVE: usize = 16;
+
 impl<'a> StreamBuffer<'a> {
     /// Create a new StreamBuffer with the given buffer slice
     pub fn new(buffer: &'a mut [u8]) -> Self {
         // Reserve ~12.5% of buffer for escape processing (>>3 instead of /10), minimum 64 bytes
         // Avoids expensive 32-bit division on 8-bit AVR targets
-        let escape_reserve = (buffer.len() >> 3).max(64);
+        let escape_reserve = (buffer.len() >> 3).max(MIN_ESCAPE_RESERVE);
 
         Self {
             buffer,
@@ -244,7 +246,7 @@ mod tests {
         assert_eq!(db.tokenize_pos, 0);
         assert_eq!(db.data_end, 0);
         assert_eq!(db.unescaped_len, 0);
-        assert_eq!(db.escape_reserve, 64); // 12.5% of 100, minimum 64
+        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE); // 12.5% of 100, minimum MIN_ESCAPE_RESERVE
         assert!(db.is_empty());
     }
 
@@ -358,12 +360,12 @@ mod tests {
         let db = StreamBuffer::new(&mut buffer);
 
         // Check escape reserve calculation
-        assert_eq!(db.escape_reserve, 64); // max(100>>3, 64) = 64
+        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE); // max(100>>3, MIN_ESCAPE_RESERVE) = MIN_ESCAPE_RESERVE
 
         // Test with smaller buffer
         let mut small_buffer = [0u8; 50];
         let small_db = StreamBuffer::new(&mut small_buffer);
-        assert_eq!(small_db.escape_reserve, 64); // Still 64 (minimum)
+        assert_eq!(small_db.escape_reserve, MIN_ESCAPE_RESERVE); // Still MIN_ESCAPE_RESERVE (minimum)
 
         // Test with larger buffer
         let mut large_buffer = [0u8; 1000];
@@ -434,8 +436,8 @@ mod tests {
         let mut buffer = [0u8; 100]; // 100 byte buffer
         let mut db = StreamBuffer::new(&mut buffer);
 
-        // Check escape reserve was set correctly (12.5% of 100, minimum 64)
-        assert_eq!(db.escape_reserve, 64);
+        // Check escape reserve was set correctly (12.5% of 100, minimum MIN_ESCAPE_RESERVE)
+        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE);
 
         // Should be able to append up to (buffer_len - escape_reserve) bytes
         let max_unescaped = 100 - db.escape_reserve; // 100 - 64 = 36
@@ -462,7 +464,7 @@ mod tests {
         let mut db = StreamBuffer::new(&mut buffer);
 
         // Even small buffers get minimum 64 byte escape reserve, but that's larger than buffer
-        assert_eq!(db.escape_reserve, 64); // minimum
+        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE); // minimum
 
         // Since escape_reserve (64) > buffer.len() (10), no bytes should be appendable
         // This should not panic with underflow, but return BufferFull error
@@ -472,7 +474,7 @@ mod tests {
         // Test with even smaller buffer to ensure we handle underflow correctly
         let mut tiny_buffer = [0u8; 3];
         let mut tiny_db = StreamBuffer::new(&mut tiny_buffer);
-        assert_eq!(tiny_db.escape_reserve, 64); // Still minimum 64
+        assert_eq!(tiny_db.escape_reserve, MIN_ESCAPE_RESERVE); // Still minimum MIN_ESCAPE_RESERVE
 
         // Should handle this gracefully without panic
         let result = tiny_db.append_unescaped_byte(b'B');
