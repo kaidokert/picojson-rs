@@ -104,31 +104,24 @@ enum Num {
     AfterExponent,
 }
 
-#[derive(Debug, Clone)]
-enum True {
-    R,
-    U,
-    E,
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TokenType {
+    True,
+    False,
+    Null,
 }
+
 #[derive(Debug, Clone)]
-enum False {
-    A,
-    L,
-    S,
-    E,
-}
-#[derive(Debug, Clone)]
-enum Null {
-    U,
-    L1,
-    L2,
+struct TokenProgress {
+    token_type: TokenType,
+    position: usize, // Current position in token string
 }
 
 #[derive(Debug, Clone)]
 enum Token {
-    True(True),
-    False(False),
-    Null(Null),
+    True(TokenProgress),
+    False(TokenProgress),
+    Null(TokenProgress),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,7 +138,7 @@ enum Array {
     CommaOrEnd,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EventToken {
     True,
     False,
@@ -244,6 +237,53 @@ impl Default for Tokenizer {
 }
 
 impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
+    // Token strings for const validation
+    const TOKEN_STRINGS: [&'static [u8]; 3] = [
+        b"true",  // TokenType::True
+        b"false", // TokenType::False
+        b"null",  // TokenType::Null
+    ];
+
+    const TOKEN_EVENTS: [EventToken; 3] = [EventToken::True, EventToken::False, EventToken::Null];
+
+    // Convert TokenType to array index
+    const fn token_type_to_index(token_type: TokenType) -> usize {
+        match token_type {
+            TokenType::True => 0,
+            TokenType::False => 1,
+            TokenType::Null => 2,
+        }
+    }
+
+    // Process token character using const lookup
+    fn process_token_char(
+        &self,
+        progress: &TokenProgress,
+        ch: u8,
+    ) -> Result<Option<TokenProgress>, EventToken> {
+        let index = Self::token_type_to_index(progress.token_type);
+        let token_string = Self::TOKEN_STRINGS[index];
+
+        // Check if character matches expected position
+        if progress.position < token_string.len() && ch == token_string[progress.position] {
+            let new_position = progress.position + 1;
+
+            // Check if token is complete
+            if new_position == token_string.len() {
+                // Token complete - return the event token
+                Err(Self::TOKEN_EVENTS[index])
+            } else {
+                // Continue parsing
+                Ok(Some(TokenProgress {
+                    token_type: progress.token_type,
+                    position: new_position,
+                }))
+            }
+        } else {
+            // Invalid character for this token
+            Ok(None)
+        }
+    }
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,
@@ -369,27 +409,38 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
         pos: usize,
         callback: &mut dyn FnMut(Event, usize),
     ) -> Result<State, Error> {
-        match token {
+        let token_type = match token {
             b't' => {
                 callback(Event::Begin(EventToken::True), pos);
-                Ok(State::Token {
-                    token: Token::True(True::R),
-                })
+                TokenType::True
             }
             b'f' => {
                 callback(Event::Begin(EventToken::False), pos);
-                Ok(State::Token {
-                    token: Token::False(False::A),
-                })
+                TokenType::False
             }
             b'n' => {
                 callback(Event::Begin(EventToken::Null), pos);
-                Ok(State::Token {
-                    token: Token::Null(Null::U),
-                })
+                TokenType::Null
             }
-            _ => Error::new(ErrKind::InvalidToken, token, pos),
-        }
+            _ => return Error::new(ErrKind::InvalidToken, token, pos),
+        };
+
+        let token = match token_type {
+            TokenType::True => Token::True(TokenProgress {
+                token_type,
+                position: 1,
+            }),
+            TokenType::False => Token::False(TokenProgress {
+                token_type,
+                position: 1,
+            }),
+            TokenType::Null => Token::Null(TokenProgress {
+                token_type,
+                position: 1,
+            }),
+        };
+
+        Ok(State::Token { token })
     }
 
     fn parse_chunk_inner<F>(&mut self, data: &[u8], mut callback: &mut F) -> Result<usize, Error>
@@ -909,88 +960,27 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     self.context.exit_array(pos)?;
                     self.maybe_exit_level()
                 }
-                (
-                    State::Token {
-                        token: Token::True(True::R),
-                    },
-                    b'r',
-                ) => State::Token {
-                    token: Token::True(True::U),
-                },
-                (
-                    State::Token {
-                        token: Token::True(True::U),
-                    },
-                    b'u',
-                ) => State::Token {
-                    token: Token::True(True::E),
-                },
-                (
-                    State::Token {
-                        token: Token::True(True::E),
-                    },
-                    b'e',
-                ) => {
-                    callback(Event::End(EventToken::True), pos);
-                    self.maybe_exit_level()
-                }
-                (
-                    State::Token {
-                        token: Token::False(False::A),
-                    },
-                    b'a',
-                ) => State::Token {
-                    token: Token::False(False::L),
-                },
-                (
-                    State::Token {
-                        token: Token::False(False::L),
-                    },
-                    b'l',
-                ) => State::Token {
-                    token: Token::False(False::S),
-                },
-                (
-                    State::Token {
-                        token: Token::False(False::S),
-                    },
-                    b's',
-                ) => State::Token {
-                    token: Token::False(False::E),
-                },
-                (
-                    State::Token {
-                        token: Token::False(False::E),
-                    },
-                    b'e',
-                ) => {
-                    callback(Event::End(EventToken::False), pos);
-                    self.maybe_exit_level()
-                }
-                (
-                    State::Token {
-                        token: Token::Null(Null::U),
-                    },
-                    b'u',
-                ) => State::Token {
-                    token: Token::Null(Null::L1),
-                },
-                (
-                    State::Token {
-                        token: Token::Null(Null::L1),
-                    },
-                    b'l',
-                ) => State::Token {
-                    token: Token::Null(Null::L2),
-                },
-                (
-                    State::Token {
-                        token: Token::Null(Null::L2),
-                    },
-                    b'l',
-                ) => {
-                    callback(Event::End(EventToken::Null), pos);
-                    self.maybe_exit_level()
+                (State::Token { token }, current_byte) => {
+                    let progress = match token {
+                        Token::True(p) | Token::False(p) | Token::Null(p) => p,
+                    };
+                    match self.process_token_char(progress, current_byte) {
+                        Ok(Some(new_progress)) => {
+                            // Continue parsing token
+                            State::Token {
+                                token: Token::True(new_progress),
+                            }
+                        }
+                        Ok(None) => {
+                            // Invalid character for this token
+                            return Error::new(ErrKind::InvalidToken, current_byte, pos);
+                        }
+                        Err(event_token) => {
+                            // Token completed
+                            callback(Event::End(event_token), pos);
+                            self.maybe_exit_level()
+                        }
+                    }
                 }
 
                 // Wrong tokens
@@ -1033,9 +1023,6 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                 ) => return Error::new(ErrKind::ExpectedArrayItem, current_byte, pos),
                 (State::Finished, _) => {
                     return Error::new(ErrKind::ContentEnded, current_byte, pos)
-                }
-                (State::Token { token: _ }, _) => {
-                    return Error::new(ErrKind::InvalidToken, current_byte, pos)
                 }
             };
             pos = pos.saturating_add(1);
