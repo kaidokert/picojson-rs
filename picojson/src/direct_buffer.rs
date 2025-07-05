@@ -46,8 +46,9 @@ pub struct DirectBuffer<'a> {
 impl<'a> DirectBuffer<'a> {
     /// Create a new DirectBuffer with the given buffer slice
     pub fn new(buffer: &'a mut [u8]) -> Self {
-        // Reserve 10% of buffer for escape processing, minimum 64 bytes
-        let escape_reserve = (buffer.len() / 10).max(64);
+        // Reserve ~12.5% of buffer for escape processing (>>3 instead of /10), minimum 64 bytes
+        // Avoids expensive 32-bit division on 8-bit AVR targets
+        let escape_reserve = (buffer.len() >> 3).max(64);
 
         Self {
             buffer,
@@ -348,7 +349,7 @@ mod tests {
         // Test with larger buffer
         let mut large_buffer = [0u8; 1000];
         let large_db = DirectBuffer::new(&mut large_buffer);
-        assert_eq!(large_db.escape_reserve, 100); // 1000/10 = 100
+        assert_eq!(large_db.escape_reserve, 125); // 1000 >> 3 = 125
     }
 
     #[test]
