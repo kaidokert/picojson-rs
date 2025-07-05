@@ -216,20 +216,20 @@ mod tests {
     fn test_lifetime_expectations() {
         // This test demonstrates how StreamBuffer lifetimes should work
         let mut buffer = [0u8; 100];
-        let mut direct_buffer = StreamBuffer::new(&mut buffer);
+        let mut stream_buffer = StreamBuffer::new(&mut buffer);
 
         // Simulate some data being in the buffer
         let test_data = b"hello world";
-        direct_buffer.buffer[0..test_data.len()].copy_from_slice(test_data);
-        direct_buffer.data_end = test_data.len();
+        stream_buffer.buffer[0..test_data.len()].copy_from_slice(test_data);
+        stream_buffer.data_end = test_data.len();
 
         // Test that we can get buffer data
 
         // Test unescaped content - add some unescaped data
-        direct_buffer.unescaped_len = 3;
-        direct_buffer.buffer[0..3].copy_from_slice(b"abc");
+        stream_buffer.unescaped_len = 3;
+        stream_buffer.buffer[0..3].copy_from_slice(b"abc");
 
-        let unescaped_slice = direct_buffer.get_unescaped_slice().unwrap();
+        let unescaped_slice = stream_buffer.get_unescaped_slice().unwrap();
         assert_eq!(unescaped_slice, b"abc");
 
         // The key expectation: these slices should live as long as the original buffer
@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_direct_buffer() {
+    fn test_new_stream_buffer() {
         let mut buffer = [0u8; 100];
         let db = StreamBuffer::new(&mut buffer);
 
