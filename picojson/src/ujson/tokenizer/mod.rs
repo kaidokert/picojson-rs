@@ -92,7 +92,7 @@ enum String {
     Unicode3,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Num {
     Sign,
     LeadingZero,
@@ -281,8 +281,108 @@ const fn process_token_char(
         Ok(None)
     }
 }
-
 impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
+    // Number state transition table: [current_state][character] -> next_state
+    const NUM_TRANSITIONS: [[Option<Num>; 256]; 8] = {
+        let mut table = [[None; 256]; 8];
+
+        // Sign state (index 0)
+        table[0][b'0' as usize] = Some(Num::LeadingZero);
+        let mut i = b'1';
+        while i <= b'9' {
+            table[0][i as usize] = Some(Num::BeforeDecimalPoint);
+            i += 1;
+        }
+
+        // LeadingZero state (index 1)
+        table[1][b'.' as usize] = Some(Num::Decimal);
+        table[1][b'e' as usize] = Some(Num::Exponent);
+        table[1][b'E' as usize] = Some(Num::Exponent);
+
+        // BeforeDecimalPoint state (index 2)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[2][i as usize] = Some(Num::BeforeDecimalPoint);
+            i += 1;
+        }
+        table[2][b'.' as usize] = Some(Num::Decimal);
+        table[2][b'e' as usize] = Some(Num::Exponent);
+        table[2][b'E' as usize] = Some(Num::Exponent);
+
+        // Decimal state (index 3)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[3][i as usize] = Some(Num::AfterDecimalPoint);
+            i += 1;
+        }
+
+        // AfterDecimalPoint state (index 4)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[4][i as usize] = Some(Num::AfterDecimalPoint);
+            i += 1;
+        }
+        table[4][b'e' as usize] = Some(Num::Exponent);
+        table[4][b'E' as usize] = Some(Num::Exponent);
+
+        // Exponent state (index 5)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[5][i as usize] = Some(Num::AfterExponent);
+            i += 1;
+        }
+        table[5][b'+' as usize] = Some(Num::ExponentSign);
+        table[5][b'-' as usize] = Some(Num::ExponentSign);
+
+        // ExponentSign state (index 6)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[6][i as usize] = Some(Num::AfterExponent);
+            i += 1;
+        }
+
+        // AfterExponent state (index 7)
+        let mut i = b'0';
+        while i <= b'9' {
+            table[7][i as usize] = Some(Num::AfterExponent);
+            i += 1;
+        }
+
+        table
+    };
+
+    // Convert Num enum to table index for NUM_TRANSITIONS
+    const fn num_to_index(num: &Num) -> usize {
+        match num {
+            Num::Sign => 0,
+            Num::LeadingZero => 1,
+            Num::BeforeDecimalPoint => 2,
+            Num::Decimal => 3,
+            Num::AfterDecimalPoint => 4,
+            Num::Exponent => 5,
+            Num::ExponentSign => 6,
+            Num::AfterExponent => 7,
+        }
+    }
+
+    // Process number state transition using const table
+    fn process_number_transition(&self, current_num: &Num, ch: u8) -> Option<Num> {
+        let index = Self::num_to_index(current_num);
+        Self::NUM_TRANSITIONS[index][ch as usize]
+    }
+
+    // Check if current number state can be terminated (not in the middle of parsing)
+    fn is_valid_number_terminal_state(&self, num_state: &Num) -> bool {
+        match num_state {
+            // These states represent valid complete numbers
+            Num::LeadingZero
+            | Num::BeforeDecimalPoint
+            | Num::AfterDecimalPoint
+            | Num::AfterExponent => true,
+            // These states are incomplete and cannot be terminated
+            Num::Sign | Num::Decimal | Num::Exponent | Num::ExponentSign => false,
+        }
+    }
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,
@@ -453,158 +553,38 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
             }
 
             self.state = match (&self.state, current_byte) {
-                (State::Number { state: Num::Sign }, b'0') => State::Number {
-                    state: Num::LeadingZero,
-                },
-                (State::Number { state: Num::Sign }, b'1'..=b'9') => State::Number {
-                    state: Num::BeforeDecimalPoint,
-                },
-                (State::Number { state: Num::Sign }, _) => {
-                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
-                }
-                (
-                    State::Number {
-                        state: Num::LeadingZero,
-                    },
-                    b'e' | b'E',
-                ) => State::Number {
-                    state: Num::Exponent,
-                },
-                (
-                    State::Number {
-                        state: Num::LeadingZero,
-                    },
-                    b'.',
-                ) => State::Number {
-                    state: Num::Decimal,
-                },
-                (
-                    State::Number {
-                        state: Num::BeforeDecimalPoint,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::BeforeDecimalPoint,
-                },
-                (
-                    State::Number {
-                        state: Num::BeforeDecimalPoint,
-                    },
-                    b'.',
-                ) => State::Number {
-                    state: Num::Decimal,
-                },
-                (
-                    State::Number {
-                        state: Num::BeforeDecimalPoint,
-                    },
-                    b'e' | b'E',
-                ) => State::Number {
-                    state: Num::Exponent,
-                },
-                (
-                    State::Number {
-                        state: Num::Decimal,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterDecimalPoint,
-                },
-                (
-                    State::Number {
-                        state: Num::Decimal,
-                    },
-                    _,
-                ) => {
-                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
-                }
-                (
-                    State::Number {
-                        state: Num::AfterDecimalPoint,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterDecimalPoint,
-                },
-                (
-                    State::Number {
-                        state: Num::AfterDecimalPoint,
-                    },
-                    b'e' | b'E',
-                ) => State::Number {
-                    state: Num::Exponent,
-                },
-                (
-                    State::Number {
-                        state: Num::Exponent,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterExponent,
-                },
-                (
-                    State::Number {
-                        state: Num::Exponent,
-                    },
-                    b'+' | b'-',
-                ) => State::Number {
-                    state: Num::ExponentSign,
-                },
-                (
-                    State::Number {
-                        state: Num::Exponent,
-                    },
-                    _,
-                ) => {
-                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
-                }
-                (
-                    State::Number {
-                        state: Num::ExponentSign,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterExponent,
-                },
-                (
-                    State::Number {
-                        state: Num::ExponentSign,
-                    },
-                    _,
-                ) => {
-                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
-                }
-                (
-                    State::Number {
-                        state: Num::AfterExponent,
-                    },
-                    b'0'..=b'9',
-                ) => State::Number {
-                    state: Num::AfterExponent,
-                },
-                (State::Number { state: _ }, b',') => {
-                    callback(Event::End(EventToken::Number), pos);
-                    self.context.after_comma = Some((current_byte, pos));
-                    self.saw_a_comma_now_what()
-                }
-                (State::Number { state: _ }, b' ' | b'\t' | b'\n' | b'\r') => {
-                    callback(Event::End(EventToken::Number), pos);
-                    self.maybe_exit_level()
-                }
-                (State::Number { state: _ }, b']') => {
-                    callback(Event::End(EventToken::NumberAndArray), pos);
-                    callback(Event::ArrayEnd, pos);
-                    self.context.exit_array(pos)?;
-                    self.maybe_exit_level()
-                }
-                (State::Number { state: _ }, b'}') => {
-                    callback(Event::End(EventToken::NumberAndObject), pos);
-                    callback(Event::ObjectEnd, pos);
-                    self.context.exit_object(pos)?;
-                    self.maybe_exit_level()
-                }
-                (State::Number { state: _ }, _) => {
-                    return Error::new(ErrKind::InvalidNumber, current_byte, pos);
+                // Table-driven number parsing
+                (State::Number { state: num_state }, ch) => {
+                    // Try table transition first
+                    if let Some(next_state) = self.process_number_transition(num_state, ch) {
+                        State::Number { state: next_state }
+                    }
+                    // Handle number termination cases - but only for valid terminal states
+                    else if self.is_valid_number_terminal_state(num_state) {
+                        if ch == b',' {
+                            callback(Event::End(EventToken::Number), pos);
+                            self.context.after_comma = Some((ch, pos));
+                            self.saw_a_comma_now_what()
+                        } else if matches!(ch, b' ' | b'\t' | b'\n' | b'\r') {
+                            callback(Event::End(EventToken::Number), pos);
+                            self.maybe_exit_level()
+                        } else if ch == b']' {
+                            callback(Event::End(EventToken::NumberAndArray), pos);
+                            callback(Event::ArrayEnd, pos);
+                            self.context.exit_array(pos)?;
+                            self.maybe_exit_level()
+                        } else if ch == b'}' {
+                            callback(Event::End(EventToken::NumberAndObject), pos);
+                            callback(Event::ObjectEnd, pos);
+                            self.context.exit_object(pos)?;
+                            self.maybe_exit_level()
+                        } else {
+                            return Error::new(ErrKind::InvalidNumber, ch, pos);
+                        }
+                    } else {
+                        // Invalid transition from current state
+                        return Error::new(ErrKind::InvalidNumber, ch, pos);
+                    }
                 }
                 (
                     State::String {
