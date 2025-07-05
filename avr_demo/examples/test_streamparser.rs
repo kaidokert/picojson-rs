@@ -109,9 +109,13 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
             Some(Ok(Event::String(value))) => {
                 if key_context == KeyContext::Status {
                     let s = value.as_str();
-                    status_len = s.len();
-                    if let Some(target_slice) = scratch.get_mut(..status_len) {
-                        target_slice.copy_from_slice(s.as_bytes());
+                    let s_bytes = s.as_bytes();
+                    // Only copy if scratch buffer is large enough
+                    if s_bytes.len() <= scratch.len() {
+                        if let Some(target_slice) = scratch.get_mut(..s_bytes.len()) {
+                            target_slice.copy_from_slice(s_bytes);
+                            status_len = s_bytes.len(); // Only set length if copy succeeded
+                        }
                     }
                 }
                 key_context = KeyContext::None;
