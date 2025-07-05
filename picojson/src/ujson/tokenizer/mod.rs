@@ -297,9 +297,9 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     };
 
     // Character classification tables for faster parsing
-    const IS_DIGIT: [bool; 256] = {
+    const IS_NON_ZERO_DIGIT: [bool; 256] = {
         let mut table = [false; 256];
-        let mut i = b'0';
+        let mut i = b'1';
         while i <= b'9' {
             table[i as usize] = true;
             i += 1;
@@ -880,7 +880,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Array::ItemOrEnd,
                     },
                     ch,
-                ) if Self::IS_DIGIT[ch as usize] => {
+                ) if Self::IS_NON_ZERO_DIGIT[ch as usize] => {
                     callback(Event::Begin(EventToken::Number), pos);
                     State::Number {
                         state: Num::BeforeDecimalPoint,
@@ -1007,13 +1007,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                 (State::Idle, _) => {
                     return Error::new(ErrKind::InvalidRoot, current_byte, pos);
                 }
-                (
-                    State::String {
-                        state: String::Escaping,
-                        key: _,
-                    },
-                    _,
-                ) => return Error::new(ErrKind::InvalidStringEscape, current_byte, pos),
+
                 (
                     State::Object {
                         expect: Object::Key,
