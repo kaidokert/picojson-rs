@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::direct_buffer::DirectBuffer;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
 use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};
+use crate::stream_buffer::StreamBuffer;
 use crate::{ujson, PullParser};
 use ujson::{EventToken, Tokenizer};
 
@@ -48,8 +48,8 @@ pub struct StreamParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     parser_state: ParserState,
     /// Reader for streaming input
     reader: R,
-    /// DirectBuffer for single-buffer input and escape processing
-    direct_buffer: DirectBuffer<'b>,
+    /// StreamBuffer for single-buffer input and escape processing
+    direct_buffer: StreamBuffer<'b>,
 
     /// Processing state machine that enforces logical invariants
     processing_state: ProcessingState,
@@ -108,7 +108,7 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
             tokenizer: Tokenizer::new(),
             parser_state: ParserState::new(),
             reader,
-            direct_buffer: DirectBuffer::new(buffer),
+            direct_buffer: StreamBuffer::new(buffer),
 
             // Initialize new state machine to Active with default values
             processing_state: ProcessingState::Active {
@@ -340,7 +340,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         }
     }
 
-    /// Helper to create an unescaped string from DirectBuffer
+    /// Helper to create an unescaped string from StreamBuffer
     fn create_unescaped_string(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.queue_unescaped_reset();
         let unescaped_slice = self.direct_buffer.get_unescaped_slice()?;
@@ -348,7 +348,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         Ok(Event::String(crate::String::Unescaped(str_content)))
     }
 
-    /// Helper to create a borrowed string from DirectBuffer
+    /// Helper to create a borrowed string from StreamBuffer
     fn create_borrowed_string(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let current_pos = self.direct_buffer.current_position();
         let (content_start, content_end) =
@@ -376,7 +376,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         }
     }
 
-    /// Helper to create an unescaped key from DirectBuffer
+    /// Helper to create an unescaped key from StreamBuffer
     fn create_unescaped_key(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.queue_unescaped_reset();
         let unescaped_slice = self.direct_buffer.get_unescaped_slice()?;
@@ -384,7 +384,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         Ok(Event::Key(crate::String::Unescaped(str_content)))
     }
 
-    /// Helper to create a borrowed key from DirectBuffer
+    /// Helper to create a borrowed key from StreamBuffer
     fn create_borrowed_key(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let current_pos = self.direct_buffer.current_position();
         let (content_start, content_end) =
@@ -461,7 +461,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         Ok(())
     }
 
-    /// Start escape processing using DirectBuffer
+    /// Start escape processing using StreamBuffer
     fn start_escape_processing(&mut self) -> Result<(), ParseError> {
         // Update escape state in enum
         if let ProcessingState::Active {
@@ -472,7 +472,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
             *in_escape_sequence = true;
         }
 
-        // Initialize escape processing with DirectBuffer if not already started
+        // Initialize escape processing with StreamBuffer if not already started
         if !self.direct_buffer.has_unescaped_content() {
             if let crate::shared::State::String(start_pos) | crate::shared::State::Key(start_pos) =
                 self.parser_state.state
@@ -489,7 +489,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     .checked_add(content_len)
                     .ok_or(ParseError::NumericOverflow)?;
 
-                // Start unescaping with DirectBuffer and copy existing content
+                // Start unescaping with StreamBuffer and copy existing content
                 self.direct_buffer.start_unescaping_with_copy(
                     max_escaped_len,
                     content_start,
@@ -563,7 +563,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         Ok(())
     }
 
-    /// Append a byte to the DirectBuffer's unescaped content
+    /// Append a byte to the StreamBuffer's unescaped content
     fn append_byte_to_escape_buffer(&mut self, byte: u8) -> Result<(), ParseError> {
         self.direct_buffer
             .append_unescaped_byte(byte)
@@ -612,7 +612,6 @@ impl<'b, R: Reader, C: BitStackConfig> PullParser for StreamParser<'b, R, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_log::test;
 
     /// Simple test reader that reads from a byte slice
     pub struct SliceReader<'a> {
@@ -1050,7 +1049,7 @@ mod tests {
         assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
     }
 
-    #[test_log::test]
+    #[test]
     fn test_direct_parser_number_simple() {
         let json = b"42";
         let reader = SliceReader::new(json);
@@ -1118,7 +1117,7 @@ mod tests {
         }
     }
 
-    #[test_log::test]
+    #[test]
     fn test_direct_parser_numbers_in_array() {
         #[cfg(feature = "float-error")]
         let json = b"[42, -7]"; // No floats for float-error config
@@ -1159,7 +1158,7 @@ mod tests {
         assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
     }
 
-    #[test_log::test]
+    #[test]
     fn test_direct_parser_numbers_in_object() {
         #[cfg(feature = "float-error")]
         let json = b"{\"count\": 42, \"score\": -7}"; // No floats for float-error config

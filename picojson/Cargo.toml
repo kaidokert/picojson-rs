@@ -32,16 +32,5 @@ int64 = []              # Use i64 for integers (full range)
 float-skip = []         # Skip float values during parsing (continue with next token)
 float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
-# Use from_utf8_unchecked to avoid panic dependencies
-unsafe-utf8 = []
-defmt = ["dep:defmt"]
 
 [dependencies]
-defmt = { version = "1.0.1", optional = true }
-# TODO: Optional, should be swappable with defmt
-log = "0.4"
-
-[dev-dependencies]
-test-log = "0.2"
-env_logger = "0.11.3"
-test-env-log = "0.2.8"

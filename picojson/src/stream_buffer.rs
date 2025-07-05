@@ -2,9 +2,9 @@
 
 use crate::ParseError;
 
-/// Error types for DirectBuffer operations
+/// Error types for StreamBuffer operations
 #[derive(Debug, PartialEq)]
-pub enum DirectBufferError {
+pub enum StreamBufferError {
     /// Buffer is full and cannot accommodate more data
     BufferFull,
     /// Attempted to read beyond available data
@@ -13,24 +13,24 @@ pub enum DirectBufferError {
     InvalidState(&'static str),
 }
 
-impl From<DirectBufferError> for ParseError {
-    fn from(err: DirectBufferError) -> Self {
+impl From<StreamBufferError> for ParseError {
+    fn from(err: StreamBufferError) -> Self {
         match err {
-            DirectBufferError::BufferFull => ParseError::ScratchBufferFull,
-            DirectBufferError::EndOfData => ParseError::EndOfData,
-            DirectBufferError::InvalidState(msg) => ParseError::UnexpectedState(msg),
+            StreamBufferError::BufferFull => ParseError::ScratchBufferFull,
+            StreamBufferError::EndOfData => ParseError::EndOfData,
+            StreamBufferError::InvalidState(msg) => ParseError::UnexpectedState(msg),
         }
     }
 }
 
-/// DirectBuffer manages a single buffer for both input and escape processing
+/// StreamBuffer manages a single buffer for both input and escape processing
 ///
 /// Key design principles:
 /// - Reader fills unused portions of buffer directly
 /// - Unescaped content is copied to buffer start when needed
 /// - Zero-copy string extraction when no escapes are present
 /// - Guaranteed space for escape processing (unescaped ≤ escaped)
-pub struct DirectBuffer<'a> {
+pub struct StreamBuffer<'a> {
     /// The entire buffer slice
     buffer: &'a mut [u8],
     /// Current position where tokenizer is reading
@@ -43,8 +43,8 @@ pub struct DirectBuffer<'a> {
     escape_reserve: usize,
 }
 
-impl<'a> DirectBuffer<'a> {
-    /// Create a new DirectBuffer with the given buffer slice
+impl<'a> StreamBuffer<'a> {
+    /// Create a new StreamBuffer with the given buffer slice
     pub fn new(buffer: &'a mut [u8]) -> Self {
         // Reserve ~12.5% of buffer for escape processing (>>3 instead of /10), minimum 64 bytes
         // Avoids expensive 32-bit division on 8-bit AVR targets
@@ -60,20 +60,20 @@ impl<'a> DirectBuffer<'a> {
     }
 
     /// Get the current byte at tokenize position
-    pub fn current_byte(&self) -> Result<u8, DirectBufferError> {
+    pub fn current_byte(&self) -> Result<u8, StreamBufferError> {
         if self.tokenize_pos >= self.data_end {
-            return Err(DirectBufferError::EndOfData);
+            return Err(StreamBufferError::EndOfData);
         }
         self.buffer
             .get(self.tokenize_pos)
             .copied()
-            .ok_or(DirectBufferError::EndOfData)
+            .ok_or(StreamBufferError::EndOfData)
     }
 
     /// Advance the tokenize position by one byte
-    pub fn advance(&mut self) -> Result<(), DirectBufferError> {
+    pub fn advance(&mut self) -> Result<(), StreamBufferError> {
         if self.tokenize_pos >= self.data_end {
-            return Err(DirectBufferError::EndOfData);
+            return Err(StreamBufferError::EndOfData);
         }
         self.tokenize_pos = self.tokenize_pos.wrapping_add(1);
         Ok(())
@@ -94,10 +94,10 @@ impl<'a> DirectBuffer<'a> {
     }
 
     /// Mark that Reader filled `bytes_read` bytes
-    pub fn mark_filled(&mut self, bytes_read: usize) -> Result<(), DirectBufferError> {
+    pub fn mark_filled(&mut self, bytes_read: usize) -> Result<(), StreamBufferError> {
         let new_data_end = self.data_end.wrapping_add(bytes_read);
         if new_data_end > self.buffer.len() {
-            return Err(DirectBufferError::InvalidState(
+            return Err(StreamBufferError::InvalidState(
                 "Attempted to mark more bytes than buffer space",
             ));
         }
@@ -112,13 +112,13 @@ impl<'a> DirectBuffer<'a> {
         max_escaped_len: usize,
         copy_start: usize,
         copy_end: usize,
-    ) -> Result<(), DirectBufferError> {
+    ) -> Result<(), StreamBufferError> {
         // Clear any previous unescaped content
         self.unescaped_len = 0;
 
         // Ensure we have space at the start for unescaping
         if max_escaped_len > self.buffer.len() {
-            return Err(DirectBufferError::BufferFull);
+            return Err(StreamBufferError::BufferFull);
         }
 
         // Copy existing content if there is any
@@ -127,12 +127,12 @@ impl<'a> DirectBuffer<'a> {
 
             // Ensure the span fits in the buffer - return error instead of silent truncation
             if span_len > self.buffer.len() {
-                return Err(DirectBufferError::BufferFull);
+                return Err(StreamBufferError::BufferFull);
             }
 
             let src_range = copy_start..copy_start.wrapping_add(span_len);
             if src_range.end > self.buffer.len() {
-                return Err(DirectBufferError::InvalidState(
+                return Err(StreamBufferError::InvalidState(
                     "Source range out of bounds",
                 ));
             }
@@ -147,15 +147,15 @@ impl<'a> DirectBuffer<'a> {
     }
 
     /// Get the unescaped content slice
-    pub fn get_unescaped_slice(&self) -> Result<&[u8], DirectBufferError> {
+    pub fn get_unescaped_slice(&self) -> Result<&[u8], StreamBufferError> {
         if self.unescaped_len == 0 {
-            return Err(DirectBufferError::InvalidState(
+            return Err(StreamBufferError::InvalidState(
                 "No unescaped content available",
             ));
         }
         self.buffer
             .get(0..self.unescaped_len)
-            .ok_or(DirectBufferError::InvalidState(
+            .ok_or(StreamBufferError::InvalidState(
                 "Unescaped length exceeds buffer size",
             ))
     }
@@ -181,10 +181,10 @@ impl<'a> DirectBuffer<'a> {
     }
 
     /// Append a single byte to the unescaped content
-    pub fn append_unescaped_byte(&mut self, byte: u8) -> Result<(), DirectBufferError> {
+    pub fn append_unescaped_byte(&mut self, byte: u8) -> Result<(), StreamBufferError> {
         let available_space = self.buffer.len().saturating_sub(self.escape_reserve);
         if self.unescaped_len >= available_space {
-            return Err(DirectBufferError::BufferFull);
+            return Err(StreamBufferError::BufferFull);
         }
 
         if let Some(b) = self.buffer.get_mut(self.unescaped_len) {
@@ -192,19 +192,19 @@ impl<'a> DirectBuffer<'a> {
             self.unescaped_len = self.unescaped_len.wrapping_add(1);
             Ok(())
         } else {
-            Err(DirectBufferError::BufferFull)
+            Err(StreamBufferError::BufferFull)
         }
     }
 
     /// Get a string slice from the buffer (zero-copy)
     /// Used for strings without escapes
-    pub fn get_string_slice(&self, start: usize, end: usize) -> Result<&[u8], DirectBufferError> {
+    pub fn get_string_slice(&self, start: usize, end: usize) -> Result<&[u8], StreamBufferError> {
         if start > end || end > self.data_end {
-            return Err(DirectBufferError::InvalidState("Invalid slice bounds"));
+            return Err(StreamBufferError::InvalidState("Invalid slice bounds"));
         }
         self.buffer
             .get(start..end)
-            .ok_or(DirectBufferError::InvalidState("Invalid slice bounds"))
+            .ok_or(StreamBufferError::InvalidState("Invalid slice bounds"))
     }
 }
 
@@ -214,9 +214,9 @@ mod tests {
 
     #[test]
     fn test_lifetime_expectations() {
-        // This test demonstrates how DirectBuffer lifetimes should work
+        // This test demonstrates how StreamBuffer lifetimes should work
         let mut buffer = [0u8; 100];
-        let mut direct_buffer = DirectBuffer::new(&mut buffer);
+        let mut direct_buffer = StreamBuffer::new(&mut buffer);
 
         // Simulate some data being in the buffer
         let test_data = b"hello world";
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn test_new_direct_buffer() {
         let mut buffer = [0u8; 100];
-        let db = DirectBuffer::new(&mut buffer);
+        let db = StreamBuffer::new(&mut buffer);
 
         assert_eq!(db.tokenize_pos, 0);
         assert_eq!(db.data_end, 0);
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn test_fill_and_advance() {
         let mut buffer = [0u8; 100];
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Fill with some data
         {
@@ -273,11 +273,11 @@ mod tests {
     #[test]
     fn test_error_conditions() {
         let mut buffer = [0u8; 10];
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // EndOfData errors
-        assert_eq!(db.current_byte().unwrap_err(), DirectBufferError::EndOfData);
-        assert_eq!(db.advance().unwrap_err(), DirectBufferError::EndOfData);
+        assert_eq!(db.current_byte().unwrap_err(), StreamBufferError::EndOfData);
+        assert_eq!(db.advance().unwrap_err(), StreamBufferError::EndOfData);
 
         // No unescaped content
         assert!(db.get_unescaped_slice().is_err());
@@ -287,7 +287,7 @@ mod tests {
     fn test_buffer_full_scenario() {
         // Test what happens when buffer gets completely full
         let mut buffer = [0u8; 10];
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Fill buffer completely
         {
@@ -308,7 +308,7 @@ mod tests {
     fn test_minimal_buffer_with_long_token() {
         // Test very small buffer with a token that doesn't fit
         let mut buffer = [0u8; 8]; // Very small buffer
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Try to put a string that's almost as big as the buffer
         {
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn test_reader_returns_zero_bytes() {
         let mut buffer = [0u8; 20];
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Simulate Reader returning 0 bytes (EOF)
         {
@@ -355,26 +355,26 @@ mod tests {
     #[test]
     fn test_maximum_escape_reserve_scenario() {
         let mut buffer = [0u8; 100];
-        let db = DirectBuffer::new(&mut buffer);
+        let db = StreamBuffer::new(&mut buffer);
 
         // Check escape reserve calculation
         assert_eq!(db.escape_reserve, 64); // max(100>>3, 64) = 64
 
         // Test with smaller buffer
         let mut small_buffer = [0u8; 50];
-        let small_db = DirectBuffer::new(&mut small_buffer);
+        let small_db = StreamBuffer::new(&mut small_buffer);
         assert_eq!(small_db.escape_reserve, 64); // Still 64 (minimum)
 
         // Test with larger buffer
         let mut large_buffer = [0u8; 1000];
-        let large_db = DirectBuffer::new(&mut large_buffer);
+        let large_db = StreamBuffer::new(&mut large_buffer);
         assert_eq!(large_db.escape_reserve, 125); // 1000 >> 3 = 125
     }
 
     #[test]
     fn test_boundary_conditions() {
         let mut buffer = [0u8; 3]; // Absolute minimum
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Can't even hold a proper JSON token, but should not crash
         {
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn test_start_unescaping_with_copy_span_too_large() {
         let mut buffer = [0u8; 10]; // Small buffer
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Fill buffer with some data
         {
@@ -413,7 +413,7 @@ mod tests {
 
         // Should return BufferFull error instead of silently truncating
         let result = db.start_unescaping_with_copy(max_escaped_len, copy_start, copy_end);
-        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
 
         // Test boundary case: span exactly equals buffer size should work
         let copy_end_exact = 10; // Span of exactly 10 bytes (buffer size)
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn test_append_unescaped_byte_respects_escape_reserve() {
         let mut buffer = [0u8; 100]; // 100 byte buffer
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Check escape reserve was set correctly (12.5% of 100, minimum 64)
         assert_eq!(db.escape_reserve, 64);
@@ -450,7 +450,7 @@ mod tests {
 
         // One more byte should fail due to escape reserve constraint
         let result = db.append_unescaped_byte(b'B');
-        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
 
         // Verify we didn't exceed the escape reserve boundary
         assert_eq!(db.unescaped_len, max_unescaped);
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn test_append_unescaped_byte_escape_reserve_larger_than_buffer() {
         let mut buffer = [0u8; 10]; // Very small buffer
-        let mut db = DirectBuffer::new(&mut buffer);
+        let mut db = StreamBuffer::new(&mut buffer);
 
         // Even small buffers get minimum 64 byte escape reserve, but that's larger than buffer
         assert_eq!(db.escape_reserve, 64); // minimum
@@ -467,20 +467,20 @@ mod tests {
         // Since escape_reserve (64) > buffer.len() (10), no bytes should be appendable
         // This should not panic with underflow, but return BufferFull error
         let result = db.append_unescaped_byte(b'A');
-        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
 
         // Test with even smaller buffer to ensure we handle underflow correctly
         let mut tiny_buffer = [0u8; 3];
-        let mut tiny_db = DirectBuffer::new(&mut tiny_buffer);
+        let mut tiny_db = StreamBuffer::new(&mut tiny_buffer);
         assert_eq!(tiny_db.escape_reserve, 64); // Still minimum 64
 
         // Should handle this gracefully without panic
         let result = tiny_db.append_unescaped_byte(b'B');
-        assert_eq!(result.unwrap_err(), DirectBufferError::BufferFull);
+        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
     }
 }
 
-impl crate::number_parser::NumberExtractor for DirectBuffer<'_> {
+impl crate::number_parser::NumberExtractor for StreamBuffer<'_> {
     fn get_number_slice(
         &self,
         start: usize,

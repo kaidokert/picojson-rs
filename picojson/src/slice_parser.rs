@@ -455,7 +455,6 @@ impl<'a, 'b, C: BitStackConfig> PullParser for SliceParser<'a, 'b, C> {
 mod tests {
     use super::*;
     use crate::{ArrayBitStack, BitStackStruct, String};
-    use test_log::test;
 
     #[test]
     fn make_parser() {
@@ -785,7 +784,7 @@ mod tests {
         assert_eq!(parser.next_event(), Ok(Event::EndDocument));
     }
 
-    #[test_log::test]
+    #[test]
     fn test_original_parser_escape_trace() {
         // Test escape sequence processing with logging
         let input = r#""a\nb""#;

@@ -63,7 +63,7 @@ mod copy_on_escape;
 
 mod escape_processor;
 
-mod direct_buffer;
+mod stream_buffer;
 
 mod stream_parser;
 

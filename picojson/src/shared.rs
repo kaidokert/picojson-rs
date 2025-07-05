@@ -211,16 +211,11 @@ impl ContentRange {
 /// Provides consistent error creation and UTF-8 validation across parsers.
 pub(crate) struct ParserErrorHandler;
 
-#[cfg(not(feature = "unsafe-utf8"))]
 pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     match core::str::from_utf8(v) {
         Ok(s) => Ok(s),
         Err(e) => Err(ParseError::InvalidUtf8(e)),
     }
-}
-#[cfg(feature = "unsafe-utf8")]
-pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
-    unsafe { Ok(core::str::from_utf8_unchecked(v)) }
 }
 
 impl ParserErrorHandler {

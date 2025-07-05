@@ -1,12 +1,12 @@
 ## TODO list
 - [ ] Constify what's possible
-- [ ] Remove `.unwrap()` calls
-- [ ] Remove copy_from_slice - can panic
-- [ ] Remove all bounds checked slice indexing that could panic!
-- [ ] Verify we are fully panic! free
+- [x] Remove `.unwrap()` calls
+- [x] Remove copy_from_slice - can panic
+- [x] Remove all bounds checked slice indexing that could panic!
+- [x] Verify we are fully panic! free
 - [ ] Remove unnecessary `'static` lifetimes
-- [ ] Dependency cleanup
-- [ ] Clippy cleanup
+- [x] Dependency cleanup
+- [x] Clippy cleanup
 - [ ] Unify code in SliceParser and StreamParser
 - [ ] Address and remove `// TODO` comments
 - [ ] Clean up reference docs
