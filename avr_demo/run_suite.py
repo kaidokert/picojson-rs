@@ -100,8 +100,8 @@ def run_bloat_analysis():
     results = {}
 
     bloat_configs = [
-        ("serde", "test_serde", []),
-        ("picojson", "test_picojson", []),
+        ("serde", "test_serde", ["int8"]),
+        ("picojson", "test_picojson", ["pico-tiny,int8"]),
     ]
 
     # Bloat analysis doesn't depend on nesting depth, so we run it once for each config.
@@ -111,6 +111,7 @@ def run_bloat_analysis():
         # Construct the cargo bloat command
         command = ["cargo", "bloat", "--release", "--message-format=json"]
         if extra_features:
+            command.append("--no-default-features")
             command.append("--features")
             command.append(",".join(extra_features))
         command.extend(["--example", example])
