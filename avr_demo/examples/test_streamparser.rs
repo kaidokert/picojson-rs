@@ -21,17 +21,49 @@ macro_rules! uwriteln {
 }
 
 // Conditionally define the configuration based on features.
+#[cfg(feature = "pico-tiny")]
+type PicoConfig = picojson::DefaultConfig; // 32 levels
 #[cfg(feature = "pico-small")]
 type PicoConfig = ArrayBitStack<64, u8, u16>; // 512 levels
 #[cfg(feature = "pico-huge")]
 type PicoConfig = ArrayBitStack<256, u8, u16>; // 2048 levels
-#[cfg(feature = "pico-tiny")]
-type PicoConfig = picojson::DefaultConfig; // 32 levels
-                                           // Default config for builds without a feature.
+                                               // Default config for builds without a feature.
 #[cfg(not(any(feature = "pico-small", feature = "pico-huge", feature = "pico-tiny")))]
 type PicoConfig = picojson::DefaultConfig;
 
 const JSON_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/test.json"));
+
+/// Helper function for byte-by-byte copy that won't panic
+/// Returns Ok(bytes_copied) on success, or Err(failed_index) if bounds check fails
+fn copy_subslice(
+    src: &[u8],
+    src_start: usize,
+    dest: &mut [u8],
+    dest_start: usize,
+    copy_len: usize,
+) -> Result<usize, usize> {
+    // Calculate end positions once with overflow checking
+    let src_end = src_start.checked_add(copy_len).ok_or(0usize)?;
+    let dest_end = dest_start.checked_add(copy_len).ok_or(0usize)?;
+
+    // Get both slices safely (they handle bounds checking)
+    match (
+        src.get(src_start..src_end),
+        dest.get_mut(dest_start..dest_end),
+    ) {
+        (Some(src_slice), Some(dest_slice)) => {
+            // Copy byte by byte, don't use iterators to avoid panics
+            for i in 0..src_slice.len() {
+                match (dest_slice.get_mut(i), src_slice.get(i)) {
+                    (Some(dst), Some(src)) => *dst = *src,
+                    _ => return Err(i), // Return the index where either access failed
+                }
+            }
+            Ok(copy_len)
+        }
+        _ => Err(0), // Either slice extraction failed
+    }
+}
 
 struct Doc<'b> {
     id: u32,
@@ -61,14 +93,9 @@ impl<'a> Reader for SliceReader<'a> {
         }
 
         let to_copy = remaining.min(buf.len());
-        let end_pos = self.position.saturating_add(to_copy);
-        if let (Some(dest), Some(src)) = (
-            buf.get_mut(..to_copy),
-            self.data.get(self.position..end_pos),
-        ) {
-            dest.copy_from_slice(src);
-            self.position = end_pos;
-            Ok(to_copy)
+        if let Ok(copied) = copy_subslice(self.data, self.position, buf, 0, to_copy) {
+            self.position = self.position.wrapping_add(copied);
+            Ok(copied)
         } else {
             Err(())
         }
@@ -91,7 +118,7 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
     // Create a streaming buffer for StreamParser (balanced size for testing)
     let mut stream_buffer = [0u8; 96]; // Balanced size for testing
     let reader = SliceReader::new(json_data);
-    let mut parser = StreamParser::<_, PicoConfig>::new(reader, &mut stream_buffer);
+    let mut parser = StreamParser::<_, PicoConfig>::with_config(reader, &mut stream_buffer);
 
     let mut key_context = KeyContext::None;
 
@@ -108,14 +135,9 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
             }
             Some(Ok(Event::String(value))) => {
                 if key_context == KeyContext::Status {
-                    let s = value.as_str();
-                    let s_bytes = s.as_bytes();
-                    // Only copy if scratch buffer is large enough
-                    if s_bytes.len() <= scratch.len() {
-                        if let Some(target_slice) = scratch.get_mut(..s_bytes.len()) {
-                            target_slice.copy_from_slice(s_bytes);
-                            status_len = s_bytes.len(); // Only set length if copy succeeded
-                        }
+                    let s_bytes = value.as_str().as_bytes();
+                    if let Ok(copied) = copy_subslice(s_bytes, 0, scratch, 0, s_bytes.len()) {
+                        status_len = copied; // Only set length if copy succeeded
                     }
                 }
                 key_context = KeyContext::None;
@@ -163,21 +185,16 @@ fn main() -> ! {
 
     match result {
         Ok(doc) => {
-            uwriteln!(&mut serial, "StreamParser doc id: {}", doc.id).ok();
-            uwriteln!(&mut serial, "StreamParser test_depth: {}", doc.test_depth).ok();
-            uwriteln!(&mut serial, "StreamParser status: {}", doc.status).ok();
+            uwriteln!(&mut serial, "Parsed doc id: {}", doc.id).ok();
+            uwriteln!(&mut serial, "Parsed test_depth: {}", doc.test_depth).ok();
+            uwriteln!(&mut serial, "Parsed status: {}", doc.status).ok();
         }
         Err(_) => {
-            uwriteln!(&mut serial, "StreamParser JSON parsing failed!").ok();
+            uwriteln!(&mut serial, "JSON parsing failed!").ok();
         }
     }
-    uwriteln!(
-        &mut serial,
-        "StreamParser max stack usage: {} bytes",
-        stack_used
-    )
-    .ok();
-    uwriteln!(&mut serial, "=== STREAMPARSER TEST COMPLETE ===").ok();
+    uwriteln!(&mut serial, "Max stack usage: {} bytes", stack_used).ok();
+    uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
 
     // Exit the simulator
     unsafe { core::arch::asm!("sleep") };

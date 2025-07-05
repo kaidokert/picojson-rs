@@ -21,13 +21,13 @@ macro_rules! uwriteln {
 }
 
 // Conditionally define the configuration based on features.
+#[cfg(feature = "pico-tiny")]
+type PicoConfig = picojson::DefaultConfig; // 32 levels
 #[cfg(feature = "pico-small")]
 type PicoConfig = ArrayBitStack<64, u8, u16>; // 512 levels
 #[cfg(feature = "pico-huge")]
 type PicoConfig = ArrayBitStack<256, u8, u16>; // 2048 levels
-#[cfg(feature = "pico-tiny")]
-type PicoConfig = picojson::DefaultConfig; // 32 levels
-                                           // Default config for builds without a feature.
+                                               // Default config for builds without a feature.
 #[cfg(not(any(feature = "pico-small", feature = "pico-huge", feature = "pico-tiny")))]
 type PicoConfig = picojson::DefaultConfig;
 
