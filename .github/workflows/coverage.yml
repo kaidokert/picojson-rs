@@ -23,6 +23,9 @@ jobs:
         with:
           components: llvm-tools-preview  # Needed for cargo-llvm-cov
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
