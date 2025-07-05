@@ -2,6 +2,7 @@
 #![no_std]
 #![no_main]
 
+use avr_demo as _;
 use avr_demo::stack_measurement::*;
 use picojson::{self, Event, ParseError, PullParser, SliceParser};
 
