@@ -111,7 +111,7 @@ enum TokenType {
     Null,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct TokenProgress {
     token_type: TokenType,
     position: usize, // Current position in token string
@@ -424,19 +424,15 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
             _ => return Error::new(ErrKind::InvalidToken, token, pos),
         };
 
+        let progress = TokenProgress {
+            token_type,
+            position: 1,
+        };
+
         let token = match token_type {
-            TokenType::True => Token::True(TokenProgress {
-                token_type,
-                position: 1,
-            }),
-            TokenType::False => Token::False(TokenProgress {
-                token_type,
-                position: 1,
-            }),
-            TokenType::Null => Token::Null(TokenProgress {
-                token_type,
-                position: 1,
-            }),
+            TokenType::True => Token::True(progress),
+            TokenType::False => Token::False(progress),
+            TokenType::Null => Token::Null(progress),
         };
 
         Ok(State::Token { token })
