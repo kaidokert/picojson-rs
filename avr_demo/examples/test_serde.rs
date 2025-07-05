@@ -2,7 +2,7 @@
 #![no_std]
 #![no_main]
 
-use avr_demo::panic_handler;
+use avr_demo::panic_handler as _;
 use avr_demo::stack_measurement::*;
 use serde::Deserialize;
 
