@@ -64,12 +64,12 @@ jobs:
 
       - name: Build the demos in ${{ matrix.profile }} mode
         working-directory: avr_demo
-        run: cargo build --profile ${{ matrix.profile }} --example ${{ matrix.example }} --features "${{ matrix.int_type }},${{ matrix.pico_size }}"
+        run: cargo build --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}"
 
       - name: Check for panics ( minimal )
         working-directory: avr_demo
-        run: cargo nm --profile ${{ matrix.profile }} --example minimal | ( ! egrep "panic|unwind" )
+        run: cargo nm    --example minimal               --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}" | ( ! egrep "panic|unwind" )
 
       - name: Check for panics
         working-directory: avr_demo
-        run: cargo nm --profile ${{ matrix.profile }} --example ${{ matrix.example }} | ( ! egrep "panic|unwind" )
+        run: cargo nm    --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}" | ( ! egrep "panic|unwind" )
