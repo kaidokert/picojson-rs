@@ -161,9 +161,6 @@ pub enum EventToken {
     EscapeTab,            // \t
 }
 
-// todo: expose number events: sign, decimal, fraction, exponent
-// update when a part of number has finished tokenizing ?
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Begin(EventToken),
@@ -1048,8 +1045,6 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use log::warn;
-    use test_log::test;
 
     #[test]
     fn test_zero_input() {
@@ -1105,7 +1100,6 @@ mod tests {
         let mut index = 0;
         let consumed = parser
             .p(data, &mut |event, _pos| {
-                warn!("Event: {:?}", event);
                 store[index] = event.clone();
                 index += 1;
             })
@@ -1120,7 +1114,6 @@ mod tests {
     ) -> Result<(usize, &'a [Event]), Error> {
         let mut index = 0;
         let consumed = parser.p(data, &mut |event, _pos| {
-            warn!("Event: {:?}", event);
             store[index] = event.clone();
             index += 1;
         })?;
@@ -1535,15 +1528,11 @@ mod tests {
         // Should handle deep nesting easily with 64-bit storage
         assert!(events.len() > 8); // Multiple ArrayStart/End + Number events
     }
-
-    // TODO: Array BitStack support needs custom implementation
-    // Arrays don't implement the required bit operations for BitStack trait
 }
 
 #[cfg(test)]
 mod conformance {
     use super::*;
-    use test_log::test;
 
     fn assert_check(
         actual: (Result<usize, Error>, &[(Event, usize)]),

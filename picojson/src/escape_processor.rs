@@ -455,7 +455,7 @@ mod tests {
 /// This function centralizes the logic for handling `\uXXXX` escapes, which is
 /// common to both the pull-based and stream-based parsers. It uses a generic
 /// `hex_slice_provider` to remain independent of the underlying buffer implementation
-/// (`SliceInputBuffer` vs. `DirectBuffer`).
+/// (`SliceInputBuffer` vs. `StreamBuffer`).
 ///
 /// # Arguments
 /// * `current_pos` - The parser's current position in the input buffer, right after the 4 hex digits.

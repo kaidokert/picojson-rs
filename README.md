@@ -18,6 +18,7 @@ A minimal Rust JSON **pull-parser** for resource-constrained environments.
 - **Configurable Tree Depth**: The maximum JSON nesting depth is configured by the user at compile time to control stack usage.
 - **Configurable Number Handling**: Integer width and float parsing behavior are configurable via feature flags.
 - **Unsafe-Free**: The crate contains no `unsafe` code.
+- **Panic-Free**: Does not panic.
 
 ## Design Philosophy
 
