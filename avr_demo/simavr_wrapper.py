@@ -5,7 +5,7 @@ import os
 import argparse
 import shlex
 
-def run_simavr_linux(binary, simavr_args, timeout_seconds=None):
+def run_simavr_posix(binary, simavr_args, timeout_seconds=None):
     """Run simavr directly on Linux with all arguments passed through."""
     cmd = ["simavr"] + simavr_args + [binary]
 
@@ -96,8 +96,8 @@ def main():
 
     system = platform.system().lower()
 
-    if system == "linux":
-        exit_code = run_simavr_linux(binary, simavr_args, timeout_seconds)
+    if system in ["linux", "darwin"]:
+        exit_code = run_simavr_posix(binary, simavr_args, timeout_seconds)
     elif system == "windows":
         exit_code = run_simavr_windows(binary, simavr_args, timeout_seconds)
     else:
