@@ -29,10 +29,10 @@ DEPTHS = get_depths_from_build_rs()
 # The test configurations to run.
 # (Test Name, Cargo Example Name, Extra Features)
 CONFIGS = [
-    ("serde", "test_serde", ["ufmt"]),
-    ("picojson-tiny", "test_picojson", ["pico-tiny","ufmt"]),
-    ("picojson-small", "test_picojson", ["pico-small","ufmt"]),
-    ("picojson-huge", "test_picojson", ["pico-huge","ufmt"]),
+    ("serde", "test_serde", ["ufmt","int8"]),
+    ("picojson-tiny", "test_picojson", ["pico-tiny","ufmt", "int8"]),
+    ("picojson-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
+    ("picojson-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
 ]
 
 def run_stack_analysis():
@@ -152,7 +152,7 @@ def _run_objdump(example_name, profile, verbose, no_default_features, features):
         cmd.append("--no-default-features")
     if features:
         cmd.extend(["--features", features])
-    cmd.extend(["--example", example_name, "--", "-dS"])
+    cmd.extend(["--example", example_name, "--", "-dS","-l","-z","--show-all-symbols"])
 
     if verbose:
         print(f"Running: {' '.join(cmd)}")
@@ -216,6 +216,12 @@ def _analyze_panic_patterns(content, verbose):
     lines = content.split('\n')
     current_function = None
     for line_num, line in enumerate(lines, 1):
+        # Skip disassembler comments that contain false positive int_log10 references
+        if re.match(r'^ *;.*int_log10::panic_for_nonpositive_argument', line):
+            if verbose:
+                print(f"Skipping false positive at line {line_num}: {line.strip()}")
+            continue
+
         function_header_line = False
         if '<' in line and '>' in line and line.endswith(':'):
             match = re.search(r'<(.+)>:', line)
@@ -248,7 +254,7 @@ def _report_panic_results(example_name, asm_file, found_panics):
         print(f"✅ PASS: No panic references found in '{example_name}'")
         return True
 
-def run_panic_checker(example_name, profile="panic_checks", verbose=False, no_default_features=False, features=None):
+def run_panic_checker(example_name, profile="dev", verbose=False, no_default_features=False, features=None):
     """Run panic checker on a specific example."""
     print(f"🔍 Checking example '{example_name}' for panic references...")
     try:

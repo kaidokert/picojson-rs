@@ -61,6 +61,8 @@ pub enum ParseError {
     EndOfStream,
     /// Error from the underlying reader (I/O error, not end-of-stream)
     ReaderError,
+    /// Numeric overflow
+    NumericOverflow,
 }
 
 impl From<core::str::Utf8Error> for ParseError {
@@ -132,7 +134,7 @@ impl ContentRange {
     /// (content_start, content_end) where content_start is after opening quote
     /// and content_end is before closing quote
     pub fn string_content_bounds(quote_start: usize, current_pos: usize) -> (usize, usize) {
-        let content_start = quote_start + 1; // Skip opening quote
+        let content_start = quote_start.saturating_add(1); // Skip opening quote
         let content_end = current_pos.saturating_sub(1); // Back up to exclude closing quote
         (content_start, content_end)
     }
@@ -149,7 +151,7 @@ impl ContentRange {
         quote_start: usize,
         current_pos: usize,
     ) -> (usize, usize) {
-        let content_start = quote_start + 1; // Skip opening quote
+        let content_start = quote_start.saturating_add(1); // Skip opening quote
         let content_end = current_pos.saturating_sub(1); // Back up to before the backslash
         (content_start, content_end)
     }
@@ -209,18 +211,19 @@ impl ContentRange {
 /// Provides consistent error creation and UTF-8 validation across parsers.
 pub(crate) struct ParserErrorHandler;
 
-impl ParserErrorHandler {
-    /// Convert bytes to UTF-8 string with consistent error handling
-    ///
-    /// # Arguments
-    /// * `bytes` - The byte slice to validate and convert
-    ///
-    /// # Returns
-    /// A UTF-8 string slice or ParseError::InvalidUtf8
-    pub fn bytes_to_utf8_str(bytes: &[u8]) -> Result<&str, ParseError> {
-        core::str::from_utf8(bytes).map_err(ParseError::InvalidUtf8)
+#[cfg(not(feature = "unsafe-utf8"))]
+pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
+    match core::str::from_utf8(v) {
+        Ok(s) => Ok(s),
+        Err(e) => Err(ParseError::InvalidUtf8(e)),
     }
+}
+#[cfg(feature = "unsafe-utf8")]
+pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
+    unsafe { Ok(core::str::from_utf8_unchecked(v)) }
+}
 
+impl ParserErrorHandler {
     /// Create an UnexpectedState error with context
     ///
     /// # Arguments

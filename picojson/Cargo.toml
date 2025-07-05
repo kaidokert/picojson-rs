@@ -24,6 +24,7 @@ default = ["int64", "float"]     # Default to full support: 64-bit integers and 
 float = []              # Enable f64 parsing support
 
 # Integer width options (mutually exclusive)
+int8  = []              # Use i8 for integers (8-bit)
 int32 = []              # Use i32 for integers (embedded-friendly)
 int64 = []              # Use i64 for integers (full range)
 
@@ -31,6 +32,8 @@ int64 = []              # Use i64 for integers (full range)
 float-skip = []         # Skip float values during parsing (continue with next token)
 float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
+# Use from_utf8_unchecked to avoid panic dependencies
+unsafe-utf8 = []
 defmt = ["dep:defmt"]
 
 [dependencies]

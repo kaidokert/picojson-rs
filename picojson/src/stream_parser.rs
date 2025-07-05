@@ -344,7 +344,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     fn create_unescaped_string(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.queue_unescaped_reset();
         let unescaped_slice = self.direct_buffer.get_unescaped_slice()?;
-        let str_content = ParserErrorHandler::bytes_to_utf8_str(unescaped_slice)?;
+        let str_content = crate::shared::from_utf8(unescaped_slice)?;
         Ok(Event::String(crate::String::Unescaped(str_content)))
     }
 
@@ -357,7 +357,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         let bytes = self
             .direct_buffer
             .get_string_slice(content_start, content_end)?;
-        let str_content = ParserErrorHandler::bytes_to_utf8_str(bytes)?;
+        let str_content = crate::shared::from_utf8(bytes)?;
         Ok(Event::String(crate::String::Borrowed(str_content)))
     }
 
@@ -380,7 +380,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     fn create_unescaped_key(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.queue_unescaped_reset();
         let unescaped_slice = self.direct_buffer.get_unescaped_slice()?;
-        let str_content = ParserErrorHandler::bytes_to_utf8_str(unescaped_slice)?;
+        let str_content = crate::shared::from_utf8(unescaped_slice)?;
         Ok(Event::Key(crate::String::Unescaped(str_content)))
     }
 
@@ -393,7 +393,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         let bytes = self
             .direct_buffer
             .get_string_slice(content_start, content_end)?;
-        let str_content = ParserErrorHandler::bytes_to_utf8_str(bytes)?;
+        let str_content = crate::shared::from_utf8(bytes)?;
         Ok(Event::Key(crate::String::Borrowed(str_content)))
     }
 
@@ -482,8 +482,12 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     ContentRange::string_content_bounds_before_escape(start_pos, current_pos);
 
                 // Estimate max length needed for unescaping (content so far + remaining buffer)
-                let max_escaped_len =
-                    self.direct_buffer.remaining_bytes() + (content_end - content_start);
+                let content_len = content_end.wrapping_sub(content_start);
+                let max_escaped_len = self
+                    .direct_buffer
+                    .remaining_bytes()
+                    .checked_add(content_len)
+                    .ok_or(ParseError::NumericOverflow)?;
 
                 // Start unescaping with DirectBuffer and copy existing content
                 self.direct_buffer.start_unescaping_with_copy(

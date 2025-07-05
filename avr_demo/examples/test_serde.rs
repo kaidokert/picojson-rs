@@ -2,8 +2,8 @@
 #![no_std]
 #![no_main]
 
+use avr_demo as _;
 use avr_demo::stack_measurement::*;
-use panic_halt as _;
 use serde::Deserialize;
 
 // Conditional import of uwriteln! - stub out if ufmt feature is not enabled

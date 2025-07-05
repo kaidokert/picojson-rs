@@ -2,8 +2,8 @@
 #![no_std]
 #![no_main]
 
+use avr_demo as _;
 use avr_demo::stack_measurement::*;
-use panic_halt as _;
 use picojson::{self, Event, ParseError, PullParser, SliceParser};
 
 #[allow(unused_imports)]

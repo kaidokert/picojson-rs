@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn parse_number() {
-        let input = r#"{"key": 1242}"#;
+        let input = r#"{"key": 124}"#;
         let mut scratch = [0u8; 1024];
         let mut parser = SliceParser::with_buffer(input, &mut scratch);
         assert_eq!(parser.next_event(), Ok(Event::StartObject));
@@ -483,8 +483,8 @@ mod tests {
         // Check number value using new JsonNumber API
         match parser.next_event() {
             Ok(Event::Number(num)) => {
-                assert_eq!(num.as_str(), "1242");
-                assert_eq!(num.as_int(), Some(1242));
+                assert_eq!(num.as_str(), "124");
+                assert_eq!(num.as_int(), Some(124));
             }
             other => panic!("Expected Number, got: {:?}", other),
         }

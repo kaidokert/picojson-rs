@@ -67,12 +67,28 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
     /// * `extra_space` - Additional space needed beyond the span (e.g., for escape character)
     fn copy_span_to_scratch(&mut self, end: usize, extra_space: usize) -> Result<(), ParseError> {
         if end > self.last_copied_pos {
-            let span = &self.input[self.last_copied_pos..end];
-            if self.scratch_pos + span.len() + extra_space > self.scratch.len() {
+            let span = self
+                .input
+                .get(self.last_copied_pos..end)
+                .ok_or(ParseError::UnexpectedState("Invalid span"))?;
+            let end_pos = self
+                .scratch_pos
+                .checked_add(span.len())
+                .ok_or(ParseError::NumericOverflow)?;
+            if end_pos
+                .checked_add(extra_space)
+                .ok_or(ParseError::NumericOverflow)?
+                > self.scratch.len()
+            {
                 return Err(ParseError::ScratchBufferFull);
             }
-            self.scratch[self.scratch_pos..self.scratch_pos + span.len()].copy_from_slice(span);
-            self.scratch_pos += span.len();
+            // Use zip to avoid copy_from_slice panic checks
+            if let Some(scratch_slice) = self.scratch.get_mut(self.scratch_pos..end_pos) {
+                for (dst, &src) in scratch_slice.iter_mut().zip(span.iter()) {
+                    *dst = src;
+                }
+            }
+            self.scratch_pos = self.scratch_pos.saturating_add(span.len());
         }
         Ok(())
     }
@@ -100,8 +116,12 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
         if self.scratch_pos >= self.scratch.len() {
             return Err(ParseError::ScratchBufferFull);
         }
-        self.scratch[self.scratch_pos] = unescaped_char;
-        self.scratch_pos += 1;
+        if let Some(slot) = self.scratch.get_mut(self.scratch_pos) {
+            *slot = unescaped_char;
+        } else {
+            return Err(ParseError::ScratchBufferFull);
+        }
+        self.scratch_pos = self.scratch_pos.saturating_add(1);
 
         // Update last copied position to after the escape sequence
         self.last_copied_pos = pos;
@@ -131,15 +151,23 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
         self.copy_span_to_scratch(start_pos, utf8_bytes.len())?;
 
         // Write the UTF-8 encoded bytes
-        if self.scratch_pos + utf8_bytes.len() > self.scratch.len() {
+        let new_scratch_pos = self
+            .scratch_pos
+            .checked_add(utf8_bytes.len())
+            .ok_or(ParseError::NumericOverflow)?;
+        if new_scratch_pos > self.scratch.len() {
             return Err(ParseError::ScratchBufferFull);
         }
-        self.scratch[self.scratch_pos..self.scratch_pos + utf8_bytes.len()]
-            .copy_from_slice(utf8_bytes);
-        self.scratch_pos += utf8_bytes.len();
+        // Use zip to avoid copy_from_slice panic checks
+        if let Some(scratch_slice) = self.scratch.get_mut(self.scratch_pos..new_scratch_pos) {
+            for (dst, &src) in scratch_slice.iter_mut().zip(utf8_bytes.iter()) {
+                *dst = src;
+            }
+        }
+        self.scratch_pos = self.scratch_pos.saturating_add(utf8_bytes.len());
 
         // Update last copied position to after the 6-byte Unicode escape sequence
-        self.last_copied_pos = start_pos + 6; // \uXXXX is always 6 bytes
+        self.last_copied_pos = start_pos.saturating_add(6); // \uXXXX is always 6 bytes
 
         Ok(())
     }
@@ -160,15 +188,19 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
             self.global_scratch_pos = self.scratch_pos;
 
             // Return unescaped string from scratch buffer
-            let unescaped_slice = &self.scratch[self.scratch_start..self.scratch_pos];
-            let unescaped_str =
-                core::str::from_utf8(unescaped_slice).map_err(ParseError::InvalidUtf8)?;
+            let unescaped_slice = self
+                .scratch
+                .get(self.scratch_start..self.scratch_pos)
+                .ok_or(ParseError::UnexpectedState("Invalid scratch slice"))?;
+            let unescaped_str = crate::shared::from_utf8(unescaped_slice)?;
             Ok(String::Unescaped(unescaped_str))
         } else {
             // No escapes found - return borrowed slice (zero-copy!)
-            let borrowed_bytes = &self.input[self.string_start..pos];
-            let borrowed_str =
-                core::str::from_utf8(borrowed_bytes).map_err(ParseError::InvalidUtf8)?;
+            let borrowed_bytes = self
+                .input
+                .get(self.string_start..pos)
+                .ok_or(ParseError::UnexpectedState("Invalid input slice"))?;
+            let borrowed_str = crate::shared::from_utf8(borrowed_bytes)?;
             Ok(String::Borrowed(borrowed_str))
         }
     }

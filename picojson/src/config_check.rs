@@ -6,9 +6,24 @@
 //! features are not enabled simultaneously.
 
 // Compile-time checks for mutually exclusive integer width features
+
+// If none were selected that's an error
+#[cfg(not(any(feature = "int32", feature = "int64", feature = "int8")))]
+compile_error!("No integer width features selected: choose one of 'int32', 'int64', or 'int8'");
+
 #[cfg(all(feature = "int32", feature = "int64"))]
 compile_error!(
     "Cannot enable both 'int32' and 'int64' features simultaneously: choose one integer width"
+);
+
+#[cfg(all(feature = "int32", feature = "int8"))]
+compile_error!(
+    "Cannot enable both 'int32' and 'int8' features simultaneously: choose one integer width"
+);
+
+#[cfg(all(feature = "int64", feature = "int8"))]
+compile_error!(
+    "Cannot enable both 'int64' and 'int8' features simultaneously: choose one integer width"
 );
 
 // Compile-time checks for mutually exclusive float behavior features

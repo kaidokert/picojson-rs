@@ -81,6 +81,7 @@ pub use json_number::{JsonNumber, NumberResult};
 mod json_string;
 pub use json_string::String;
 
+mod int_parser;
 mod number_parser;
 
 pub use slice_parser::SliceParser;

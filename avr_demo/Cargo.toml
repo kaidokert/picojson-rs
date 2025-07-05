@@ -10,8 +10,7 @@ autotests = false
 autobenches = false
 
 [dependencies]
-picojson = { path = "../picojson", default-features = false, features = ["int32"]}
-panic-halt = "1.0"
+picojson = { path = "../picojson", default-features = false}
 ufmt = { version = "0.2", optional = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde-json-core = { version = "0.6", default-features = false }
@@ -23,22 +22,11 @@ features = ["arduino-uno"]
 
 [profile.dev]
 panic = "abort"
-lto = true
-opt-level = "s"
-
-# Build profile for investigating panics in the code
-# We don't want to optimize away any code, but do
-# enable dead code elimination.
-[profile.panic_checks]
-inherits = "dev"
-panic = "abort"
-opt-level = 1         # Minimal code size optimizations, mostly just DCE
-lto = "fat"           # Enable fat LTO for better dead code elimination
+lto = "fat"
+opt-level = "z"         # Least amount of panic generation
 codegen-units = 1       # helps DCE across units
 strip = "none"          # Keep symbols
 debug = "full"
-incremental = false
-overflow-checks = true  # Enable ( it's a default, but we want to be explicit )
 # Disable the compiler's built-in undefined behavior checks.
 # These checks can insert their own panic paths, creating noise in our analysis.
 # We are focused on panics from application logic (e.g., unwrap, bounds checks),
@@ -53,7 +41,10 @@ lto = true
 opt-level = "s"
 
 [features]
-default = ["depth-7", "pico-tiny", "ufmt"]
+default = ["depth-7", "pico-tiny", "ufmt", "int8"]
+
+int8 = [ "picojson/int8"]
+int32 = [ "picojson/int32"]
 
 depth-7 = []
 depth-9 = []
@@ -70,8 +61,7 @@ depth-513 = []
 depth-1023 = []
 depth-1025 = []
 
-debug-trace = []
-
 pico-small = []
 pico-huge = []
 pico-tiny = []
+unsafe-utf8 = ["picojson/unsafe-utf8"]
