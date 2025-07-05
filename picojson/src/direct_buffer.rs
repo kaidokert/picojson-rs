@@ -64,7 +64,10 @@ impl<'a> DirectBuffer<'a> {
         if self.tokenize_pos >= self.data_end {
             return Err(DirectBufferError::EndOfData);
         }
-        Ok(self.buffer[self.tokenize_pos])
+        self.buffer
+            .get(self.tokenize_pos)
+            .copied()
+            .ok_or(DirectBufferError::EndOfData)
     }
 
     /// Advance the tokenize position by one byte
@@ -87,7 +90,7 @@ impl<'a> DirectBuffer<'a> {
         if self.data_end >= self.buffer.len() {
             return None;
         }
-        Some(&mut self.buffer[self.data_end..])
+        self.buffer.get_mut(self.data_end..)
     }
 
     /// Mark that Reader filled `bytes_read` bytes
@@ -127,10 +130,16 @@ impl<'a> DirectBuffer<'a> {
                 return Err(DirectBufferError::BufferFull);
             }
 
+            let src_range = copy_start..copy_start.wrapping_add(span_len);
+            if src_range.end > self.buffer.len() {
+                return Err(DirectBufferError::InvalidState(
+                    "Source range out of bounds",
+                ));
+            }
+
             // Copy within the same buffer: move data from [copy_start..copy_end] to [0..span_len]
             // Use copy_within to handle overlapping ranges safely
-            self.buffer
-                .copy_within(copy_start..copy_start.wrapping_add(span_len), 0);
+            self.buffer.copy_within(src_range, 0);
             self.unescaped_len = span_len;
         }
 
@@ -144,7 +153,11 @@ impl<'a> DirectBuffer<'a> {
                 "No unescaped content available",
             ));
         }
-        Ok(&self.buffer[0..self.unescaped_len])
+        self.buffer
+            .get(0..self.unescaped_len)
+            .ok_or(DirectBufferError::InvalidState(
+                "Unescaped length exceeds buffer size",
+            ))
     }
 
     /// Clear unescaped content (call after yielding unescaped string)
@@ -174,9 +187,13 @@ impl<'a> DirectBuffer<'a> {
             return Err(DirectBufferError::BufferFull);
         }
 
-        self.buffer[self.unescaped_len] = byte;
-        self.unescaped_len = self.unescaped_len.wrapping_add(1);
-        Ok(())
+        if let Some(b) = self.buffer.get_mut(self.unescaped_len) {
+            *b = byte;
+            self.unescaped_len = self.unescaped_len.wrapping_add(1);
+            Ok(())
+        } else {
+            Err(DirectBufferError::BufferFull)
+        }
     }
 
     /// Get a string slice from the buffer (zero-copy)
@@ -185,7 +202,9 @@ impl<'a> DirectBuffer<'a> {
         if start > end || end > self.data_end {
             return Err(DirectBufferError::InvalidState("Invalid slice bounds"));
         }
-        Ok(&self.buffer[start..end])
+        self.buffer
+            .get(start..end)
+            .ok_or(DirectBufferError::InvalidState("Invalid slice bounds"))
     }
 }
 

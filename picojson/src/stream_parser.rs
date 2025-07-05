@@ -549,7 +549,9 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 )?;
             let mut copy = [0u8; 4];
             let len = utf8_bytes.len();
-            copy[..len].copy_from_slice(utf8_bytes);
+            if let Some(dest) = copy.get_mut(..len) {
+                dest.copy_from_slice(utf8_bytes);
+            }
             (copy, len)
         };
 
@@ -626,14 +628,19 @@ mod tests {
         type Error = ();
 
         fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-            let remaining = self.data.len() - self.position;
+            let remaining = self.data.len().saturating_sub(self.position);
             if remaining == 0 {
                 return Ok(0); // EOF
             }
 
             let to_copy = remaining.min(buf.len());
-            buf[..to_copy].copy_from_slice(&self.data[self.position..self.position + to_copy]);
-            self.position += to_copy;
+            if let Some(dest) = buf.get_mut(..to_copy) {
+                let end_pos = self.position.saturating_add(to_copy);
+                if let Some(src) = self.data.get(self.position..end_pos) {
+                    dest.copy_from_slice(src);
+                    self.position = end_pos;
+                }
+            }
             Ok(to_copy)
         }
     }
