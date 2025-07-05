@@ -36,8 +36,15 @@ jobs:
         run: python run_suite.py bloat
 
   avr_panic_check:
-    name: AVR Panic Prevention
+    name: AVR Panic Prevention (${{ matrix.int_type }}, ${{ matrix.pico_size }}, ${{ matrix.profile }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [test_picojson]
+        int_type: [int8, int32]
+        profile: [release, dev]
+        pico_size: [pico-tiny, pico-huge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -55,22 +62,14 @@ jobs:
       - name: Install cargo-binutils
         run: cargo install cargo-binutils
 
-      - name: Build the demos in Release mode
+      - name: Build the demos in ${{ matrix.profile }} mode
         working-directory: avr_demo
-        run: cargo build --release --examples
+        run: cargo build --profile ${{ matrix.profile }} --example ${{ matrix.example }} --features "${{ matrix.int_type }},${{ matrix.pico_size }}"
 
-      - name: Build the demos in Dev mode
+      - name: Check for panics ( minimal )
         working-directory: avr_demo
-        run: cargo build --examples
+        run: cargo nm --profile ${{ matrix.profile }} --example minimal | ( ! egrep "panic|unwind" )
 
-      - name: Build the demos in panic check profile
+      - name: Check for panics
         working-directory: avr_demo
-        run: cargo build --profile panic_checks --example minimal
-
-      - name: Run Panic Check (Minimal Example)
-        working-directory: avr_demo
-        run: python run_suite.py panic --example minimal
-
-      - name: Run Panic Check (Minimal Example)
-        working-directory: avr_demo
-        run: python run_suite.py panic --example test_picojson
+        run: cargo nm --profile ${{ matrix.profile }} --example ${{ matrix.example }} | ( ! egrep "panic|unwind" )

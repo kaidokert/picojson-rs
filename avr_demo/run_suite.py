@@ -254,7 +254,7 @@ def _report_panic_results(example_name, asm_file, found_panics):
         print(f"✅ PASS: No panic references found in '{example_name}'")
         return True
 
-def run_panic_checker(example_name, profile="panic_checks", verbose=False, no_default_features=False, features=None):
+def run_panic_checker(example_name, profile="dev", verbose=False, no_default_features=False, features=None):
     """Run panic checker on a specific example."""
     print(f"🔍 Checking example '{example_name}' for panic references...")
     try:

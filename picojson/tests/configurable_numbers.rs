@@ -111,18 +111,18 @@ fn test_float_truncate_to_i32() {
     feature = "float-truncate",
     not(feature = "int32")
 ))]
-fn test_float_truncate_to_i64() {
+fn test_float_truncate_to_integer() {
     let input = r#"[1.7, 2.9, 3.1]"#;
     let mut scratch = [0u8; 1024];
     let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
     assert!(matches!(parser.next_event(), Ok(Event::StartArray)));
 
-    // Should truncate to i64 values
+    // Should truncate to integer
     match parser.next_event() {
         Ok(Event::Number(num)) => {
             assert_eq!(num.as_str(), "1.7");
-            assert!(matches!(num.parsed(), NumberResult::FloatTruncated(1i64)));
+            assert!(matches!(num.parsed(), NumberResult::FloatTruncated(1)));
         }
         other => panic!("Expected truncated Number, got: {:?}", other),
     }
