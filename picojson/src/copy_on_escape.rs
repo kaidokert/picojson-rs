@@ -71,8 +71,15 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
                 .input
                 .get(self.last_copied_pos..end)
                 .ok_or(ParseError::UnexpectedState("Invalid span"))?;
-            let end_pos = self.scratch_pos.wrapping_add(span.len());
-            if end_pos.wrapping_add(extra_space) > self.scratch.len() {
+            let end_pos = self
+                .scratch_pos
+                .checked_add(span.len())
+                .ok_or(ParseError::NumericOverflow)?;
+            if end_pos
+                .checked_add(extra_space)
+                .ok_or(ParseError::NumericOverflow)?
+                > self.scratch.len()
+            {
                 return Err(ParseError::ScratchBufferFull);
             }
             // Use zip to avoid copy_from_slice panic checks
@@ -111,6 +118,8 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
         }
         if let Some(slot) = self.scratch.get_mut(self.scratch_pos) {
             *slot = unescaped_char;
+        } else {
+            return Err(ParseError::ScratchBufferFull);
         }
         self.scratch_pos = self.scratch_pos.saturating_add(1);
 
@@ -142,7 +151,10 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
         self.copy_span_to_scratch(start_pos, utf8_bytes.len())?;
 
         // Write the UTF-8 encoded bytes
-        let new_scratch_pos = self.scratch_pos.wrapping_add(utf8_bytes.len());
+        let new_scratch_pos = self
+            .scratch_pos
+            .checked_add(utf8_bytes.len())
+            .ok_or(ParseError::NumericOverflow)?;
         if new_scratch_pos > self.scratch.len() {
             return Err(ParseError::ScratchBufferFull);
         }

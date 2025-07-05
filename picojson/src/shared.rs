@@ -61,6 +61,8 @@ pub enum ParseError {
     EndOfStream,
     /// Error from the underlying reader (I/O error, not end-of-stream)
     ReaderError,
+    /// Numeric overflow
+    NumericOverflow,
 }
 
 impl From<core::str::Utf8Error> for ParseError {

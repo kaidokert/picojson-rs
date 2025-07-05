@@ -171,26 +171,16 @@ pub fn is_integer(bytes: &[u8]) -> bool {
 /// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
 #[inline(never)]
 pub const fn parse_integer(bytes: &[u8]) -> NumberResult {
-    {
-        #[cfg(feature = "int8")]
-        match from_ascii_i8(bytes) {
-            Ok(val) => NumberResult::Integer(val),
-            Err(_) => NumberResult::IntegerOverflow,
-        }
-    }
+    #[cfg(feature = "int8")]
+    let result = from_ascii_i8(bytes);
     #[cfg(feature = "int32")]
-    {
-        match from_ascii_i32(bytes) {
-            Ok(val) => NumberResult::Integer(val),
-            Err(_) => NumberResult::IntegerOverflow,
-        }
-    }
+    let result = from_ascii_i32(bytes);
     #[cfg(feature = "int64")]
-    {
-        match from_ascii_i64(bytes) {
-            Ok(val) => NumberResult::Integer(val),
-            Err(_) => NumberResult::IntegerOverflow,
-        }
+    let result = from_ascii_i64(bytes);
+
+    match result {
+        Ok(val) => NumberResult::Integer(val),
+        Err(_) => NumberResult::IntegerOverflow,
     }
 }
 

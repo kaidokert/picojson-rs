@@ -486,7 +486,8 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 let max_escaped_len = self
                     .direct_buffer
                     .remaining_bytes()
-                    .wrapping_add(content_len);
+                    .checked_add(content_len)
+                    .ok_or(ParseError::NumericOverflow)?;
 
                 // Start unescaping with DirectBuffer and copy existing content
                 self.direct_buffer.start_unescaping_with_copy(
@@ -631,9 +632,8 @@ mod tests {
             }
 
             let to_copy = remaining.min(buf.len());
-            buf[..to_copy]
-                .copy_from_slice(&self.data[self.position..self.position.wrapping_add(to_copy)]);
-            self.position = self.position.wrapping_add(to_copy);
+            buf[..to_copy].copy_from_slice(&self.data[self.position..self.position + to_copy]);
+            self.position += to_copy;
             Ok(to_copy)
         }
     }

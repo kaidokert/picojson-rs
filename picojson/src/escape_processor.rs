@@ -175,9 +175,10 @@ impl UnicodeEscapeCollector {
             ));
         }
 
-        // Safe assignment using get_mut
         if let Some(slot) = self.hex_buffer.get_mut(self.hex_pos) {
             *slot = digit;
+        } else {
+            return Err(ParseError::InvalidUnicodeHex);
         }
 
         self.hex_pos = self.hex_pos.saturating_add(1);

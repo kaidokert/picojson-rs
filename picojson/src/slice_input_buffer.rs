@@ -29,11 +29,11 @@ impl InputBuffer for SliceInputBuffer<'_> {
     fn consume_byte(&mut self) -> Result<u8, Error> {
         match self.data.get(self.pos) {
             Some(&byte) => {
-                self.pos = self.pos.wrapping_add(1);
+                self.pos = self.pos.checked_add(1).ok_or(Error::InvalidSliceBounds)?;
                 Ok(byte)
             }
             None => {
-                self.pos = self.pos.wrapping_add(1);
+                self.pos = self.pos.checked_add(1).ok_or(Error::InvalidSliceBounds)?;
                 Err(Error::ReachedEnd)
             }
         }
