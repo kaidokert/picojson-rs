@@ -17,15 +17,41 @@ jobs:
         with:
           components: rust-src
 
-      - name: Install simavr and dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y simavr gcc-avr avr-libc
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            avr_demo
+            picojson
+
+      - name: Cache APT packages
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: simavr gcc-avr avr-libc
+          version: 1.0
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-bloat
+            ~/.cargo/bin/cargo-nm
+            ~/.cargo/bin/cargo-objcopy
+            ~/.cargo/bin/cargo-objdump
+            ~/.cargo/bin/cargo-size
+            ~/.cargo/bin/cargo-strip
+          key: ${{ runner.os }}-cargo-bins-bloat-binutils-v1
 
       - name: Install cargo-bloat
-        run: cargo install cargo-bloat
+        run: |
+          if ! command -v cargo-bloat &> /dev/null; then
+            cargo install cargo-bloat --locked
+          fi
       - name: Install cargo-binutils
-        run: cargo install cargo-binutils
+        run: |
+          if ! command -v cargo-nm &> /dev/null; then
+            cargo install cargo-binutils --locked
+          fi
 
       - name: Run Stack Analysis
         working-directory: avr_demo
@@ -54,13 +80,35 @@ jobs:
         with:
           components: rust-src
 
-      - name: Install simavr and dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y simavr gcc-avr avr-libc
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            avr_demo
+            picojson
+
+      - name: Cache APT packages
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: simavr gcc-avr avr-libc
+          version: 1.0
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-nm
+            ~/.cargo/bin/cargo-objcopy
+            ~/.cargo/bin/cargo-objdump
+            ~/.cargo/bin/cargo-size
+            ~/.cargo/bin/cargo-strip
+          key: ${{ runner.os }}-cargo-binutils-v1
 
       - name: Install cargo-binutils
-        run: cargo install cargo-binutils
+        run: |
+          if ! command -v cargo-nm &> /dev/null; then
+            cargo install cargo-binutils --locked
+          fi
 
       - name: Build the demos in ${{ matrix.profile }} mode
         working-directory: avr_demo
