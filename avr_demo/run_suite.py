@@ -30,9 +30,10 @@ DEPTHS = get_depths_from_build_rs()
 # (Test Name, Cargo Example Name, Extra Features)
 CONFIGS = [
     ("serde", "test_serde", ["ufmt","int8"]),
-    ("picojson-tiny", "test_picojson", ["pico-tiny","ufmt", "int8"]),
-    ("picojson-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
-    ("picojson-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
+    ("slice-tiny", "test_picojson", ["pico-tiny","ufmt", "int8"]),
+    ("slice-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
+    ("slice-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
+    ("stream-tiny", "test_streamparser", ["pico-tiny","ufmt", "int8"]),
 ]
 
 def run_stack_analysis():
@@ -101,7 +102,8 @@ def run_bloat_analysis():
 
     bloat_configs = [
         ("serde", "test_serde", ["int8"]),
-        ("picojson", "test_picojson", ["pico-tiny", "int8"]),
+        ("picojson-slice", "test_picojson", ["pico-tiny", "int8"]),
+        ("picojson-stream", "test_streamparser", ["pico-tiny", "int8"]),
     ]
 
     # Bloat analysis doesn't depend on nesting depth, so we run it once for each config.

@@ -555,8 +555,10 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
             (copy, len)
         };
 
-        for &byte in &utf8_bytes_copy.0[..utf8_bytes_copy.1] {
-            self.append_byte_to_escape_buffer(byte)?;
+        if let Some(bytes_to_copy) = utf8_bytes_copy.0.get(..utf8_bytes_copy.1) {
+            for &byte in bytes_to_copy {
+                self.append_byte_to_escape_buffer(byte)?;
+            }
         }
         Ok(())
     }

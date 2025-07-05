@@ -18,7 +18,7 @@ fn generate_nested_json(depth: usize) -> String {
 
 // Define all possible depth configurations in a constant array.
 const DEPTHS: &[usize] = &[
-    7, 9, 31, 33, 63, 65, 127, 129, 255, 257, 511, 513, 1023, 1025,
+    7, 9, 30, 33, 62, 65, 126, 129, 254, 257, 510, 513, 1022, 1025,
 ];
 
 fn main() {
