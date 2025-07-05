@@ -282,6 +282,60 @@ const fn process_token_char(
     }
 }
 impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
+    // Const lookup table for escape sequences - replaces runtime match
+    const ESCAPE_TOKENS: [Option<EventToken>; 256] = {
+        let mut table = [None; 256];
+        table[b'"' as usize] = Some(EventToken::EscapeQuote);
+        table[b'\\' as usize] = Some(EventToken::EscapeBackslash);
+        table[b'/' as usize] = Some(EventToken::EscapeSlash);
+        table[b'b' as usize] = Some(EventToken::EscapeBackspace);
+        table[b'f' as usize] = Some(EventToken::EscapeFormFeed);
+        table[b'n' as usize] = Some(EventToken::EscapeNewline);
+        table[b'r' as usize] = Some(EventToken::EscapeCarriageReturn);
+        table[b't' as usize] = Some(EventToken::EscapeTab);
+        table
+    };
+
+    // Character classification tables for faster parsing
+    const IS_NON_ZERO_DIGIT: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = b'1';
+        while i <= b'9' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        table
+    };
+
+    const IS_WHITESPACE: [bool; 256] = {
+        let mut table = [false; 256];
+        table[b' ' as usize] = true;
+        table[b'\t' as usize] = true;
+        table[b'\n' as usize] = true;
+        table[b'\r' as usize] = true;
+        table
+    };
+
+    const IS_HEX_DIGIT: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = b'0';
+        while i <= b'9' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        let mut i = b'a';
+        while i <= b'f' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        let mut i = b'A';
+        while i <= b'F' {
+            table[i as usize] = true;
+            i += 1;
+        }
+        table
+    };
+
     // Number state transition table: [current_state][character] -> next_state
     const NUM_TRANSITIONS: [[Option<Num>; 256]; 8] = {
         let mut table = [[None; 256]; 8];
@@ -565,7 +619,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                             callback(Event::End(EventToken::Number), pos);
                             self.context.after_comma = Some((ch, pos));
                             self.saw_a_comma_now_what()
-                        } else if matches!(ch, b' ' | b'\t' | b'\n' | b'\r') {
+                        } else if Self::IS_WHITESPACE[ch as usize] {
                             callback(Event::End(EventToken::Number), pos);
                             self.maybe_exit_level()
                         } else if ch == b']' {
@@ -638,44 +692,32 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Escaping,
                         key,
                     },
-                    escape_char @ (b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't'),
+                    escape_char,
                 ) => {
-                    let escape_token = match escape_char {
-                        b'"' => EventToken::EscapeQuote,
-                        b'\\' => EventToken::EscapeBackslash,
-                        b'/' => EventToken::EscapeSlash,
-                        b'b' => EventToken::EscapeBackspace,
-                        b'f' => EventToken::EscapeFormFeed,
-                        b'n' => EventToken::EscapeNewline,
-                        b'r' => EventToken::EscapeCarriageReturn,
-                        b't' => EventToken::EscapeTab,
-                        // This branch should never be reached due to the pattern guard above
-                        _ => return Error::new(ErrKind::InvalidStringEscape, current_byte, pos),
-                    };
-                    callback(Event::Begin(escape_token.clone()), pos);
-                    callback(Event::End(escape_token), pos);
-                    State::String {
-                        state: String::Normal,
-                        key: *key,
+                    if let Some(escape_token) = Self::ESCAPE_TOKENS[escape_char as usize] {
+                        callback(Event::Begin(escape_token), pos);
+                        callback(Event::End(escape_token), pos);
+                        State::String {
+                            state: String::Normal,
+                            key: *key,
+                        }
+                    } else if escape_char == b'u' {
+                        // Handle unicode escape sequence
+                        State::String {
+                            state: String::Unicode0,
+                            key: *key,
+                        }
+                    } else {
+                        return Error::new(ErrKind::InvalidStringEscape, escape_char, pos);
                     }
                 }
-                (
-                    State::String {
-                        state: String::Escaping,
-                        key,
-                    },
-                    b'u',
-                ) => State::String {
-                    state: String::Unicode0,
-                    key: *key,
-                },
                 (
                     State::String {
                         state: String::Unicode0,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => {
                     callback(Event::Begin(EventToken::UnicodeEscape), pos);
                     State::String {
                         state: String::Unicode1,
@@ -687,8 +729,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Unicode1,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => State::String {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => State::String {
                     state: String::Unicode2,
                     key: *key,
                 },
@@ -697,8 +739,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Unicode2,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => State::String {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => State::String {
                     state: String::Unicode3,
                     key: *key,
                 },
@@ -707,8 +749,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         state: String::Unicode3,
                         key,
                     },
-                    b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F',
-                ) => {
+                    ch,
+                ) if Self::IS_HEX_DIGIT[ch as usize] => {
                     callback(Event::End(EventToken::UnicodeEscape), pos);
                     State::String {
                         state: String::Normal,
@@ -741,8 +783,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     | State::Object { expect: _ }
                     | State::Array { expect: _ }
                     | State::Finished,
-                    b' ' | b'\t' | b'\n' | b'\r',
-                ) => self.state.clone(),
+                    ch,
+                ) if Self::IS_WHITESPACE[ch as usize] => self.state.clone(),
                 (
                     State::Idle
                     | State::Object {
@@ -837,8 +879,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     | State::Array {
                         expect: Array::ItemOrEnd,
                     },
-                    b'1'..=b'9',
-                ) => {
+                    ch,
+                ) if Self::IS_NON_ZERO_DIGIT[ch as usize] => {
                     callback(Event::Begin(EventToken::Number), pos);
                     State::Number {
                         state: Num::BeforeDecimalPoint,
@@ -965,13 +1007,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                 (State::Idle, _) => {
                     return Error::new(ErrKind::InvalidRoot, current_byte, pos);
                 }
-                (
-                    State::String {
-                        state: String::Escaping,
-                        key: _,
-                    },
-                    _,
-                ) => return Error::new(ErrKind::InvalidStringEscape, current_byte, pos),
+
                 (
                     State::Object {
                         expect: Object::Key,
