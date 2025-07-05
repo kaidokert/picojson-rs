@@ -634,14 +634,17 @@ mod tests {
             }
 
             let to_copy = remaining.min(buf.len());
-            if let Some(dest) = buf.get_mut(..to_copy) {
-                let end_pos = self.position.saturating_add(to_copy);
-                if let Some(src) = self.data.get(self.position..end_pos) {
-                    dest.copy_from_slice(src);
-                    self.position = end_pos;
-                }
+            let end_pos = self.position.saturating_add(to_copy);
+            if let (Some(dest), Some(src)) = (
+                buf.get_mut(..to_copy),
+                self.data.get(self.position..end_pos),
+            ) {
+                dest.copy_from_slice(src);
+                self.position = end_pos;
+                Ok(to_copy)
+            } else {
+                Err(())
             }
-            Ok(to_copy)
         }
     }
 

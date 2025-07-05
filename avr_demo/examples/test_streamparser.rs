@@ -61,15 +61,26 @@ impl<'a> Reader for SliceReader<'a> {
         }
 
         let to_copy = remaining.min(buf.len());
-        if let Some(dest) = buf.get_mut(..to_copy) {
-            let end_pos = self.position.saturating_add(to_copy);
-            if let Some(src) = self.data.get(self.position..end_pos) {
-                dest.copy_from_slice(src);
-                self.position = end_pos;
-            }
+        let end_pos = self.position.saturating_add(to_copy);
+        if let (Some(dest), Some(src)) = (
+            buf.get_mut(..to_copy),
+            self.data.get(self.position..end_pos),
+        ) {
+            dest.copy_from_slice(src);
+            self.position = end_pos;
+            Ok(to_copy)
+        } else {
+            Err(())
         }
-        Ok(to_copy)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum KeyContext {
+    None,
+    Id,
+    TestDepth,
+    Status,
 }
 
 fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, ParseError> {
@@ -82,39 +93,36 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
     let reader = SliceReader::new(json_data);
     let mut parser = StreamParser::<_, PicoConfig>::new(reader, &mut stream_buffer);
 
-    let mut key_is_id = false;
-    let mut key_is_test_depth = false;
-    let mut key_is_status = false;
+    let mut key_context = KeyContext::None;
 
     loop {
         match parser.next() {
             Some(Ok(Event::Key(key))) => {
                 let s = key.as_str();
-                key_is_id = s == "id";
-                key_is_test_depth = s == "test_depth";
-                key_is_status = s == "status";
+                key_context = match s {
+                    "id" => KeyContext::Id,
+                    "test_depth" => KeyContext::TestDepth,
+                    "status" => KeyContext::Status,
+                    _ => KeyContext::None,
+                };
             }
             Some(Ok(Event::String(value))) => {
-                if key_is_status {
+                if key_context == KeyContext::Status {
                     let s = value.as_str();
                     status_len = s.len();
                     if let Some(target_slice) = scratch.get_mut(..status_len) {
                         target_slice.copy_from_slice(s.as_bytes());
                     }
                 }
-                key_is_id = false;
-                key_is_test_depth = false;
-                key_is_status = false;
+                key_context = KeyContext::None;
             }
             Some(Ok(Event::Number(value))) => {
-                if key_is_id {
-                    id = value.as_int().unwrap_or(0) as u32;
-                } else if key_is_test_depth {
-                    test_depth = value.as_int().unwrap_or(0) as u32;
+                match key_context {
+                    KeyContext::Id => id = value.as_int().unwrap_or(0) as u32,
+                    KeyContext::TestDepth => test_depth = value.as_int().unwrap_or(0) as u32,
+                    _ => {}
                 }
-                key_is_id = false;
-                key_is_test_depth = false;
-                key_is_status = false;
+                key_context = KeyContext::None;
             }
             Some(Ok(_)) => {}
             Some(Err(e)) => return Err(e),
