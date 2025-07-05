@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(db.tokenize_pos, 0);
         assert_eq!(db.data_end, 0);
         assert_eq!(db.unescaped_len, 0);
-        assert_eq!(db.escape_reserve, 64); // 10% of 100, minimum 64
+        assert_eq!(db.escape_reserve, 64); // 12.5% of 100, minimum 64
         assert!(db.is_empty());
     }
 
@@ -339,7 +339,7 @@ mod tests {
         let db = DirectBuffer::new(&mut buffer);
 
         // Check escape reserve calculation
-        assert_eq!(db.escape_reserve, 64); // max(100/10, 64) = 64
+        assert_eq!(db.escape_reserve, 64); // max(100>>3, 64) = 64
 
         // Test with smaller buffer
         let mut small_buffer = [0u8; 50];
@@ -415,7 +415,7 @@ mod tests {
         let mut buffer = [0u8; 100]; // 100 byte buffer
         let mut db = DirectBuffer::new(&mut buffer);
 
-        // Check escape reserve was set correctly (10% of 100, minimum 64)
+        // Check escape reserve was set correctly (12.5% of 100, minimum 64)
         assert_eq!(db.escape_reserve, 64);
 
         // Should be able to append up to (buffer_len - escape_reserve) bytes
