@@ -42,34 +42,26 @@ fn copy_subslice(
     dest_start: usize,
     copy_len: usize,
 ) -> Result<usize, usize> {
-    // Check source bounds
-    if src_start > src.len() || src_start + copy_len > src.len() {
-        return Err(0); // Failed at the beginning
-    }
+    // Calculate end positions once with overflow checking
+    let src_end = src_start.checked_add(copy_len).ok_or(0usize)?;
+    let dest_end = dest_start.checked_add(copy_len).ok_or(0usize)?;
 
-    // Check if the copy length fits in the destination
-    if copy_len > dest.len() || dest_start > dest.len() || dest_start + copy_len > dest.len() {
-        return Err(0); // Failed at the beginning
-    }
-
-    // Get the source slice safely
-    if let Some(src_slice) = src.get(src_start..src_start + copy_len) {
-        // Get the destination slice safely
-        if let Some(dest_slice) = dest.get_mut(dest_start..dest_start + copy_len) {
-            // Copy byte by byte
-            for (i, &byte) in src_slice.iter().enumerate() {
-                if let Some(dst) = dest_slice.get_mut(i) {
-                    *dst = byte;
-                } else {
-                    return Err(i); // Return the index where it failed
+    // Get both slices safely (they handle bounds checking)
+    match (
+        src.get(src_start..src_end),
+        dest.get_mut(dest_start..dest_end),
+    ) {
+        (Some(src_slice), Some(dest_slice)) => {
+            // Copy byte by byte, don't use iterators to avoid panics
+            for i in 0..src_slice.len() {
+                match (dest_slice.get_mut(i), src_slice.get(i)) {
+                    (Some(dst), Some(src)) => *dst = *src,
+                    _ => return Err(i), // Return the index where either access failed
                 }
             }
             Ok(copy_len)
-        } else {
-            Err(0) // Failed to get destination slice
         }
-    } else {
-        Err(0) // Failed to get source slice
+        _ => Err(0), // Either slice extraction failed
     }
 }
 
@@ -102,7 +94,7 @@ impl<'a> Reader for SliceReader<'a> {
 
         let to_copy = remaining.min(buf.len());
         if let Ok(copied) = copy_subslice(self.data, self.position, buf, 0, to_copy) {
-            self.position += copied;
+            self.position = self.position.wrapping_add(copied);
             Ok(copied)
         } else {
             Err(())
