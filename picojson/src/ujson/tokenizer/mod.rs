@@ -352,7 +352,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     };
 
     // Convert Num enum to table index for NUM_TRANSITIONS
-    const fn num_to_index(num: &Num) -> usize {
+    const fn num_to_index(num: Num) -> usize {
         match num {
             Num::Sign => 0,
             Num::LeadingZero => 1,
@@ -366,13 +366,13 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     }
 
     // Process number state transition using const table
-    fn process_number_transition(&self, current_num: &Num, ch: u8) -> Option<Num> {
-        let index = Self::num_to_index(current_num);
+    const fn process_number_transition(&self, current_num: &Num, ch: u8) -> Option<Num> {
+        let index = Self::num_to_index(*current_num);
         Self::NUM_TRANSITIONS[index][ch as usize]
     }
 
     // Check if current number state can be terminated (not in the middle of parsing)
-    fn is_valid_number_terminal_state(&self, num_state: &Num) -> bool {
+    const fn is_valid_number_terminal_state(num_state: Num) -> bool {
         match num_state {
             // These states represent valid complete numbers
             Num::LeadingZero
@@ -560,7 +560,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         State::Number { state: next_state }
                     }
                     // Handle number termination cases - but only for valid terminal states
-                    else if self.is_valid_number_terminal_state(num_state) {
+                    else if Self::is_valid_number_terminal_state(*num_state) {
                         if ch == b',' {
                             callback(Event::End(EventToken::Number), pos);
                             self.context.after_comma = Some((ch, pos));
