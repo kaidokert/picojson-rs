@@ -236,54 +236,53 @@ impl Default for Tokenizer {
     }
 }
 
-impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
-    // Token strings for const validation
-    const TOKEN_STRINGS: [&'static [u8]; 3] = [
-        b"true",  // TokenType::True
-        b"false", // TokenType::False
-        b"null",  // TokenType::Null
-    ];
-
-    const TOKEN_EVENTS: [EventToken; 3] = [EventToken::True, EventToken::False, EventToken::Null];
-
-    // Convert TokenType to array index
-    const fn token_type_to_index(token_type: TokenType) -> usize {
-        match token_type {
-            TokenType::True => 0,
-            TokenType::False => 1,
-            TokenType::Null => 2,
+impl TokenType {
+    const fn as_str(&self) -> &'static [u8] {
+        match self {
+            TokenType::True => b"true",
+            TokenType::False => b"false",
+            TokenType::Null => b"null",
         }
     }
 
-    // Process token character using const lookup
-    fn process_token_char(
-        &self,
-        progress: &TokenProgress,
-        ch: u8,
-    ) -> Result<Option<TokenProgress>, EventToken> {
-        let index = Self::token_type_to_index(progress.token_type);
-        let token_string = Self::TOKEN_STRINGS[index];
+    const fn as_event_token(&self) -> EventToken {
+        match self {
+            TokenType::True => EventToken::True,
+            TokenType::False => EventToken::False,
+            TokenType::Null => EventToken::Null,
+        }
+    }
+}
 
-        // Check if character matches expected position
-        if progress.position < token_string.len() && ch == token_string[progress.position] {
-            let new_position = progress.position + 1;
+// Process token character using const lookup
+const fn process_token_char(
+    progress: &TokenProgress,
+    ch: u8,
+) -> Result<Option<TokenProgress>, EventToken> {
+    let token_string = progress.token_type.as_str();
 
-            // Check if token is complete
-            if new_position == token_string.len() {
-                // Token complete - return the event token
-                Err(Self::TOKEN_EVENTS[index])
-            } else {
-                // Continue parsing
-                Ok(Some(TokenProgress {
-                    token_type: progress.token_type,
-                    position: new_position,
-                }))
-            }
+    // Check if character matches expected position
+    if progress.position < token_string.len() && ch == token_string[progress.position] {
+        let new_position = progress.position + 1;
+
+        // Check if token is complete
+        if new_position == token_string.len() {
+            // Token complete - return the event token
+            Err(progress.token_type.as_event_token())
         } else {
-            // Invalid character for this token
-            Ok(None)
+            // Continue parsing
+            Ok(Some(TokenProgress {
+                token_type: progress.token_type,
+                position: new_position,
+            }))
         }
+    } else {
+        // Invalid character for this token
+        Ok(None)
     }
+}
+
+impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,
@@ -964,12 +963,15 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     let progress = match token {
                         Token::True(p) | Token::False(p) | Token::Null(p) => p,
                     };
-                    match self.process_token_char(progress, current_byte) {
+                    match process_token_char(progress, current_byte) {
                         Ok(Some(new_progress)) => {
                             // Continue parsing token
-                            State::Token {
-                                token: Token::True(new_progress),
-                            }
+                            let new_token = match progress.token_type {
+                                TokenType::True => Token::True(new_progress),
+                                TokenType::False => Token::False(new_progress),
+                                TokenType::Null => Token::Null(new_progress),
+                            };
+                            State::Token { token: new_token }
                         }
                         Ok(None) => {
                             // Invalid character for this token
