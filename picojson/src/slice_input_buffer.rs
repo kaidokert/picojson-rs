@@ -29,11 +29,11 @@ impl InputBuffer for SliceInputBuffer<'_> {
     fn consume_byte(&mut self) -> Result<u8, Error> {
         match self.data.get(self.pos) {
             Some(&byte) => {
-                self.pos += 1;
+                self.pos = self.pos.wrapping_add(1);
                 Ok(byte)
             }
             None => {
-                self.pos += 1; // Still increment position like original logic
+                self.pos = self.pos.wrapping_add(1);
                 Err(Error::ReachedEnd)
             }
         }

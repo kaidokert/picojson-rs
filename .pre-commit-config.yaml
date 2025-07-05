@@ -31,9 +31,27 @@ repos:
         language: system
         pass_filenames: false
 
-    -   id: feature-matrix-no-defaults
-        name: Feature Matrix Check - No Defaults
-        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features
+    -   id: feature-matrix-int8-float
+        name: Feature Matrix Check - int8 + float
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int8,float"
+        language: system
+        pass_filenames: false
+
+    -   id: feature-matrix-int8-float-skip
+        name: Feature Matrix Check - int8 + float-skip
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int8,float-skip"
+        language: system
+        pass_filenames: false
+
+    -   id: feature-matrix-int8-float-error
+        name: Feature Matrix Check - int8 + float-error
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int8,float-error"
+        language: system
+        pass_filenames: false
+
+    -   id: feature-matrix-int8-float-truncate
+        name: Feature Matrix Check - int8 + float-truncate
+        entry: cargo check --manifest-path=picojson/Cargo.toml --no-default-features --features "int8,float-truncate"
         language: system
         pass_filenames: false
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::shared::{Event, ParseError, ParserErrorHandler};
+use crate::shared::{Event, ParseError};
 use crate::JsonNumber;
 
 /// Trait for extracting number slices from different buffer implementations.
@@ -45,12 +45,12 @@ pub fn parse_number_event<T: NumberExtractor>(
         current_pos
     };
 
-    // Extract number bytes and convert to string
+    // Extract number bytes and parse directly
     let number_bytes = extractor.get_number_slice(start_pos, number_end)?;
-    let number_str = ParserErrorHandler::bytes_to_utf8_str(number_bytes)?;
+    let parsed_result = crate::parse_number_from_str(number_bytes)?;
 
-    // Parse number using shared logic
-    let parsed_result = crate::parse_number_from_str(number_str)?;
+    // Convert to string for JsonNumber event
+    let number_str = crate::shared::from_utf8(number_bytes)?;
 
     // Create event
     Ok(Event::Number(JsonNumber::Borrowed {
@@ -62,6 +62,7 @@ pub fn parse_number_event<T: NumberExtractor>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::ParserErrorHandler;
 
     // Mock extractor for testing
     struct MockExtractor {
@@ -101,13 +102,13 @@ mod tests {
 
     #[test]
     fn test_parse_number_event_with_container() {
-        let data = b"456}"; // Number followed by container end
-        let extractor = MockExtractor::new(data, 4, false); // Position after '}'
+        let data = b"56}"; // Number followed by container end
+        let extractor = MockExtractor::new(data, 3, false); // Position after '}'
 
         let result = parse_number_event(&extractor, 0, true).unwrap();
         if let Event::Number(num) = result {
-            assert_eq!(num.as_str(), "456"); // Should exclude the '}'
-            assert_eq!(num.as_int(), Some(456));
+            assert_eq!(num.as_str(), "56"); // Should exclude the '}'
+            assert_eq!(num.as_int(), Some(56));
         } else {
             panic!("Expected Number event");
         }
@@ -115,13 +116,13 @@ mod tests {
 
     #[test]
     fn test_parse_number_event_at_eof() {
-        let data = b"789";
-        let extractor = MockExtractor::new(data, 3, true); // At EOF
+        let data = b"89";
+        let extractor = MockExtractor::new(data, 2, true); // At EOF
 
         let result = parse_number_event(&extractor, 0, false).unwrap();
         if let Event::Number(num) = result {
-            assert_eq!(num.as_str(), "789"); // Should include full number
-            assert_eq!(num.as_int(), Some(789));
+            assert_eq!(num.as_str(), "89"); // Should include full number
+            assert_eq!(num.as_int(), Some(89));
         } else {
             panic!("Expected Number event");
         }

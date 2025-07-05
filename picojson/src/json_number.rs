@@ -5,10 +5,19 @@ use core::str::FromStr;
 
 use crate::ParseError;
 
+#[cfg(feature = "int32")]
+use crate::int_parser::from_ascii_i32;
+#[cfg(feature = "int64")]
+use crate::int_parser::from_ascii_i64;
+#[cfg(feature = "int8")]
+use crate::int_parser::from_ascii_i8;
+
 // Type alias for the configured integer type
+#[cfg(feature = "int8")]
+type ConfiguredInt = i8;
 #[cfg(feature = "int32")]
 type ConfiguredInt = i32;
-#[cfg(not(feature = "int32"))]
+#[cfg(feature = "int64")]
 type ConfiguredInt = i64;
 
 /// Represents the parsed result of a JSON number.
@@ -146,31 +155,71 @@ impl core::fmt::Display for JsonNumber<'_, '_> {
     }
 }
 
-/// Detects if a number string represents an integer (no decimal point or exponent).
-pub(super) fn is_integer(s: &str) -> bool {
-    !s.contains('.') && !s.contains('e') && !s.contains('E')
+/// Detects if a number byte slice represents an integer (no decimal point or exponent).
+/// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
+#[inline(never)]
+pub fn is_integer(bytes: &[u8]) -> bool {
+    for &b in bytes {
+        if b == b'.' || b == b'e' || b == b'E' {
+            return false;
+        }
+    }
+    true
 }
 
-/// Parses an integer string into NumberResult using configured integer type.
-pub(super) fn parse_integer(s: &str) -> NumberResult {
-    match ConfiguredInt::from_str(s) {
-        Ok(val) => NumberResult::Integer(val),
-        Err(_) => NumberResult::IntegerOverflow,
+/// Parses an integer byte slice into NumberResult using configured integer type.
+/// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
+#[inline(never)]
+pub const fn parse_integer(bytes: &[u8]) -> NumberResult {
+    {
+        #[cfg(feature = "int8")]
+        match from_ascii_i8(bytes) {
+            Ok(val) => NumberResult::Integer(val),
+            Err(_) => NumberResult::IntegerOverflow,
+        }
+    }
+    #[cfg(feature = "int32")]
+    {
+        match from_ascii_i32(bytes) {
+            Ok(val) => NumberResult::Integer(val),
+            Err(_) => NumberResult::IntegerOverflow,
+        }
+    }
+    #[cfg(feature = "int64")]
+    {
+        match from_ascii_i64(bytes) {
+            Ok(val) => NumberResult::Integer(val),
+            Err(_) => NumberResult::IntegerOverflow,
+        }
     }
 }
 
-/// Parses a float string into NumberResult (only available with float feature).
+/// Parses a float byte slice into NumberResult (only available with float feature).
+/// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
 #[cfg(feature = "float")]
-pub(super) fn parse_float(s: &str) -> NumberResult {
+#[inline(never)]
+pub fn parse_float(bytes: &[u8]) -> NumberResult {
+    // Convert bytes to str - JSON numbers are guaranteed ASCII
+    let s = match crate::shared::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return NumberResult::IntegerOverflow, // Invalid UTF-8 means invalid number
+    };
     match f64::from_str(s) {
         Ok(val) if val.is_finite() => NumberResult::Float(val),
         _ => NumberResult::IntegerOverflow, // Infinity/NaN -> treat as overflow, use raw string
     }
 }
 
-/// Parses a float string when float feature is disabled - behavior depends on configuration.
+/// Parses a float byte slice when float feature is disabled - behavior depends on configuration.
+/// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
 #[cfg(not(feature = "float"))]
-pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
+#[inline(never)]
+pub fn parse_float(bytes: &[u8]) -> Result<NumberResult, ParseError> {
+    // Convert bytes to str - JSON numbers are guaranteed ASCII
+    let s = match crate::shared::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return Err(ParseError::InvalidNumber), // Invalid UTF-8 means invalid number
+    };
     #[cfg(feature = "float-error")]
     {
         let _ = s; // Acknowledge parameter usage
@@ -191,7 +240,7 @@ pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
 
         // Extract integer part before decimal point for simple decimals like 1.5 → 1
         let int_part = if let Some(dot_pos) = s.find('.') {
-            &s[..dot_pos]
+            s.get(..dot_pos).unwrap_or(s)
         } else {
             s // Should not happen since we detected it's a float, but handle gracefully
         };
@@ -212,21 +261,23 @@ pub(super) fn parse_float(s: &str) -> Result<NumberResult, ParseError> {
     }
 }
 
-/// Parses a JSON number from a string slice.
+/// Parses a JSON number from a byte slice.
+/// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
 ///
 /// This is the main entry point for parsing numbers with all the configured
 /// behavior (int32/int64, float support, etc.).
-pub(super) fn parse_number_from_str(s: &str) -> Result<NumberResult, ParseError> {
-    if is_integer(s) {
-        Ok(parse_integer(s))
+#[inline(never)]
+pub fn parse_number_from_str(bytes: &[u8]) -> Result<NumberResult, ParseError> {
+    if is_integer(bytes) {
+        Ok(parse_integer(bytes))
     } else {
         #[cfg(feature = "float")]
         {
-            Ok(parse_float(s))
+            Ok(parse_float(bytes))
         }
         #[cfg(not(feature = "float"))]
         {
-            parse_float(s)
+            parse_float(bytes)
         }
     }
 }
@@ -341,11 +392,11 @@ mod tests {
 
     #[test]
     fn test_is_integer_detection() {
-        assert!(is_integer("42"));
-        assert!(is_integer("-123"));
-        assert!(is_integer("0"));
-        assert!(!is_integer("3.14"));
-        assert!(!is_integer("1e10"));
-        assert!(!is_integer("2.5E-3"));
+        assert!(is_integer("42".as_bytes()));
+        assert!(is_integer("-123".as_bytes()));
+        assert!(is_integer("0".as_bytes()));
+        assert!(!is_integer("3.14".as_bytes()));
+        assert!(!is_integer("1e10".as_bytes()));
+        assert!(!is_integer("2.5E-3".as_bytes()));
     }
 }
