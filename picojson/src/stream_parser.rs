@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
-use crate::shared::{ContentRange, Event, ParseError, ParserErrorHandler, ParserState};
+use crate::parse_error::ParseError;
+use crate::shared::{ContentRange, Event, ParserState, UnexpectedState};
 use crate::stream_buffer::StreamBuffer;
 use crate::{ujson, PullParser};
 use ujson::{EventToken, Tokenizer};
@@ -332,7 +333,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         self.parser_state.evts.iter().any(|evt| evt.is_some())
     }
 
-    /// Extract number from parser state without 'static lifetime cheating
+    /// Extract number from parser state
     fn extract_number_from_state(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.extract_number_from_state_with_context(false)
     }
@@ -340,7 +341,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Extract string after all buffer operations are complete
     fn extract_string_from_state(&mut self) -> Result<Event<'_, '_>, ParseError> {
         let crate::shared::State::String(start_pos) = self.parser_state.state else {
-            return Err(ParserErrorHandler::state_mismatch("string", "extract"));
+            return Err(UnexpectedState::StateMismatch.into());
         };
 
         self.parser_state.state = crate::shared::State::None;
@@ -379,7 +380,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Extract key after all buffer operations are complete
     fn extract_key_from_state(&mut self) -> Result<Event<'_, '_>, ParseError> {
         let crate::shared::State::Key(start_pos) = self.parser_state.state else {
-            return Err(ParserErrorHandler::state_mismatch("key", "extract"));
+            return Err(UnexpectedState::StateMismatch.into());
         };
 
         self.parser_state.state = crate::shared::State::None;
@@ -418,7 +419,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         from_container_end: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
         let crate::shared::State::Number(start_pos) = self.parser_state.state else {
-            return Err(ParserErrorHandler::state_mismatch("number", "extract"));
+            return Err(UnexpectedState::StateMismatch.into());
         };
 
         self.parser_state.state = crate::shared::State::None;

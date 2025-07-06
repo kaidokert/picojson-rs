@@ -4,7 +4,7 @@
 - [x] Remove copy_from_slice - can panic
 - [x] Remove all bounds checked slice indexing that could panic!
 - [x] Verify we are fully panic! free
-- [ ] Remove unnecessary `'static` lifetimes
+- [x] Remove unnecessary `'static` lifetime errors
 - [x] Dependency cleanup
 - [x] Clippy cleanup
 - [ ] Unify code in SliceParser and StreamParser
@@ -12,8 +12,8 @@
 - [ ] Clean up reference docs
 - [ ] Provide user guide docs
 - [ ] Direct defmt support
-- [ ] Stack size benchmarks
-- [ ] Code size benchmarks
+- [x] Stack size benchmarks
+- [x]  Code size benchmarks
 - [ ] Sax-style push parser
 - [x] See if we can bring an Iterator impl back
     - Can't practically be done with borrowing return values

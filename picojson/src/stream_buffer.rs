@@ -9,18 +9,10 @@ pub enum StreamBufferError {
     BufferFull,
     /// Attempted to read beyond available data
     EndOfData,
-    /// Invalid buffer state or operation
-    InvalidState(&'static str),
-}
-
-impl From<StreamBufferError> for ParseError {
-    fn from(err: StreamBufferError) -> Self {
-        match err {
-            StreamBufferError::BufferFull => ParseError::ScratchBufferFull,
-            StreamBufferError::EndOfData => ParseError::EndOfData,
-            StreamBufferError::InvalidState(msg) => ParseError::UnexpectedState(msg),
-        }
-    }
+    /// An unexpected error occurred.
+    Unexpected,
+    /// Invalid slice bounds provided for string extraction
+    InvalidSliceBounds,
 }
 
 /// StreamBuffer manages a single buffer for both input and escape processing
@@ -159,9 +151,7 @@ impl<'a> StreamBuffer<'a> {
 
             let src_range = start_offset..start_offset.wrapping_add(span_len);
             if src_range.end > self.buffer.len() {
-                return Err(StreamBufferError::InvalidState(
-                    "Source range out of bounds",
-                ));
+                return Err(StreamBufferError::InvalidSliceBounds);
             }
 
             // Copy within the same buffer: move data from [start_offset..end] to [0..span_len]
@@ -180,9 +170,7 @@ impl<'a> StreamBuffer<'a> {
     pub fn mark_filled(&mut self, bytes_read: usize) -> Result<(), StreamBufferError> {
         let new_data_end = self.data_end.wrapping_add(bytes_read);
         if new_data_end > self.buffer.len() {
-            return Err(StreamBufferError::InvalidState(
-                "Attempted to mark more bytes than buffer space",
-            ));
+            return Err(StreamBufferError::Unexpected);
         }
         self.data_end = new_data_end;
         Ok(())
@@ -215,9 +203,7 @@ impl<'a> StreamBuffer<'a> {
 
             let src_range = copy_start..copy_start.wrapping_add(span_len);
             if src_range.end > self.buffer.len() {
-                return Err(StreamBufferError::InvalidState(
-                    "Source range out of bounds",
-                ));
+                return Err(StreamBufferError::InvalidSliceBounds);
             }
 
             // Copy within the same buffer: move data from [copy_start..copy_end] to [0..span_len]
@@ -232,15 +218,11 @@ impl<'a> StreamBuffer<'a> {
     /// Get the unescaped content slice
     pub fn get_unescaped_slice(&self) -> Result<&[u8], StreamBufferError> {
         if self.unescaped_len == 0 {
-            return Err(StreamBufferError::InvalidState(
-                "No unescaped content available",
-            ));
+            return Err(StreamBufferError::InvalidSliceBounds);
         }
         self.buffer
             .get(0..self.unescaped_len)
-            .ok_or(StreamBufferError::InvalidState(
-                "Unescaped length exceeds buffer size",
-            ))
+            .ok_or(StreamBufferError::Unexpected)
     }
 
     /// Clear unescaped content (call after yielding unescaped string)
@@ -278,11 +260,11 @@ impl<'a> StreamBuffer<'a> {
     /// Used for strings without escapes
     pub fn get_string_slice(&self, start: usize, end: usize) -> Result<&[u8], StreamBufferError> {
         if start > end || end > self.data_end {
-            return Err(StreamBufferError::InvalidState("Invalid slice bounds"));
+            return Err(StreamBufferError::InvalidSliceBounds);
         }
         self.buffer
             .get(start..end)
-            .ok_or(StreamBufferError::InvalidState("Invalid slice bounds"))
+            .ok_or(StreamBufferError::InvalidSliceBounds)
     }
 }
 
@@ -1017,13 +999,8 @@ mod tests {
 }
 
 impl crate::number_parser::NumberExtractor for StreamBuffer<'_> {
-    fn get_number_slice(
-        &self,
-        start: usize,
-        end: usize,
-    ) -> Result<&[u8], crate::shared::ParseError> {
-        self.get_string_slice(start, end)
-            .map_err(|_| crate::shared::ParseError::UnexpectedState("Invalid number slice bounds"))
+    fn get_number_slice(&self, start: usize, end: usize) -> Result<&[u8], ParseError> {
+        self.get_string_slice(start, end).map_err(Into::into)
     }
 
     fn current_position(&self) -> usize {

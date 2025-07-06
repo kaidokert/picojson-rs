@@ -2,9 +2,8 @@
 
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
-use crate::shared::{
-    ContentRange, Event, ParseError, ParserErrorHandler, ParserState, PullParser, State,
-};
+use crate::parse_error::ParseError;
+use crate::shared::{ContentRange, Event, ParserState, PullParser, State, UnexpectedState};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ujson;
 use ujson::{EventToken, Tokenizer};
@@ -241,10 +240,8 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
             Err(crate::slice_input_buffer::Error::ReachedEnd) => {
                 self.tokenizer.finish(&mut callback)
             }
-            Err(crate::slice_input_buffer::Error::InvalidSliceBounds) => {
-                return Err(ParseError::UnexpectedState(
-                    "Invalid slice bounds in consume_byte",
-                ));
+            Err(err) => {
+                return Err(err.into());
             }
             Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
         };
@@ -390,7 +387,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                     }
                     #[cfg(test)]
                     ujson::Event::Uninitialized => {
-                        return Err(ParseError::UnexpectedState("Uninitialized event"));
+                        return Err(UnexpectedState::StateMismatch.into());
                     }
                 };
                 match res {
@@ -406,7 +403,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                             let key_result = self.copy_on_escape.end_string(end_pos)?;
                             break Ok(Event::Key(key_result));
                         } else {
-                            break Err(ParserErrorHandler::state_mismatch("key", "end"));
+                            break Err(UnexpectedState::StateMismatch.into());
                         }
                     }
                     EventResult::ExtractString => {
@@ -419,7 +416,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                             let value_result = self.copy_on_escape.end_string(end_pos)?;
                             break Ok(Event::String(value_result));
                         } else {
-                            break Err(ParserErrorHandler::state_mismatch("string", "end"));
+                            break Err(UnexpectedState::StateMismatch.into());
                         }
                     }
                     EventResult::ExtractNumber(from_container_end) => {
@@ -431,17 +428,13 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                                 .parse_number_from_buffer(number_token_start, from_container_end)?;
                             break Ok(event);
                         } else {
-                            break Err(ParseError::UnexpectedState(
-                                "Number end without Number start",
-                            ));
+                            break Err(UnexpectedState::StateMismatch.into());
                         }
                     }
                 }
             } else {
                 // No event available - this shouldn't happen since we ensured have_events() above
-                break Err(ParseError::UnexpectedState(
-                    "No events available after ensuring events exist",
-                ));
+                break Err(UnexpectedState::StateMismatch.into());
             }
         }
     }
