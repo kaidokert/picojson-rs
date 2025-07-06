@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::shared::UnexpectedState;
 use crate::ParseError;
 
 /// Error types for StreamBuffer operations
@@ -1001,8 +1000,7 @@ mod tests {
 
 impl crate::number_parser::NumberExtractor for StreamBuffer<'_> {
     fn get_number_slice(&self, start: usize, end: usize) -> Result<&[u8], ParseError> {
-        self.get_string_slice(start, end)
-            .map_err(|_| UnexpectedState::InvalidSliceBounds.into())
+        self.get_string_slice(start, end).map_err(Into::into)
     }
 
     fn current_position(&self) -> usize {

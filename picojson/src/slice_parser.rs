@@ -240,8 +240,8 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
             Err(crate::slice_input_buffer::Error::ReachedEnd) => {
                 self.tokenizer.finish(&mut callback)
             }
-            Err(crate::slice_input_buffer::Error::InvalidSliceBounds) => {
-                return Err(UnexpectedState::InvalidSliceBounds.into());
+            Err(err) => {
+                return Err(err.into());
             }
             Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
         };
@@ -387,7 +387,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                     }
                     #[cfg(test)]
                     ujson::Event::Uninitialized => {
-                        return Err(ParseError::Unexpected(UnexpectedState::StateMismatch));
+                        return Err(UnexpectedState::StateMismatch.into());
                     }
                 };
                 match res {
