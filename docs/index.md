@@ -42,7 +42,7 @@ Test code can be found [in avr_demo](https://github.com/kaidokert/picojson-rs/tr
 
 ## Summary
 
-picojson's code size is currently larger. This might be due to default 32-bit math operations being compiled in, or generally less optimized code generation. Some const-optimizations could help reduce the size.
+picojson's code size is currently slightly larger.
 
 Stack usage follows the expected patterns: serde recurses and with more nested documents consumes more stack. picojson is designed to use constant allocation for
 its configured max doc depth.
