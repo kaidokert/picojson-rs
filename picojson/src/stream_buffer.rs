@@ -205,16 +205,6 @@ impl<'a> StreamBuffer<'a> {
         self.unescaped_len > 0
     }
 
-    /// Get current data_end for debugging
-    pub fn data_end(&self) -> usize {
-        self.data_end
-    }
-
-    /// Get buffer length for debugging
-    pub fn buffer_len(&self) -> usize {
-        self.buffer.len()
-    }
-
     /// Append a single byte to the unescaped content
     pub fn append_unescaped_byte(&mut self, byte: u8) -> Result<(), StreamBufferError> {
         if let Some(b) = self.buffer.get_mut(self.unescaped_len) {

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use picojson::{Event, JsonNumber, NumberResult, PullParser, Reader, StreamParser};
-use test_log::test;
 
 // --- Readers for Testing ---
 

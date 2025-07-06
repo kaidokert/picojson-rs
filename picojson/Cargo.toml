@@ -34,8 +34,5 @@ float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
 
 [dependencies]
-log = "0.4.27"
 
 [dev-dependencies]
-env_logger = "0.11"
-test-log = "0.2"

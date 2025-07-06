@@ -2,8 +2,6 @@
 
 use picojson::{Event, PullParser, Reader, StreamParser};
 
-use test_log::test;
-
 /// Configurable reader that provides data in specified chunk sizes
 struct ChunkReader<'a> {
     data: &'a [u8],

@@ -2,8 +2,6 @@
 
 use picojson::{Event, PullParser, Reader, StreamParser};
 
-use test_log::test;
-
 struct SliceReader<'a> {
     data: &'a [u8],
     pos: usize,
