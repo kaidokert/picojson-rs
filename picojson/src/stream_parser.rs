@@ -218,7 +218,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     ujson::Event::Begin(EventToken::Key) => {
                         // Update parser state to track key content position
                         let current_pos = self.stream_buffer.current_position();
-                        let content_start = ContentRange::content_start_from_current(current_pos);
+                        let content_start = current_pos;
                         self.parser_state.state = crate::shared::State::Key(content_start);
                         // Continue processing
                     }
@@ -231,7 +231,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     ujson::Event::Begin(EventToken::String) => {
                         // Update parser state to track string content position
                         let current_pos = self.stream_buffer.current_position();
-                        let content_start = ContentRange::content_start_from_current(current_pos);
+                        let content_start = current_pos;
                         self.parser_state.state = crate::shared::State::String(content_start);
                         // Continue processing
                     }

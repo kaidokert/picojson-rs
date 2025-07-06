@@ -135,17 +135,6 @@ impl ContentRange {
         current_pos.saturating_sub(1) // Back up to include first digit
     }
 
-    /// Calculate content start position from current position
-    /// Used when tokenizer position is after opening quote was processed
-    ///
-    /// # Arguments
-    /// * `current_pos` - Current parser position (after opening quote was processed)
-    ///
-    /// # Returns
-    /// Position where string/key content begins (after the opening quote)
-    pub fn content_start_from_current(current_pos: usize) -> usize {
-        current_pos // Content starts at current position (after quote)
-    }
 
     /// Calculate string content boundaries using content start position
     /// Alternative to string_content_bounds that works with content positions
@@ -321,14 +310,6 @@ mod tests {
             }
             Ok(_) => panic!("Expected UTF-8 validation to fail"),
         }
-    }
-
-    #[test]
-    fn test_content_start_from_current() {
-        // Test content start calculation - should return current position
-        assert_eq!(ContentRange::content_start_from_current(0), 0);
-        assert_eq!(ContentRange::content_start_from_current(5), 5);
-        assert_eq!(ContentRange::content_start_from_current(100), 100);
     }
 
     #[test]

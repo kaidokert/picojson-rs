@@ -30,7 +30,7 @@ impl<'a> Reader for SliceReader<'a> {
 }
 
 #[test]
-fn test_key_value_pair_with_20_byte_buffer() {
+fn test_key_value_pair_with_10_byte_buffer() {
     let json = b"{ \"hello\" : \"world\" }";
     let reader = SliceReader::new(json);
     let mut buffer = [0u8; 10];
