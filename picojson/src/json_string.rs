@@ -41,6 +41,12 @@ impl Deref for String<'_, '_> {
     }
 }
 
+impl<'a> From<&'a str> for String<'a, '_> {
+    fn from(s: &'a str) -> Self {
+        String::Borrowed(s)
+    }
+}
+
 impl core::fmt::Display for String<'_, '_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.as_str())
