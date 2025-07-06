@@ -42,6 +42,44 @@ pub struct StreamBuffer<'a> {
 }
 
 impl<'a> StreamBuffer<'a> {
+    /// Panic-free copy_within implementation that handles overlapping ranges
+    /// Based on memmove behavior but without panic machinery
+    fn safe_copy_within(&mut self, src_start: usize, src_end: usize, dest: usize) {
+        let count = src_end.saturating_sub(src_start);
+
+        // Early return if nothing to copy or bounds are invalid
+        if count == 0
+            || src_start >= self.buffer.len()
+            || src_end > self.buffer.len()
+            || dest >= self.buffer.len()
+        {
+            return;
+        }
+
+        // Ensure dest + count doesn't exceed buffer
+        let max_copy = (self.buffer.len().saturating_sub(dest)).min(count);
+        if max_copy == 0 {
+            return;
+        }
+
+        let iterator: &mut dyn Iterator<Item = usize> = if dest <= src_start {
+            &mut (0..max_copy)
+        } else {
+            &mut (0..max_copy).rev()
+        };
+
+        for i in iterator {
+            match (
+                self.buffer.get(src_start.wrapping_add(i)).copied(),
+                self.buffer.get_mut(dest.wrapping_add(i)),
+            ) {
+                (Some(src_byte), Some(dest_slot)) => {
+                    *dest_slot = src_byte;
+                }
+                _ => {}
+            }
+        }
+    }
     /// Create a new StreamBuffer with the given buffer slice
     pub fn new(buffer: &'a mut [u8]) -> Self {
         Self {
@@ -109,7 +147,27 @@ impl<'a> StreamBuffer<'a> {
 
         // Move unprocessed data to start of buffer
         let remaining_data = self.data_end.saturating_sub(start_offset);
-        self.buffer.copy_within(start_offset..self.data_end, 0);
+
+        // Copy existing content if there is any - EXACT same pattern as start_unescaping_with_copy
+        if self.data_end > start_offset && start_offset < self.data_end {
+            let span_len = remaining_data;
+
+            // Ensure the span fits in the buffer - return error instead of silent truncation
+            if span_len > self.buffer.len() {
+                return Err(StreamBufferError::BufferFull);
+            }
+
+            let src_range = start_offset..start_offset.wrapping_add(span_len);
+            if src_range.end > self.buffer.len() {
+                return Err(StreamBufferError::InvalidState(
+                    "Source range out of bounds",
+                ));
+            }
+
+            // Copy within the same buffer: move data from [start_offset..end] to [0..span_len]
+            // Use our panic-free copy implementation
+            self.safe_copy_within(src_range.start, src_range.end, 0);
+        }
 
         // Update positions
         self.tokenize_pos = self.tokenize_pos.saturating_sub(offset);

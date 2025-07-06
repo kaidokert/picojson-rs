@@ -34,5 +34,3 @@ float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
 
 [dependencies]
-
-[dev-dependencies]
