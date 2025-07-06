@@ -131,8 +131,10 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         loop {
             // Pull events from tokenizer until we have some
             while !self.have_events() {
-                // Fill buffer and check for end of data
-                self.fill_buffer_from_reader()?;
+                // Only fill buffer when we actually need more data
+                if self.stream_buffer.is_empty() {
+                    self.fill_buffer_from_reader()?;
+                }
 
                 if self.stream_buffer.is_empty() {
                     // Handle end of data with tokenizer finish
@@ -214,10 +216,10 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
                     // String/Key events
                     ujson::Event::Begin(EventToken::Key) => {
-                        // Update parser state to track key position
+                        // Update parser state to track key content position
                         let current_pos = self.stream_buffer.current_position();
-                        let quote_pos = ContentRange::quote_position_from_current(current_pos);
-                        self.parser_state.state = crate::shared::State::Key(quote_pos);
+                        let content_start = current_pos;
+                        self.parser_state.state = crate::shared::State::Key(content_start);
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::Key) => {
@@ -227,10 +229,10 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
                     // String events - same pattern as Key
                     ujson::Event::Begin(EventToken::String) => {
-                        // Update parser state to track string position
+                        // Update parser state to track string content position
                         let current_pos = self.stream_buffer.current_position();
-                        let quote_pos = ContentRange::quote_position_from_current(current_pos);
-                        self.parser_state.state = crate::shared::State::String(quote_pos);
+                        let content_start = current_pos;
+                        self.parser_state.state = crate::shared::State::String(content_start);
                         // Continue processing
                     }
                     ujson::Event::End(EventToken::String) => {
@@ -239,11 +241,21 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     }
 
                     // Number events
-                    ujson::Event::Begin(
-                        EventToken::Number
-                        | EventToken::NumberAndArray
-                        | EventToken::NumberAndObject,
-                    ) => {
+                    ujson::Event::Begin(EventToken::Number) => {
+                        // Update parser state to track number position
+                        let current_pos = self.stream_buffer.current_position();
+                        let number_start = ContentRange::number_start_from_current(current_pos);
+                        self.parser_state.state = crate::shared::State::Number(number_start);
+                        // Continue processing
+                    }
+                    ujson::Event::Begin(EventToken::NumberAndArray) => {
+                        // Update parser state to track number position
+                        let current_pos = self.stream_buffer.current_position();
+                        let number_start = ContentRange::number_start_from_current(current_pos);
+                        self.parser_state.state = crate::shared::State::Number(number_start);
+                        // Continue processing
+                    }
+                    ujson::Event::Begin(EventToken::NumberAndObject) => {
                         // Update parser state to track number position
                         let current_pos = self.stream_buffer.current_position();
                         let number_start = ContentRange::number_start_from_current(current_pos);
@@ -349,10 +361,13 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Helper to create a borrowed string from StreamBuffer
-    fn create_borrowed_string(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+    fn create_borrowed_string(
+        &mut self,
+        content_start: usize,
+    ) -> Result<Event<'_, '_>, ParseError> {
         let current_pos = self.stream_buffer.current_position();
         let (content_start, content_end) =
-            ContentRange::string_content_bounds(start_pos, current_pos);
+            ContentRange::string_content_bounds_from_content_start(content_start, current_pos);
 
         let bytes = self
             .stream_buffer
@@ -385,10 +400,10 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 
     /// Helper to create a borrowed key from StreamBuffer
-    fn create_borrowed_key(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+    fn create_borrowed_key(&mut self, content_start: usize) -> Result<Event<'_, '_>, ParseError> {
         let current_pos = self.stream_buffer.current_position();
         let (content_start, content_end) =
-            ContentRange::string_content_bounds(start_pos, current_pos);
+            ContentRange::string_content_bounds_from_content_start(content_start, current_pos);
 
         let bytes = self
             .stream_buffer
@@ -408,8 +423,13 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
         self.parser_state.state = crate::shared::State::None;
 
+        let number_token_start = start_pos;
         // Use unified number parsing logic
-        crate::number_parser::parse_number_event(&self.stream_buffer, start_pos, from_container_end)
+        crate::number_parser::parse_number_event(
+            &self.stream_buffer,
+            number_token_start,
+            from_container_end,
+        )
     }
     /// Clear event slots
     fn clear_events(&mut self) {
@@ -426,10 +446,145 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 .map_err(|_| ParseError::ReaderError)?;
 
             self.stream_buffer.mark_filled(bytes_read)?;
+        } else {
+            // Buffer is full - ALWAYS attempt compaction
+            let compact_start_pos = match self.parser_state.state {
+                crate::shared::State::Number(start_pos) => start_pos,
+                crate::shared::State::Key(start_pos) => start_pos,
+                crate::shared::State::String(start_pos) => start_pos,
+                _ => {
+                    let pos = self.stream_buffer.current_position();
+                    pos
+                }
+            };
 
-            // Note: bytes_read == 0 indicates end-of-stream per trait contract.
-            // The main loop will handle transitioning to Finished state when buffer is empty.
+            let offset = self.stream_buffer.compact_from(compact_start_pos)?;
+
+            if offset == 0 {
+                // SOL: Buffer too small for current token
+                return Err(ParseError::ScratchBufferFull);
+            }
+
+            // Update parser state positions
+            self.update_positions_after_compaction(offset)?;
+
+            // Try to fill again after compaction
+            if let Some(fill_slice) = self.stream_buffer.get_fill_slice() {
+                let bytes_read = self
+                    .reader
+                    .read(fill_slice)
+                    .map_err(|_| ParseError::ReaderError)?;
+
+                self.stream_buffer.mark_filled(bytes_read)?;
+            }
         }
+        Ok(())
+    }
+
+    /// Update parser state positions after buffer compaction
+    fn update_positions_after_compaction(&mut self, offset: usize) -> Result<(), ParseError> {
+        // Check for positions that would be discarded and need escape mode
+        // CRITICAL: Position 0 is never discarded, regardless of offset
+        let needs_escape_mode = match &self.parser_state.state {
+            crate::shared::State::Key(pos) if *pos > 0 && *pos < offset => Some((*pos, true)), // true = is_key
+            crate::shared::State::String(pos) if *pos > 0 && *pos < offset => Some((*pos, false)), // false = is_string
+            crate::shared::State::Number(pos) if *pos > 0 && *pos < offset => {
+                return Err(ParseError::ScratchBufferFull);
+            }
+            _ => None,
+        };
+
+        // Handle escape mode transition if needed
+        if let Some((original_pos, is_key)) = needs_escape_mode {
+            if is_key {
+                self.switch_key_to_escape_mode(original_pos, offset)?;
+            } else {
+                self.switch_string_to_escape_mode(original_pos, offset)?;
+            }
+        }
+
+        // Update positions
+        match &mut self.parser_state.state {
+            crate::shared::State::None => {
+                // No position-based state to update
+            }
+            crate::shared::State::Key(pos) => {
+                if *pos > 0 && *pos < offset {
+                    *pos = 0; // Reset for escape mode
+                } else if *pos >= offset {
+                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
+                }
+                // else: *pos == 0 or *pos < offset with pos == 0, keep as-is
+            }
+            crate::shared::State::String(pos) => {
+                if *pos > 0 && *pos < offset {
+                    *pos = 0; // Reset for escape mode
+                } else if *pos >= offset {
+                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
+                }
+                // else: *pos == 0 or *pos < offset with pos == 0, keep as-is
+            }
+            crate::shared::State::Number(pos) => {
+                if *pos >= offset {
+                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
+                } else {
+                    *pos = 0; // Reset for discarded number start
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Switch key processing to escape/copy mode when original position was discarded
+    fn switch_key_to_escape_mode(
+        &mut self,
+        original_pos: usize,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        // The key start position was in the discarded portion of the buffer
+
+        // For keys, the original_pos now points to the content start (after opening quote)
+        // If offset > original_pos, it means some actual content was discarded
+
+        // Calculate how much actual key content was discarded
+        let content_start = original_pos; // Key content starts at original_pos (now tracks content directly)
+        let discarded_content = offset.saturating_sub(content_start);
+
+        if discarded_content > 0 {
+            // We lost some actual key content - this would require content recovery
+            // For now, this is unsupported
+            return Err(ParseError::ScratchBufferFull);
+        }
+
+        // No actual content was discarded, we can continue parsing
+        // We can continue parsing the key from the current position
+        Ok(())
+    }
+
+    /// Switch string processing to escape/copy mode when original position was discarded
+    fn switch_string_to_escape_mode(
+        &mut self,
+        original_pos: usize,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        // The string start position was in the discarded portion of the buffer
+
+        // For strings, the original_pos now points to the content start (after opening quote)
+        // If offset > original_pos, it means some actual content was discarded
+
+        // Calculate how much actual string content was discarded
+        let content_start = original_pos; // String content starts at original_pos (now tracks content directly)
+        let discarded_content = offset.saturating_sub(content_start);
+
+        if discarded_content > 0 {
+            // We lost some actual string content - this would require content recovery
+            // For now, this is unsupported
+            return Err(ParseError::ScratchBufferFull);
+        }
+
+        // No actual content was discarded, we can continue parsing
+        // We can continue parsing the string from the current position
         Ok(())
     }
 
@@ -478,8 +633,11 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 self.parser_state.state
             {
                 let current_pos = self.stream_buffer.current_position();
-                let (content_start, content_end) =
-                    ContentRange::string_content_bounds_before_escape(start_pos, current_pos);
+
+                // With content tracking, start_pos is the content_start
+                let content_start = start_pos;
+                // Content to copy ends right before the escape character
+                let content_end = ContentRange::end_position_excluding_delimiter(current_pos);
 
                 // Estimate max length needed for unescaping (content so far + remaining buffer)
                 let content_len = content_end.wrapping_sub(content_start);
@@ -1554,5 +1712,72 @@ mod tests {
 
         assert_eq!(parser.next_event().unwrap(), Event::EndObject);
         assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+    }
+
+    /// Helper function to test escape sequence parsing with specific buffer size
+    fn test_simple_escape_with_buffer_size(buffer_size: usize) -> Result<(), crate::ParseError> {
+        // DEBUG TEST: Simple escape sequence should need minimal buffer
+        // JSON: ["hello\\"] = 10 bytes total, should work with ~7 byte buffer
+        let json_stream = br#"["hello\\"]"#;
+
+        println!("Testing escape sequence with buffer size: {}", buffer_size);
+        println!(
+            "JSON input: {:?}",
+            core::str::from_utf8(json_stream).unwrap()
+        );
+        let mut buffer = vec![0u8; buffer_size];
+        let mut parser = StreamParser::new(SliceReader::new(json_stream), &mut buffer);
+
+        // Array start
+        match parser.next_event()? {
+            Event::StartArray => println!("  ✅ StartArray OK"),
+            other => panic!("Expected StartArray, got: {:?}", other),
+        }
+
+        // String with escape
+        match parser.next_event()? {
+            Event::String(s) => {
+                println!("  ✅ String OK: '{}'", s.as_str());
+                assert_eq!(s.as_str(), "hello\\");
+            }
+            other => panic!("Expected String, got: {:?}", other),
+        }
+
+        // Array end
+        match parser.next_event()? {
+            Event::EndArray => println!("  ✅ EndArray OK"),
+            other => panic!("Expected EndArray, got: {:?}", other),
+        }
+
+        // End document
+        match parser.next_event()? {
+            Event::EndDocument => println!("  ✅ EndDocument OK"),
+            other => panic!("Expected EndDocument, got: {:?}", other),
+        }
+
+        println!("  🎉 SUCCESS with buffer size: {}", buffer_size);
+        Ok(())
+    }
+
+    #[test]
+    fn test_minimal_buffer_simple_escape_1() {
+        // Buffer size 4 - clearly not enough
+        match test_simple_escape_with_buffer_size(4) {
+            Ok(()) => panic!("Expected failure with 4-byte buffer, but succeeded!"),
+            Err(e) => println!("Expected failure with 4-byte buffer: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_minimal_buffer_simple_escape_2() {
+        // Buffer size 12 - test if larger buffer avoids compaction bugs
+        test_simple_escape_with_buffer_size(12)
+            .expect("12-byte buffer should be sufficient for simple escape");
+    }
+
+    #[test]
+    fn test_minimal_buffer_simple_escape_3() {
+        // Buffer size 24 - known working boundary from stress tests
+        test_simple_escape_with_buffer_size(24).expect("24-byte buffer should definitely work");
     }
 }

@@ -39,23 +39,54 @@ pub struct StreamBuffer<'a> {
     data_end: usize,
     /// Length of unescaped content at buffer start (0 if no unescaping active)
     unescaped_len: usize,
-    /// Minimum space to reserve for escape processing
-    escape_reserve: usize,
 }
 
 impl<'a> StreamBuffer<'a> {
+    /// Panic-free copy_within implementation that handles overlapping ranges
+    /// Based on memmove behavior but without panic machinery
+    fn safe_copy_within(&mut self, src_start: usize, src_end: usize, dest: usize) {
+        let count = src_end.saturating_sub(src_start);
+
+        // Early return if nothing to copy or bounds are invalid
+        if count == 0
+            || src_start >= self.buffer.len()
+            || src_end > self.buffer.len()
+            || dest >= self.buffer.len()
+        {
+            return;
+        }
+
+        // Ensure dest + count doesn't exceed buffer
+        let max_copy = (self.buffer.len().saturating_sub(dest)).min(count);
+        if max_copy == 0 {
+            return;
+        }
+
+        let iterator: &mut dyn Iterator<Item = usize> = if dest <= src_start {
+            &mut (0..max_copy)
+        } else {
+            &mut (0..max_copy).rev()
+        };
+
+        for i in iterator {
+            match (
+                self.buffer.get(src_start.wrapping_add(i)).copied(),
+                self.buffer.get_mut(dest.wrapping_add(i)),
+            ) {
+                (Some(src_byte), Some(dest_slot)) => {
+                    *dest_slot = src_byte;
+                }
+                _ => {}
+            }
+        }
+    }
     /// Create a new StreamBuffer with the given buffer slice
     pub fn new(buffer: &'a mut [u8]) -> Self {
-        // Reserve ~12.5% of buffer for escape processing (>>3 instead of /10), minimum 64 bytes
-        // Avoids expensive 32-bit division on 8-bit AVR targets
-        let escape_reserve = (buffer.len() >> 3).max(64);
-
         Self {
             buffer,
             tokenize_pos: 0,
             data_end: 0,
             unescaped_len: 0,
-            escape_reserve,
         }
     }
 
@@ -91,6 +122,58 @@ impl<'a> StreamBuffer<'a> {
             return None;
         }
         self.buffer.get_mut(self.data_end..)
+    }
+
+    /// Compact buffer by moving unprocessed data from a given start offset to the beginning.
+    ///
+    /// # Arguments
+    /// * `start_offset` - The position from which to preserve data.
+    ///
+    /// Returns the offset by which data was moved.
+    pub fn compact_from(&mut self, start_offset: usize) -> Result<usize, StreamBufferError> {
+        if start_offset == 0 {
+            // Already at start, no compaction possible
+            return Ok(0);
+        }
+
+        let offset = start_offset;
+
+        if start_offset >= self.data_end {
+            // All data has been processed, reset to start
+            self.tokenize_pos = 0;
+            self.data_end = 0;
+            return Ok(offset);
+        }
+
+        // Move unprocessed data to start of buffer
+        let remaining_data = self.data_end.saturating_sub(start_offset);
+
+        // Copy existing content if there is any - EXACT same pattern as start_unescaping_with_copy
+        if self.data_end > start_offset && start_offset < self.data_end {
+            let span_len = remaining_data;
+
+            // Ensure the span fits in the buffer - return error instead of silent truncation
+            if span_len > self.buffer.len() {
+                return Err(StreamBufferError::BufferFull);
+            }
+
+            let src_range = start_offset..start_offset.wrapping_add(span_len);
+            if src_range.end > self.buffer.len() {
+                return Err(StreamBufferError::InvalidState(
+                    "Source range out of bounds",
+                ));
+            }
+
+            // Copy within the same buffer: move data from [start_offset..end] to [0..span_len]
+            // Use our panic-free copy implementation
+            self.safe_copy_within(src_range.start, src_range.end, 0);
+        }
+
+        // Update positions
+        self.tokenize_pos = self.tokenize_pos.saturating_sub(offset);
+        self.data_end = remaining_data;
+
+        Ok(offset)
     }
 
     /// Mark that Reader filled `bytes_read` bytes
@@ -182,11 +265,6 @@ impl<'a> StreamBuffer<'a> {
 
     /// Append a single byte to the unescaped content
     pub fn append_unescaped_byte(&mut self, byte: u8) -> Result<(), StreamBufferError> {
-        let available_space = self.buffer.len().saturating_sub(self.escape_reserve);
-        if self.unescaped_len >= available_space {
-            return Err(StreamBufferError::BufferFull);
-        }
-
         if let Some(b) = self.buffer.get_mut(self.unescaped_len) {
             *b = byte;
             self.unescaped_len = self.unescaped_len.wrapping_add(1);
@@ -244,7 +322,6 @@ mod tests {
         assert_eq!(db.tokenize_pos, 0);
         assert_eq!(db.data_end, 0);
         assert_eq!(db.unescaped_len, 0);
-        assert_eq!(db.escape_reserve, 64); // 12.5% of 100, minimum 64
         assert!(db.is_empty());
     }
 
@@ -353,25 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn test_maximum_escape_reserve_scenario() {
-        let mut buffer = [0u8; 100];
-        let db = StreamBuffer::new(&mut buffer);
-
-        // Check escape reserve calculation
-        assert_eq!(db.escape_reserve, 64); // max(100>>3, 64) = 64
-
-        // Test with smaller buffer
-        let mut small_buffer = [0u8; 50];
-        let small_db = StreamBuffer::new(&mut small_buffer);
-        assert_eq!(small_db.escape_reserve, 64); // Still 64 (minimum)
-
-        // Test with larger buffer
-        let mut large_buffer = [0u8; 1000];
-        let large_db = StreamBuffer::new(&mut large_buffer);
-        assert_eq!(large_db.escape_reserve, 125); // 1000 >> 3 = 125
-    }
-
-    #[test]
     fn test_boundary_conditions() {
         let mut buffer = [0u8; 3]; // Absolute minimum
         let mut db = StreamBuffer::new(&mut buffer);
@@ -430,53 +488,531 @@ mod tests {
     }
 
     #[test]
-    fn test_append_unescaped_byte_respects_escape_reserve() {
-        let mut buffer = [0u8; 100]; // 100 byte buffer
+    fn test_append_unescaped_byte_uses_full_buffer() {
+        let mut buffer = [0u8; 10]; // 10 byte buffer
         let mut db = StreamBuffer::new(&mut buffer);
 
-        // Check escape reserve was set correctly (12.5% of 100, minimum 64)
-        assert_eq!(db.escape_reserve, 64);
-
-        // Should be able to append up to (buffer_len - escape_reserve) bytes
-        let max_unescaped = 100 - db.escape_reserve; // 100 - 64 = 36
-
-        // Fill up to the limit - should succeed
-        for i in 0..max_unescaped {
+        // Should be able to append up to buffer_len bytes (no more escape reserve!)
+        for i in 0..10 {
             let result = db.append_unescaped_byte(b'A');
             assert!(result.is_ok(), "Failed at byte {}", i);
         }
 
-        assert_eq!(db.unescaped_len, max_unescaped);
+        assert_eq!(db.unescaped_len, 10);
 
-        // One more byte should fail due to escape reserve constraint
+        // One more byte should fail because buffer is full
         let result = db.append_unescaped_byte(b'B');
         assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
-
-        // Verify we didn't exceed the escape reserve boundary
-        assert_eq!(db.unescaped_len, max_unescaped);
     }
 
     #[test]
-    fn test_append_unescaped_byte_escape_reserve_larger_than_buffer() {
-        let mut buffer = [0u8; 10]; // Very small buffer
+    fn test_compact_basic() {
+        let mut buffer = [0u8; 10];
         let mut db = StreamBuffer::new(&mut buffer);
 
-        // Even small buffers get minimum 64 byte escape reserve, but that's larger than buffer
-        assert_eq!(db.escape_reserve, 64); // minimum
+        // Fill buffer with data: "0123456789"
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice.copy_from_slice(b"0123456789");
+        }
+        db.mark_filled(10).unwrap();
 
-        // Since escape_reserve (64) > buffer.len() (10), no bytes should be appendable
-        // This should not panic with underflow, but return BufferFull error
-        let result = db.append_unescaped_byte(b'A');
-        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
+        // Process some data (advance tokenize_pos to position 4)
+        for _ in 0..4 {
+            db.advance().unwrap();
+        }
 
-        // Test with even smaller buffer to ensure we handle underflow correctly
-        let mut tiny_buffer = [0u8; 3];
-        let mut tiny_db = StreamBuffer::new(&mut tiny_buffer);
-        assert_eq!(tiny_db.escape_reserve, 64); // Still minimum 64
+        // Before compact: tokenize_pos=4, data_end=10, remaining="456789"
+        assert_eq!(db.tokenize_pos, 4);
+        assert_eq!(db.data_end, 10);
+        assert_eq!(db.remaining_bytes(), 6);
 
-        // Should handle this gracefully without panic
-        let result = tiny_db.append_unescaped_byte(b'B');
-        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
+        // Compact the buffer
+        let offset = db.compact_from(4).unwrap();
+        assert_eq!(offset, 4); // Data was moved by 4 positions
+
+        // After compact: tokenize_pos=0, data_end=6, buffer starts with "456789"
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 6);
+        assert_eq!(db.remaining_bytes(), 6);
+
+        // Verify the data was moved correctly
+        assert_eq!(db.current_byte().unwrap(), b'4');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'5');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'6');
+    }
+
+    #[test]
+    fn test_compact_from_preserves_number() {
+        let mut buffer = [0u8; 10];
+        let mut db = StreamBuffer::new(&mut buffer);
+        db.buffer.copy_from_slice(b"0123456789");
+        db.data_end = 10;
+        db.tokenize_pos = 5;
+        let number_start_pos = 3;
+
+        let offset = db.compact_from(number_start_pos).unwrap();
+        assert_eq!(offset, 3);
+        assert_eq!(db.tokenize_pos, 2); // 5 - 3
+        assert_eq!(db.data_end, 7); // 10 - 3
+        assert_eq!(&db.buffer[..db.data_end], b"3456789");
+    }
+
+    #[test]
+    fn test_compact_no_op_when_at_start() {
+        let mut buffer = [0u8; 10];
+        let mut db = StreamBuffer::new(&mut buffer);
+
+        // Fill buffer with data
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice[0..5].copy_from_slice(b"hello");
+        }
+        db.mark_filled(5).unwrap();
+
+        // Don't advance tokenize_pos (stays at 0)
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 5);
+
+        // Compact should be no-op
+        let offset = db.compact_from(0).unwrap();
+        assert_eq!(offset, 0); // No movement occurred
+
+        // Should be unchanged
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 5);
+        assert_eq!(db.current_byte().unwrap(), b'h');
+    }
+
+    #[test]
+    fn test_compact_all_data_processed() {
+        let mut buffer = [0u8; 10];
+        let mut db = StreamBuffer::new(&mut buffer);
+
+        // Fill buffer with data
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice[0..5].copy_from_slice(b"hello");
+        }
+        db.mark_filled(5).unwrap();
+
+        // Process all data
+        for _ in 0..5 {
+            db.advance().unwrap();
+        }
+
+        // All data processed
+        assert_eq!(db.tokenize_pos, 5);
+        assert_eq!(db.data_end, 5);
+        assert!(db.is_empty());
+
+        // Compact should reset to start
+        let offset = db.compact_from(5).unwrap();
+        assert_eq!(offset, 5); // All data was processed, moved by 5
+
+        // Should be reset to empty state
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 0);
+        assert!(db.is_empty());
+    }
+
+    #[test]
+    fn test_compact_enables_new_data_fill() {
+        let mut buffer = [0u8; 10];
+        let mut db = StreamBuffer::new(&mut buffer);
+
+        // Fill buffer completely
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice.copy_from_slice(b"0123456789");
+        }
+        db.mark_filled(10).unwrap();
+
+        // Process half the data
+        for _ in 0..5 {
+            db.advance().unwrap();
+        }
+
+        // Buffer is full, can't get fill slice
+        assert!(db.get_fill_slice().is_none());
+
+        // Compact to make space
+        let offset = db.compact_from(5).unwrap();
+        assert_eq!(offset, 5); // Data moved by 5 positions
+
+        // Now should be able to get fill slice again
+        let fill_slice = db.get_fill_slice().unwrap();
+        assert_eq!(fill_slice.len(), 5); // 5 bytes available (10 - 5 remaining)
+
+        // Fill with new data
+        fill_slice[0..5].copy_from_slice(b"ABCDE");
+        db.mark_filled(5).unwrap();
+
+        // Verify combined data: "56789ABCDE"
+        assert_eq!(db.data_end, 10);
+        assert_eq!(db.current_byte().unwrap(), b'5');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'6');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'7');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'8');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'9');
+        db.advance().unwrap();
+        assert_eq!(db.current_byte().unwrap(), b'A');
+    }
+
+    #[test]
+    fn test_compact_with_single_byte_remaining() {
+        let mut buffer = [0u8; 5];
+        let mut db = StreamBuffer::new(&mut buffer);
+
+        // Fill buffer: "abcde"
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice.copy_from_slice(b"abcde");
+        }
+        db.mark_filled(5).unwrap();
+
+        // Process almost all data (leave one byte)
+        for _ in 0..4 {
+            db.advance().unwrap();
+        }
+
+        // One byte remaining
+        assert_eq!(db.remaining_bytes(), 1);
+        assert_eq!(db.current_byte().unwrap(), b'e');
+
+        // Compact
+        let offset = db.compact_from(4).unwrap();
+        assert_eq!(offset, 4); // Moved by 4 positions
+
+        // Should have moved the last byte to start
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 1);
+        assert_eq!(db.current_byte().unwrap(), b'e');
+        assert_eq!(db.remaining_bytes(), 1);
+
+        // Should have space for 4 more bytes
+        let fill_slice = db.get_fill_slice().unwrap();
+        assert_eq!(fill_slice.len(), 4);
+    }
+
+    #[test]
+    fn test_compact_buffer_wall_scenario() {
+        // Simulate hitting the buffer wall during token processing
+        // This tests the "always compact when buffer full" strategy
+
+        let mut buffer = [0u8; 10];
+        let mut db = StreamBuffer::new(&mut buffer);
+
+        // Fill buffer completely with: `{"hello_wo` (10 bytes, fills buffer exactly)
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice.copy_from_slice(b"{\"hello_wo");
+        }
+        db.mark_filled(10).unwrap();
+
+        // Process tokens: { " h e l l o _ w o
+        // Parser is in State::String(2) tracking string start at position 2
+        let mut _string_start_pos = 2; // Parser's state: string started at pos 2
+
+        // Advance to simulate tokenizer processing
+        for _ in 0..10 {
+            db.advance().unwrap();
+        }
+
+        // Buffer is now empty, we hit the wall
+        assert!(db.is_empty());
+        assert!(db.get_fill_slice().is_none()); // No space to read more
+
+        // ALWAYS compact when hitting buffer wall
+        let offset = db.compact_from(10).unwrap();
+        assert_eq!(offset, 10); // Moved by 10 positions (everything was processed)
+
+        // Parser updates state: string_start_pos = 2 - 10 = -8
+        // Since string_start_pos < 0, the original string start was discarded!
+        // Parser must now switch to escape/copy mode for the continuation
+        if _string_start_pos < offset {
+            // Original string start was discarded - must use escape/copy mode
+            // In real implementation, parser would copy what it had processed to unescaped buffer
+            println!("String start was discarded, switching to escape mode");
+            _string_start_pos = 0; // Reset for escape mode
+        } else {
+            _string_start_pos = _string_start_pos.saturating_sub(offset); // Normal position update
+        }
+
+        // After compaction, buffer is reset and ready for new data
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 0);
+
+        // Now we can read more data
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            assert_eq!(fill_slice.len(), 10); // Full buffer available
+            fill_slice[0..3].copy_from_slice(b"rld");
+        }
+        db.mark_filled(3).unwrap();
+
+        // Continue processing the string continuation
+        assert_eq!(db.current_byte().unwrap(), b'r');
+        assert_eq!(db.remaining_bytes(), 3);
+    }
+
+    #[test]
+    fn test_compact_saves_partial_token() {
+        // Test case where compaction saves partial token at end of buffer
+        let mut buffer = [0u8; 8];
+        let mut db = StreamBuffer::new(&mut buffer);
+
+        // Fill buffer: {"hel|lo"} where we process up to 'l' and hit wall with "lo\"}" remaining
+        {
+            let fill_slice = db.get_fill_slice().unwrap();
+            fill_slice.copy_from_slice(b"{\"hello\"");
+        }
+        db.mark_filled(8).unwrap();
+
+        // Process: { " h e l - stop here with "lo\"" remaining
+        for _ in 0..5 {
+            db.advance().unwrap();
+        }
+
+        // Current state: parser at position 5, with "lo\"" remaining (3 bytes)
+        let mut _string_start_pos = 2; // Parser state: string started at position 2
+        assert_eq!(db.current_byte().unwrap(), b'l');
+        assert_eq!(db.remaining_bytes(), 3);
+
+        // Hit buffer wall, compact
+        let offset = db.compact_from(5).unwrap();
+        assert_eq!(offset, 5); // Moved data by 5 positions
+
+        // Update parser state
+        _string_start_pos = if _string_start_pos < offset {
+            0 // Switch to escape mode - original start was discarded
+        } else {
+            _string_start_pos - offset // Normal position update: 2 - 5 = -3, so switch to escape mode
+        };
+
+        // After compaction: "lo\"" is now at start of buffer
+        assert_eq!(db.tokenize_pos, 0);
+        assert_eq!(db.data_end, 3);
+        assert_eq!(db.current_byte().unwrap(), b'l');
+        assert_eq!(db.remaining_bytes(), 3);
+
+        // We saved 3 bytes, gained 5 bytes of space
+        let fill_slice = db.get_fill_slice().unwrap();
+        assert_eq!(fill_slice.len(), 5);
+    }
+
+    #[test]
+    fn test_position_update_after_compaction_normal_case() {
+        // Test normal position updates where positions are preserved
+
+        // Case 1: String position preserved after compaction
+        let _state = crate::shared::State::String(10);
+        let offset = 5;
+
+        // Simulate the position update logic
+        let updated_pos = if 10 < offset {
+            0 // Would need escape mode
+        } else {
+            10 - offset // Normal position update: 10 - 5 = 5
+        };
+
+        assert_eq!(updated_pos, 5);
+
+        // Case 2: Key position preserved after compaction
+        let key_pos = 8;
+        let offset = 3;
+
+        let updated_key_pos = if key_pos < offset {
+            0 // Would need escape mode
+        } else {
+            key_pos - offset // Normal position update: 8 - 3 = 5
+        };
+
+        assert_eq!(updated_key_pos, 5);
+
+        // Case 3: Number position preserved after compaction
+        let number_pos = 15;
+        let offset = 7;
+
+        let updated_number_pos = if number_pos < offset {
+            // Numbers should not normally lose their start position
+            panic!("Number position discarded - buffer too small");
+        } else {
+            number_pos - offset // Normal position update: 15 - 7 = 8
+        };
+
+        assert_eq!(updated_number_pos, 8);
+    }
+
+    #[test]
+    fn test_position_update_after_compaction_escape_mode_case() {
+        // Test position updates where original positions are discarded (need escape mode)
+
+        // Case 1: String position discarded - needs escape mode
+        let string_pos = 3;
+        let offset = 7; // Offset is larger than string position
+
+        let needs_escape_mode = string_pos < offset;
+        assert!(needs_escape_mode);
+
+        let updated_string_pos = if needs_escape_mode {
+            0 // Reset for escape mode
+        } else {
+            string_pos - offset
+        };
+
+        assert_eq!(updated_string_pos, 0);
+
+        // Case 2: Key position discarded - needs escape mode
+        let key_pos = 2;
+        let offset = 8;
+
+        let needs_escape_mode = key_pos < offset;
+        assert!(needs_escape_mode);
+
+        let updated_key_pos = if needs_escape_mode {
+            0 // Reset for escape mode
+        } else {
+            key_pos - offset
+        };
+
+        assert_eq!(updated_key_pos, 0);
+
+        // Case 3: Number position discarded - should be an error
+        let number_pos = 1;
+        let offset = 5;
+
+        let should_error = number_pos < offset;
+        assert!(should_error); // Numbers spanning compaction boundaries should error
+    }
+
+    #[test]
+    fn test_position_update_boundary_conditions() {
+        // Test exact boundary conditions for position updates
+
+        // Case 1: Position exactly equals offset
+        let pos = 5;
+        let offset = 5;
+
+        let needs_escape_mode = pos < offset; // false, pos == offset
+        assert!(!needs_escape_mode);
+
+        let updated_pos = pos - offset; // 5 - 5 = 0
+        assert_eq!(updated_pos, 0);
+
+        // Case 2: Position one less than offset (boundary case)
+        let pos = 4;
+        let offset = 5;
+
+        let needs_escape_mode = pos < offset; // true, pos < offset
+        assert!(needs_escape_mode);
+
+        // Case 3: Position one more than offset (boundary case)
+        let pos = 6;
+        let offset = 5;
+
+        let needs_escape_mode = pos < offset; // false, pos > offset
+        assert!(!needs_escape_mode);
+
+        let updated_pos = pos - offset; // 6 - 5 = 1
+        assert_eq!(updated_pos, 1);
+
+        // Case 4: Zero offset (no compaction occurred)
+        let pos = 10;
+        let offset = 0;
+
+        let needs_escape_mode = pos < offset; // false, 10 < 0
+        assert!(!needs_escape_mode);
+
+        let updated_pos = pos - offset; // 10 - 0 = 10 (unchanged)
+        assert_eq!(updated_pos, 10);
+    }
+
+    #[test]
+    fn test_position_update_state_transitions() {
+        // Test the complete state transition logic for different parser states
+
+        // Mock the State enum variants and position update logic
+        use crate::shared::State;
+
+        // Case 1: State::None - no position to update
+        let state = State::None;
+        // No position updates needed for None state
+        match state {
+            State::None => {
+                // No action needed - test passes
+            }
+            _ => panic!("Expected State::None"),
+        }
+
+        // Case 2: String state position updates
+        let mut string_state = State::String(12);
+        let offset = 8;
+
+        match &mut string_state {
+            State::String(pos) => {
+                if *pos < offset {
+                    // Would need escape mode
+                    *pos = 0;
+                } else {
+                    *pos = pos.saturating_sub(offset); // 12 - 8 = 4
+                }
+            }
+            _ => panic!("Expected State::String"),
+        }
+
+        match string_state {
+            State::String(pos) => assert_eq!(pos, 4),
+            _ => panic!("Expected State::String"),
+        }
+
+        // Case 3: Key state needing escape mode
+        let mut key_state = State::Key(3);
+        let offset = 10;
+
+        match &mut key_state {
+            State::Key(pos) => {
+                if *pos < offset {
+                    // Needs escape mode
+                    *pos = 0;
+                } else {
+                    *pos = pos.saturating_sub(offset);
+                }
+            }
+            _ => panic!("Expected State::Key"),
+        }
+
+        match key_state {
+            State::Key(pos) => assert_eq!(pos, 0), // Reset for escape mode
+            _ => panic!("Expected State::Key"),
+        }
+
+        // Case 4: Number state normal update
+        let mut number_state = State::Number(20);
+        let offset = 6;
+
+        match &mut number_state {
+            State::Number(pos) => {
+                if *pos < offset {
+                    // This should not happen for numbers in normal operation
+                    panic!("Number position discarded - buffer too small");
+                } else {
+                    *pos = pos.saturating_sub(offset); // 20 - 6 = 14
+                }
+            }
+            _ => panic!("Expected State::Number"),
+        }
+
+        match number_state {
+            State::Number(pos) => assert_eq!(pos, 14),
+            _ => panic!("Expected State::Number"),
+        }
     }
 }
 

@@ -426,7 +426,9 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                         if let State::Number(start) = self.parser_state.state {
                             // Reset state before parsing to stop selective copying
                             self.parser_state.state = State::None;
-                            let event = self.parse_number_from_buffer(start, from_container_end)?;
+                            let number_token_start = start;
+                            let event = self
+                                .parse_number_from_buffer(number_token_start, from_container_end)?;
                             break Ok(event);
                         } else {
                             break Err(ParseError::UnexpectedState(

@@ -124,38 +124,6 @@ pub trait PullParser {
 pub(crate) struct ContentRange;
 
 impl ContentRange {
-    /// Calculate string content boundaries from quote positions
-    ///
-    /// # Arguments
-    /// * `quote_start` - Position of opening quote
-    /// * `current_pos` - Current parser position (typically after closing quote)
-    ///
-    /// # Returns
-    /// (content_start, content_end) where content_start is after opening quote
-    /// and content_end is before closing quote
-    pub fn string_content_bounds(quote_start: usize, current_pos: usize) -> (usize, usize) {
-        let content_start = quote_start.saturating_add(1); // Skip opening quote
-        let content_end = current_pos.saturating_sub(1); // Back up to exclude closing quote
-        (content_start, content_end)
-    }
-
-    /// Calculate string content boundaries when escape sequence is in progress
-    ///
-    /// # Arguments
-    /// * `quote_start` - Position of opening quote
-    /// * `current_pos` - Current parser position (typically at escape sequence)
-    ///
-    /// # Returns
-    /// (content_start, content_end) where content_end is before the backslash
-    pub fn string_content_bounds_before_escape(
-        quote_start: usize,
-        current_pos: usize,
-    ) -> (usize, usize) {
-        let content_start = quote_start.saturating_add(1); // Skip opening quote
-        let content_end = current_pos.saturating_sub(1); // Back up to before the backslash
-        (content_start, content_end)
-    }
-
     /// Calculate number content start from current position
     ///
     /// # Arguments
@@ -167,16 +135,22 @@ impl ContentRange {
         current_pos.saturating_sub(1) // Back up to include first digit
     }
 
-    /// Calculate quote position from current position
-    /// Used when tokenizer position is after a quote was processed
+
+    /// Calculate string content boundaries using content start position
+    /// Alternative to string_content_bounds that works with content positions
     ///
     /// # Arguments
-    /// * `current_pos` - Current parser position (after quote was processed)
+    /// * `content_start` - Position where content begins (after opening quote)
+    /// * `current_pos` - Current parser position (typically after closing quote)
     ///
     /// # Returns
-    /// Position of the quote itself
-    pub fn quote_position_from_current(current_pos: usize) -> usize {
-        current_pos.saturating_sub(1) // Back up to the quote
+    /// (content_start, content_end) where both positions bound the actual content
+    pub fn string_content_bounds_from_content_start(
+        content_start: usize,
+        current_pos: usize,
+    ) -> (usize, usize) {
+        let content_end = current_pos.saturating_sub(1); // Back up to exclude closing quote
+        (content_start, content_end)
     }
 
     /// Calculate Unicode escape sequence boundaries
@@ -285,27 +259,6 @@ mod tests {
     }
 
     #[test]
-    fn test_string_content_bounds_before_escape() {
-        // Test string content bounds calculation
-        let quote_start = 5; // Position of opening quote
-        let current_pos = 15; // Position at backslash
-
-        let (content_start, content_end) =
-            ContentRange::string_content_bounds_before_escape(quote_start, current_pos);
-
-        assert_eq!(content_start, 6); // After opening quote (5 + 1)
-        assert_eq!(content_end, 14); // Before backslash (15 - 1)
-    }
-
-    #[test]
-    fn test_string_content_bounds_edge_cases() {
-        // Test with positions that could underflow
-        let (content_start, content_end) = ContentRange::string_content_bounds_before_escape(0, 0);
-        assert_eq!(content_start, 1);
-        assert_eq!(content_end, 0); // This will result in empty range, which is handled elsewhere
-    }
-
-    #[test]
     fn test_error_constructors() {
         // Test state_mismatch error constructor
         let error = ParserErrorHandler::state_mismatch("string", "end");
@@ -357,5 +310,30 @@ mod tests {
             }
             Ok(_) => panic!("Expected UTF-8 validation to fail"),
         }
+    }
+
+    #[test]
+    fn test_string_content_bounds_from_content_start() {
+        // Test string content bounds using content start position
+        let content_start = 6; // After opening quote
+        let current_pos = 15; // After closing quote
+
+        let (start, end) =
+            ContentRange::string_content_bounds_from_content_start(content_start, current_pos);
+        assert_eq!(start, 6); // Same as input content_start
+        assert_eq!(end, 14); // current_pos - 1 (before closing quote)
+    }
+
+    #[test]
+    fn test_string_content_bounds_from_content_start_edge_cases() {
+        // Test with minimum positions
+        let (start, end) = ContentRange::string_content_bounds_from_content_start(0, 1);
+        assert_eq!(start, 0);
+        assert_eq!(end, 0); // 1 - 1
+
+        // Test with underflow protection
+        let (start, end) = ContentRange::string_content_bounds_from_content_start(5, 0);
+        assert_eq!(start, 5);
+        assert_eq!(end, 0); // saturating_sub protects from underflow
     }
 }
