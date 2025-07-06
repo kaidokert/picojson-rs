@@ -512,7 +512,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 if *pos > 0 && *pos < offset {
                     *pos = 0; // Reset for escape mode
                 } else if *pos >= offset {
-                    *pos -= offset; // Normal position adjustment
+                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
                 }
                 // else: *pos == 0 or *pos < offset with pos == 0, keep as-is
             }
@@ -520,13 +520,13 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 if *pos > 0 && *pos < offset {
                     *pos = 0; // Reset for escape mode
                 } else if *pos >= offset {
-                    *pos -= offset; // Normal position adjustment
+                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
                 }
                 // else: *pos == 0 or *pos < offset with pos == 0, keep as-is
             }
             crate::shared::State::Number(pos) => {
                 if *pos >= offset {
-                    *pos -= offset; // Normal position adjustment
+                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
                 } else {
                     *pos = 0; // Reset for discarded number start
                 }
@@ -549,11 +549,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
         // Calculate how much actual key content was discarded
         let content_start = original_pos; // Key content starts at original_pos (now tracks content directly)
-        let discarded_content = if offset > content_start {
-            offset - content_start
-        } else {
-            0
-        };
+        let discarded_content = offset.saturating_sub(content_start);
 
         if discarded_content > 0 {
             // We lost some actual key content - this would require content recovery
@@ -579,11 +575,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
         // Calculate how much actual string content was discarded
         let content_start = original_pos; // String content starts at original_pos (now tracks content directly)
-        let discarded_content = if offset > content_start {
-            offset - content_start
-        } else {
-            0
-        };
+        let discarded_content = offset.saturating_sub(content_start);
 
         if discarded_content > 0 {
             // We lost some actual string content - this would require content recovery

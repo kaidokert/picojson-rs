@@ -108,7 +108,7 @@ impl<'a> StreamBuffer<'a> {
         }
 
         // Move unprocessed data to start of buffer
-        let remaining_data = self.data_end - start_offset;
+        let remaining_data = self.data_end.saturating_sub(start_offset);
         self.buffer.copy_within(start_offset..self.data_end, 0);
 
         // Update positions
@@ -684,7 +684,7 @@ mod tests {
             println!("String start was discarded, switching to escape mode");
             _string_start_pos = 0; // Reset for escape mode
         } else {
-            _string_start_pos -= offset; // Normal position update
+            _string_start_pos = _string_start_pos.saturating_sub(offset); // Normal position update
         }
 
         // After compaction, buffer is reset and ready for new data
@@ -903,7 +903,7 @@ mod tests {
                     // Would need escape mode
                     *pos = 0;
                 } else {
-                    *pos -= offset; // 12 - 8 = 4
+                    *pos = pos.saturating_sub(offset); // 12 - 8 = 4
                 }
             }
             _ => panic!("Expected State::String"),
@@ -924,7 +924,7 @@ mod tests {
                     // Needs escape mode
                     *pos = 0;
                 } else {
-                    *pos -= offset;
+                    *pos = pos.saturating_sub(offset);
                 }
             }
             _ => panic!("Expected State::Key"),
@@ -945,7 +945,7 @@ mod tests {
                     // This should not happen for numbers in normal operation
                     panic!("Number position discarded - buffer too small");
                 } else {
-                    *pos -= offset; // 20 - 6 = 14
+                    *pos = pos.saturating_sub(offset); // 20 - 6 = 14
                 }
             }
             _ => panic!("Expected State::Number"),
