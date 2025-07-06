@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{shared::ParserErrorHandler, ParseError};
+use crate::parse_error::ParseError;
+use crate::shared::UnexpectedState;
 
 /// Shared utilities for processing JSON escape sequences.
 /// This module contains pure functions for escape processing that can be used
@@ -54,7 +55,7 @@ impl EscapeProcessor {
     /// ```
     pub fn process_escape_token(escape_token: &ujson::EventToken) -> Result<u8, ParseError> {
         let escape_char = Self::token_to_escape_char(escape_token)
-            .ok_or(ParserErrorHandler::unexpected_state("Invalid escape token"))?;
+            .ok_or_else(|| UnexpectedState::InvalidEscapeToken)?;
         Self::process_simple_escape(escape_char)
     }
 
@@ -170,9 +171,7 @@ impl UnicodeEscapeCollector {
         EscapeProcessor::validate_hex_digit(digit)?;
 
         if self.hex_pos >= 4 {
-            return Err(ParserErrorHandler::unexpected_state(
-                "Too many hex digits in Unicode escape",
-            ));
+            return Err(UnexpectedState::InvalidUnicodeEscape.into());
         }
 
         if let Some(slot) = self.hex_buffer.get_mut(self.hex_pos) {
@@ -190,7 +189,7 @@ impl UnicodeEscapeCollector {
     /// Should only be called when is_complete() returns true
     pub fn process_to_utf8<'a>(&self, utf8_buffer: &'a mut [u8]) -> Result<&'a [u8], ParseError> {
         if self.hex_pos != 4 {
-            return Err(ParserErrorHandler::incomplete_unicode_escape());
+            return Err(UnexpectedState::InvalidUnicodeEscape.into());
         }
 
         EscapeProcessor::process_unicode_escape(&self.hex_buffer, utf8_buffer)
@@ -481,7 +480,7 @@ where
     let hex_slice = hex_slice_provider(hex_start, hex_end)?;
 
     if hex_slice.len() != 4 {
-        return Err(ParserErrorHandler::invalid_unicode_length());
+        return Err(UnexpectedState::InvalidUnicodeEscape.into());
     }
 
     // Feed hex digits to the shared collector

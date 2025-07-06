@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::shared::{Event, ParseError};
+use crate::parse_error::ParseError;
+use crate::shared::Event;
+#[cfg(test)]
+use crate::shared::UnexpectedState;
 use crate::JsonNumber;
 
 /// Trait for extracting number slices from different buffer implementations.
@@ -62,7 +65,6 @@ pub fn parse_number_event<T: NumberExtractor>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::ParserErrorHandler;
 
     // Mock extractor for testing
     struct MockExtractor {
@@ -84,9 +86,7 @@ mod tests {
     impl NumberExtractor for MockExtractor {
         fn get_number_slice(&self, start: usize, end: usize) -> Result<&[u8], ParseError> {
             if end > self.data.len() {
-                return Err(ParserErrorHandler::unexpected_state(
-                    "End position beyond buffer",
-                ));
+                return Err(UnexpectedState::InvalidSliceBounds.into());
             }
             Ok(&self.data[start..end])
         }

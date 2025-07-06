@@ -69,8 +69,11 @@ mod stream_parser;
 
 mod slice_parser;
 
+mod parse_error;
+pub use parse_error::ParseError;
+
 mod shared;
-pub use shared::{Event, ParseError, PullParser};
+pub use shared::{Event, PullParser};
 
 mod slice_input_buffer;
 
@@ -86,14 +89,3 @@ mod number_parser;
 
 pub use slice_parser::SliceParser;
 pub use stream_parser::{Reader, StreamParser};
-
-impl From<slice_input_buffer::Error> for ParseError {
-    fn from(err: slice_input_buffer::Error) -> Self {
-        match err {
-            slice_input_buffer::Error::ReachedEnd => ParseError::EndOfData,
-            slice_input_buffer::Error::InvalidSliceBounds => {
-                ParseError::UnexpectedState("Invalid slice bounds in input buffer")
-            }
-        }
-    }
-}

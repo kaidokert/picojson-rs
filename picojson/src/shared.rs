@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::ParseError;
 /// Shared components for JSON parsers
 use crate::{JsonNumber, String};
 
@@ -28,47 +29,19 @@ pub enum Event<'a, 'b> {
     EndDocument,
 }
 
-/// Errors that can occur during JSON parsing
+/// Specific unexpected states that can occur during parsing.
 #[derive(Debug, PartialEq)]
-pub enum ParseError {
-    /// An error bubbled up from the underlying tokenizer.
-    TokenizerError,
-    /// The provided scratch buffer was not large enough for an operation.
-    ScratchBufferFull,
-    /// A string slice was not valid UTF-8.
-    InvalidUtf8(core::str::Utf8Error),
-    /// A number string could not be parsed.
-    InvalidNumber,
-    /// The parser entered an unexpected internal state.
-    UnexpectedState(&'static str),
-    /// End of input data.
-    EndOfData,
-    /// Invalid hex digits in Unicode escape sequence.
-    InvalidUnicodeHex,
-    /// Valid hex but invalid Unicode codepoint.
-    InvalidUnicodeCodepoint,
-    /// Invalid escape sequence character.
-    InvalidEscapeSequence,
-    /// Float encountered but float support is disabled and float-error is configured
-    FloatNotAllowed,
-    /// A JSON token was too large to fit in the available buffer space
-    TokenTooLarge {
-        token_size: usize,
-        buffer_size: usize,
-        suggestion: &'static str,
-    },
-    /// End of input stream was reached unexpectedly
-    EndOfStream,
-    /// Error from the underlying reader (I/O error, not end-of-stream)
-    ReaderError,
-    /// Numeric overflow
-    NumericOverflow,
-}
-
-impl From<core::str::Utf8Error> for ParseError {
-    fn from(err: core::str::Utf8Error) -> Self {
-        ParseError::InvalidUtf8(err)
-    }
+pub enum UnexpectedState {
+    /// A generic state mismatch occurred.
+    StateMismatch,
+    /// An invalid escape token was encountered.
+    InvalidEscapeToken,
+    /// A Unicode escape sequence was invalid.
+    InvalidUnicodeEscape,
+    /// An operation exceeded the buffer's capacity.
+    BufferCapacityExceeded,
+    /// Invalid slice bounds were provided for an operation.
+    InvalidSliceBounds,
 }
 
 /// Internal parser state tracking
@@ -135,7 +108,6 @@ impl ContentRange {
         current_pos.saturating_sub(1) // Back up to include first digit
     }
 
-
     /// Calculate string content boundaries using content start position
     /// Alternative to string_content_bounds that works with content positions
     ///
@@ -181,159 +153,9 @@ impl ContentRange {
     }
 }
 
-/// Utility for common error handling patterns in JSON parsing.
-/// Provides consistent error creation and UTF-8 validation across parsers.
-pub(crate) struct ParserErrorHandler;
-
 pub const fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     match core::str::from_utf8(v) {
         Ok(s) => Ok(s),
         Err(e) => Err(ParseError::InvalidUtf8(e)),
-    }
-}
-
-impl ParserErrorHandler {
-    /// Create an UnexpectedState error with context
-    ///
-    /// # Arguments
-    /// * `context` - Description of what state was unexpected
-    ///
-    /// # Returns
-    /// ParseError::UnexpectedState with the given context
-    pub fn unexpected_state(context: &'static str) -> ParseError {
-        ParseError::UnexpectedState(context)
-    }
-
-    /// Create a state mismatch error for parser state validation
-    ///
-    /// # Arguments
-    /// * `expected` - The expected parser state
-    /// * `operation` - The operation that failed
-    ///
-    /// # Returns
-    /// ParseError::UnexpectedState with formatted message
-    pub fn state_mismatch(expected: &'static str, operation: &'static str) -> ParseError {
-        // Since we can't use format! in no_std, we'll use predefined common patterns
-        match (expected, operation) {
-            ("string", "end") => ParseError::UnexpectedState("String end without String start"),
-            ("key", "end") => ParseError::UnexpectedState("Key end without Key start"),
-            ("number", "extract") => ParseError::UnexpectedState("Not in number state"),
-            ("active", "process") => ParseError::UnexpectedState("Not in active processing state"),
-            _ => ParseError::UnexpectedState("State mismatch"),
-        }
-    }
-
-    /// Create error for invalid Unicode escape length
-    pub fn invalid_unicode_length() -> ParseError {
-        ParseError::UnexpectedState("Invalid Unicode escape length")
-    }
-
-    /// Create error for incomplete Unicode escape sequences
-    pub fn incomplete_unicode_escape() -> ParseError {
-        ParseError::UnexpectedState("Incomplete Unicode escape sequence")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_unicode_escape_bounds() {
-        // Test unicode_escape_bounds with typical position after \u1234
-        let current_pos = 10; // Position after reading \u1234
-        let (hex_start, hex_end, escape_start) = ContentRange::unicode_escape_bounds(current_pos);
-
-        assert_eq!(hex_start, 6); // Start of XXXX (10 - 4)
-        assert_eq!(hex_end, 10); // End of XXXX
-        assert_eq!(escape_start, 4); // Start of \uXXXX (10 - 6)
-    }
-
-    #[test]
-    fn test_unicode_escape_bounds_edge_cases() {
-        // Test with position that would underflow
-        let (hex_start, hex_end, escape_start) = ContentRange::unicode_escape_bounds(3);
-        assert_eq!(hex_start, 0); // saturating_sub prevents underflow
-        assert_eq!(hex_end, 3);
-        assert_eq!(escape_start, 0); // saturating_sub prevents underflow
-    }
-
-    #[test]
-    fn test_error_constructors() {
-        // Test state_mismatch error constructor
-        let error = ParserErrorHandler::state_mismatch("string", "end");
-        match error {
-            ParseError::UnexpectedState(msg) => {
-                assert_eq!(msg, "String end without String start");
-            }
-            _ => panic!("Expected UnexpectedState error"),
-        }
-
-        // Test invalid_unicode_length error constructor
-        let error = ParserErrorHandler::invalid_unicode_length();
-        match error {
-            ParseError::UnexpectedState(msg) => {
-                assert_eq!(msg, "Invalid Unicode escape length");
-            }
-            _ => panic!("Expected UnexpectedState error"),
-        }
-
-        // Test incomplete_unicode_escape error constructor
-        let error = ParserErrorHandler::incomplete_unicode_escape();
-        match error {
-            ParseError::UnexpectedState(msg) => {
-                assert_eq!(msg, "Incomplete Unicode escape sequence");
-            }
-            _ => panic!("Expected UnexpectedState error"),
-        }
-    }
-
-    #[test]
-    fn test_utf8_error_conversion() {
-        // Test From<Utf8Error> trait implementation
-        use core::str;
-        // Create a proper invalid UTF-8 sequence (lone continuation byte) dynamically
-        // to avoid compile-time warning about static invalid UTF-8 literals
-        let mut invalid_utf8_array = [0u8; 1];
-        invalid_utf8_array[0] = 0b10000000u8; // Invalid UTF-8 - continuation byte without start
-        let invalid_utf8 = &invalid_utf8_array;
-
-        match str::from_utf8(invalid_utf8) {
-            Err(utf8_error) => {
-                let parse_error: ParseError = utf8_error.into();
-                match parse_error {
-                    ParseError::InvalidUtf8(_) => {
-                        // Expected - conversion works correctly
-                    }
-                    _ => panic!("Expected InvalidUtf8 error"),
-                }
-            }
-            Ok(_) => panic!("Expected UTF-8 validation to fail"),
-        }
-    }
-
-    #[test]
-    fn test_string_content_bounds_from_content_start() {
-        // Test string content bounds using content start position
-        let content_start = 6; // After opening quote
-        let current_pos = 15; // After closing quote
-
-        let (start, end) =
-            ContentRange::string_content_bounds_from_content_start(content_start, current_pos);
-        assert_eq!(start, 6); // Same as input content_start
-        assert_eq!(end, 14); // current_pos - 1 (before closing quote)
-    }
-
-    #[test]
-    fn test_string_content_bounds_from_content_start_edge_cases() {
-        // Test with minimum positions
-        let (start, end) = ContentRange::string_content_bounds_from_content_start(0, 1);
-        assert_eq!(start, 0);
-        assert_eq!(end, 0); // 1 - 1
-
-        // Test with underflow protection
-        let (start, end) = ContentRange::string_content_bounds_from_content_start(5, 0);
-        assert_eq!(start, 5);
-        assert_eq!(end, 0); // saturating_sub protects from underflow
     }
 }

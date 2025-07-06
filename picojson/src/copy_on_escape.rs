@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ParseError, String};
+use crate::parse_error::ParseError;
+use crate::{shared::UnexpectedState, String};
 
 /// A struct that encapsulates copy-on-escape string processing with full buffer ownership.
 ///
@@ -70,7 +71,7 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
             let span = self
                 .input
                 .get(self.last_copied_pos..end)
-                .ok_or(ParseError::UnexpectedState("Invalid span"))?;
+                .ok_or(UnexpectedState::InvalidSliceBounds)?;
             let end_pos = self
                 .scratch_pos
                 .checked_add(span.len())
@@ -191,7 +192,7 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
             let unescaped_slice = self
                 .scratch
                 .get(self.scratch_start..self.scratch_pos)
-                .ok_or(ParseError::UnexpectedState("Invalid scratch slice"))?;
+                .ok_or(UnexpectedState::InvalidSliceBounds)?;
             let unescaped_str = crate::shared::from_utf8(unescaped_slice)?;
             Ok(String::Unescaped(unescaped_str))
         } else {
@@ -199,7 +200,7 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
             let borrowed_bytes = self
                 .input
                 .get(self.string_start..pos)
-                .ok_or(ParseError::UnexpectedState("Invalid input slice"))?;
+                .ok_or(UnexpectedState::InvalidSliceBounds)?;
             let borrowed_str = crate::shared::from_utf8(borrowed_bytes)?;
             Ok(String::Borrowed(borrowed_str))
         }
