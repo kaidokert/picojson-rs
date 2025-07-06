@@ -447,21 +447,22 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
             self.stream_buffer.mark_filled(bytes_read)?;
         } else {
-            // Buffer is full - ALWAYS attempt compaction
+            // Buffer is full - attempt compaction only if we have a valid token start position
             let compact_start_pos = match self.parser_state.state {
                 crate::shared::State::Number(start_pos) => start_pos,
                 crate::shared::State::Key(start_pos) => start_pos,
                 crate::shared::State::String(start_pos) => start_pos,
-                _ => {
-                    let pos = self.stream_buffer.current_position();
-                    pos
+                crate::shared::State::None => {
+                    // No active token - buffer is too small for any meaningful processing
+                    // Cannot safely compact without losing essential data
+                    return Err(ParseError::ScratchBufferFull);
                 }
             };
 
             let offset = self.stream_buffer.compact_from(compact_start_pos)?;
 
             if offset == 0 {
-                // SOL: Buffer too small for current token
+                // Buffer too small for current token
                 return Err(ParseError::ScratchBufferFull);
             }
 
@@ -486,8 +487,8 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         // Check for positions that would be discarded and need escape mode
         // CRITICAL: Position 0 is never discarded, regardless of offset
         let needs_escape_mode = match &self.parser_state.state {
-            crate::shared::State::Key(pos) if *pos > 0 && *pos < offset => Some((*pos, true)), // true = is_key
-            crate::shared::State::String(pos) if *pos > 0 && *pos < offset => Some((*pos, false)), // false = is_string
+            crate::shared::State::Key(pos) if *pos < offset => Some((*pos, true)), // true = is_key
+            crate::shared::State::String(pos) if *pos < offset => Some((*pos, false)), // false = is_string
             crate::shared::State::Number(pos) if *pos > 0 && *pos < offset => {
                 return Err(ParseError::ScratchBufferFull);
             }

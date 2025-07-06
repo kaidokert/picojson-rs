@@ -34,6 +34,8 @@ CONFIGS = [
     ("slice-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
     ("slice-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
     ("stream-tiny", "test_streamparser", ["pico-tiny","ufmt", "int8"]),
+    ("stream-small", "test_streamparser", ["pico-small","ufmt", "int8"]),
+    ("stream-huge", "test_streamparser", ["pico-huge","ufmt", "int8"]),
 ]
 
 def run_stack_analysis():
