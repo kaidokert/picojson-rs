@@ -425,11 +425,24 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         self.parser_state.state = crate::shared::State::None;
 
         let number_token_start = start_pos;
-        // Use unified number parsing logic
+
+        // StreamParser determines correct delimiter handling:
+        // Only exclude delimiter when NOT at document end for standalone numbers
+        let buffer_current_pos = self.stream_buffer.current_position();
+        let corrected_pos =
+            if !from_container_end && matches!(self.processing_state, ProcessingState::Finished) {
+                // End(Number) at document end - no delimiter to exclude
+                buffer_current_pos
+            } else {
+                // All other cases - exclude delimiter
+                buffer_current_pos.saturating_sub(1)
+            };
+
+        // Use the position-controlled API - StreamParser handles all position logic
         crate::number_parser::parse_number_event(
             &self.stream_buffer,
             number_token_start,
-            from_container_end,
+            corrected_pos,
         )
     }
     /// Clear event slots

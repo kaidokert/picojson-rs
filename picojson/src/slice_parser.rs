@@ -2,6 +2,7 @@
 
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
+use crate::number_parser::NumberExtractor;
 use crate::parse_error::ParseError;
 use crate::shared::{ContentRange, Event, ParserState, PullParser, State, UnexpectedState};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
@@ -169,13 +170,23 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
     }
 
     /// Helper function to parse a number from the buffer given a start position.
-    /// Uses unified number parsing logic with centralized delimiter handling.
+    /// SliceParser handles all delimiter logic directly.
     fn parse_number_from_buffer(
         &mut self,
         start: usize,
         from_container_end: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        crate::number_parser::parse_number_event(&self.buffer, start, from_container_end)
+        // SliceParser delimiter logic (same as the legacy wrapper)
+        let current_pos = self.buffer.current_position();
+        let end_pos = if !from_container_end && self.buffer.is_empty() {
+            // At EOF - use full span
+            current_pos
+        } else {
+            // All other cases - exclude delimiter
+            current_pos.saturating_sub(1)
+        };
+
+        crate::number_parser::parse_number_event(&self.buffer, start, end_pos)
     }
 
     /// Helper method to handle simple escape tokens using EscapeProcessor
