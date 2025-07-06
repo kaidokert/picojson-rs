@@ -39,25 +39,16 @@ pub struct StreamBuffer<'a> {
     data_end: usize,
     /// Length of unescaped content at buffer start (0 if no unescaping active)
     unescaped_len: usize,
-    /// Minimum space to reserve for escape processing
-    escape_reserve: usize,
 }
-
-const MIN_ESCAPE_RESERVE: usize = 16;
 
 impl<'a> StreamBuffer<'a> {
     /// Create a new StreamBuffer with the given buffer slice
     pub fn new(buffer: &'a mut [u8]) -> Self {
-        // Reserve ~12.5% of buffer for escape processing (>>3 instead of /10), minimum 64 bytes
-        // Avoids expensive 32-bit division on 8-bit AVR targets
-        let escape_reserve = (buffer.len() >> 3).max(MIN_ESCAPE_RESERVE);
-
         Self {
             buffer,
             tokenize_pos: 0,
             data_end: 0,
             unescaped_len: 0,
-            escape_reserve,
         }
     }
 
@@ -226,11 +217,6 @@ impl<'a> StreamBuffer<'a> {
 
     /// Append a single byte to the unescaped content
     pub fn append_unescaped_byte(&mut self, byte: u8) -> Result<(), StreamBufferError> {
-        let available_space = self.buffer.len().saturating_sub(self.escape_reserve);
-        if self.unescaped_len >= available_space {
-            return Err(StreamBufferError::BufferFull);
-        }
-
         if let Some(b) = self.buffer.get_mut(self.unescaped_len) {
             *b = byte;
             self.unescaped_len = self.unescaped_len.wrapping_add(1);
@@ -288,7 +274,6 @@ mod tests {
         assert_eq!(db.tokenize_pos, 0);
         assert_eq!(db.data_end, 0);
         assert_eq!(db.unescaped_len, 0);
-        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE); // 12.5% of 100, minimum MIN_ESCAPE_RESERVE
         assert!(db.is_empty());
     }
 
@@ -397,25 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn test_maximum_escape_reserve_scenario() {
-        let mut buffer = [0u8; 100];
-        let db = StreamBuffer::new(&mut buffer);
-
-        // Check escape reserve calculation
-        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE); // max(100>>3, MIN_ESCAPE_RESERVE) = MIN_ESCAPE_RESERVE
-
-        // Test with smaller buffer
-        let mut small_buffer = [0u8; 50];
-        let small_db = StreamBuffer::new(&mut small_buffer);
-        assert_eq!(small_db.escape_reserve, MIN_ESCAPE_RESERVE); // Still MIN_ESCAPE_RESERVE (minimum)
-
-        // Test with larger buffer
-        let mut large_buffer = [0u8; 1000];
-        let large_db = StreamBuffer::new(&mut large_buffer);
-        assert_eq!(large_db.escape_reserve, 125); // 1000 >> 3 = 125
-    }
-
-    #[test]
     fn test_boundary_conditions() {
         let mut buffer = [0u8; 3]; // Absolute minimum
         let mut db = StreamBuffer::new(&mut buffer);
@@ -474,52 +440,20 @@ mod tests {
     }
 
     #[test]
-    fn test_append_unescaped_byte_respects_escape_reserve() {
-        let mut buffer = [0u8; 100]; // 100 byte buffer
+    fn test_append_unescaped_byte_uses_full_buffer() {
+        let mut buffer = [0u8; 10]; // 10 byte buffer
         let mut db = StreamBuffer::new(&mut buffer);
 
-        // Check escape reserve was set correctly (12.5% of 100, minimum MIN_ESCAPE_RESERVE)
-        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE);
-
-        // Should be able to append up to (buffer_len - escape_reserve) bytes
-        let max_unescaped = 100 - db.escape_reserve; // 100 - 64 = 36
-
-        // Fill up to the limit - should succeed
-        for i in 0..max_unescaped {
+        // Should be able to append up to buffer_len bytes (no more escape reserve!)
+        for i in 0..10 {
             let result = db.append_unescaped_byte(b'A');
             assert!(result.is_ok(), "Failed at byte {}", i);
         }
 
-        assert_eq!(db.unescaped_len, max_unescaped);
+        assert_eq!(db.unescaped_len, 10);
 
-        // One more byte should fail due to escape reserve constraint
+        // One more byte should fail because buffer is full
         let result = db.append_unescaped_byte(b'B');
-        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
-
-        // Verify we didn't exceed the escape reserve boundary
-        assert_eq!(db.unescaped_len, max_unescaped);
-    }
-
-    #[test]
-    fn test_append_unescaped_byte_escape_reserve_larger_than_buffer() {
-        let mut buffer = [0u8; 10]; // Very small buffer
-        let mut db = StreamBuffer::new(&mut buffer);
-
-        // Even small buffers get minimum 64 byte escape reserve, but that's larger than buffer
-        assert_eq!(db.escape_reserve, MIN_ESCAPE_RESERVE); // minimum
-
-        // Since escape_reserve (64) > buffer.len() (10), no bytes should be appendable
-        // This should not panic with underflow, but return BufferFull error
-        let result = db.append_unescaped_byte(b'A');
-        assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
-
-        // Test with even smaller buffer to ensure we handle underflow correctly
-        let mut tiny_buffer = [0u8; 3];
-        let mut tiny_db = StreamBuffer::new(&mut tiny_buffer);
-        assert_eq!(tiny_db.escape_reserve, MIN_ESCAPE_RESERVE); // Still minimum MIN_ESCAPE_RESERVE
-
-        // Should handle this gracefully without panic
-        let result = tiny_db.append_unescaped_byte(b'B');
         assert_eq!(result.unwrap_err(), StreamBufferError::BufferFull);
     }
 
@@ -736,7 +670,7 @@ mod tests {
 
         // Process tokens: { " h e l l o _ w o
         // Parser is in State::String(2) tracking string start at position 2
-        let mut string_start_pos = 2; // Parser's state: string started at pos 2
+        let mut _string_start_pos = 2; // Parser's state: string started at pos 2
 
         // Advance to simulate tokenizer processing
         for _ in 0..10 {
@@ -754,13 +688,13 @@ mod tests {
         // Parser updates state: string_start_pos = 2 - 10 = -8
         // Since string_start_pos < 0, the original string start was discarded!
         // Parser must now switch to escape/copy mode for the continuation
-        if string_start_pos < offset {
+        if _string_start_pos < offset {
             // Original string start was discarded - must use escape/copy mode
             // In real implementation, parser would copy what it had processed to unescaped buffer
             println!("String start was discarded, switching to escape mode");
-            string_start_pos = 0; // Reset for escape mode
+            _string_start_pos = 0; // Reset for escape mode
         } else {
-            string_start_pos -= offset; // Normal position update
+            _string_start_pos -= offset; // Normal position update
         }
 
         // After compaction, buffer is reset and ready for new data
@@ -799,7 +733,7 @@ mod tests {
         }
 
         // Current state: parser at position 5, with "lo\"" remaining (3 bytes)
-        let mut string_start_pos = 2; // Parser state: string started at position 2
+        let mut _string_start_pos = 2; // Parser state: string started at position 2
         assert_eq!(db.current_byte().unwrap(), b'l');
         assert_eq!(db.remaining_bytes(), 3);
 
@@ -808,10 +742,10 @@ mod tests {
         assert_eq!(offset, 5); // Moved data by 5 positions
 
         // Update parser state
-        string_start_pos = if string_start_pos < offset {
+        _string_start_pos = if _string_start_pos < offset {
             0 // Switch to escape mode - original start was discarded
         } else {
-            string_start_pos - offset // Normal position update: 2 - 5 = -3, so switch to escape mode
+            _string_start_pos - offset // Normal position update: 2 - 5 = -3, so switch to escape mode
         };
 
         // After compaction: "lo\"" is now at start of buffer
@@ -830,7 +764,7 @@ mod tests {
         // Test normal position updates where positions are preserved
 
         // Case 1: String position preserved after compaction
-        let mut state = crate::shared::State::String(10);
+        let _state = crate::shared::State::String(10);
         let offset = 5;
 
         // Simulate the position update logic

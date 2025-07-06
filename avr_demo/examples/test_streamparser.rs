@@ -116,7 +116,7 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
     let mut status_len = 0;
 
     // Create a streaming buffer for StreamParser (balanced size for testing)
-    let mut stream_buffer = [0u8; 96]; // Balanced size for testing
+    let mut stream_buffer = [0u8; 12];
     let reader = SliceReader::new(json_data);
     let mut parser = StreamParser::<_, PicoConfig>::with_config(reader, &mut stream_buffer);
 

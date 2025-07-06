@@ -124,38 +124,6 @@ pub trait PullParser {
 pub(crate) struct ContentRange;
 
 impl ContentRange {
-    /// Calculate string content boundaries from quote positions
-    ///
-    /// # Arguments
-    /// * `quote_start` - Position of opening quote
-    /// * `current_pos` - Current parser position (typically after closing quote)
-    ///
-    /// # Returns
-    /// (content_start, content_end) where content_start is after opening quote
-    /// and content_end is before closing quote
-    pub fn string_content_bounds(quote_start: usize, current_pos: usize) -> (usize, usize) {
-        let content_start = quote_start.saturating_add(1); // Skip opening quote
-        let content_end = current_pos.saturating_sub(1); // Back up to exclude closing quote
-        (content_start, content_end)
-    }
-
-    /// Calculate string content boundaries when escape sequence is in progress
-    ///
-    /// # Arguments
-    /// * `quote_start` - Position of opening quote
-    /// * `current_pos` - Current parser position (typically at escape sequence)
-    ///
-    /// # Returns
-    /// (content_start, content_end) where content_end is before the backslash
-    pub fn string_content_bounds_before_escape(
-        quote_start: usize,
-        current_pos: usize,
-    ) -> (usize, usize) {
-        let content_start = quote_start.saturating_add(1); // Skip opening quote
-        let content_end = current_pos.saturating_sub(1); // Back up to before the backslash
-        (content_start, content_end)
-    }
-
     /// Calculate number content start from current position
     ///
     /// # Arguments
@@ -165,18 +133,6 @@ impl ContentRange {
     /// Position that includes the first digit of the number
     pub fn number_start_from_current(current_pos: usize) -> usize {
         current_pos.saturating_sub(1) // Back up to include first digit
-    }
-
-    /// Calculate quote position from current position
-    /// Used when tokenizer position is after a quote was processed
-    ///
-    /// # Arguments
-    /// * `current_pos` - Current parser position (after quote was processed)
-    ///
-    /// # Returns
-    /// Position of the quote itself
-    pub fn quote_position_from_current(current_pos: usize) -> usize {
-        current_pos.saturating_sub(1) // Back up to the quote
     }
 
     /// Calculate content start position from current position
@@ -189,18 +145,6 @@ impl ContentRange {
     /// Position where string/key content begins (after the opening quote)
     pub fn content_start_from_current(current_pos: usize) -> usize {
         current_pos // Content starts at current position (after quote)
-    }
-
-    /// Calculate content end position from current position
-    /// Used when tokenizer position is after closing quote was processed
-    ///
-    /// # Arguments
-    /// * `current_pos` - Current parser position (after closing quote was processed)
-    ///
-    /// # Returns
-    /// Position where string/key content ends (before the closing quote)
-    pub fn content_end_from_current(current_pos: usize) -> usize {
-        current_pos.saturating_sub(1) // Back up to exclude closing quote
     }
 
     /// Calculate string content boundaries using content start position
@@ -326,27 +270,6 @@ mod tests {
     }
 
     #[test]
-    fn test_string_content_bounds_before_escape() {
-        // Test string content bounds calculation
-        let quote_start = 5; // Position of opening quote
-        let current_pos = 15; // Position at backslash
-
-        let (content_start, content_end) =
-            ContentRange::string_content_bounds_before_escape(quote_start, current_pos);
-
-        assert_eq!(content_start, 6); // After opening quote (5 + 1)
-        assert_eq!(content_end, 14); // Before backslash (15 - 1)
-    }
-
-    #[test]
-    fn test_string_content_bounds_edge_cases() {
-        // Test with positions that could underflow
-        let (content_start, content_end) = ContentRange::string_content_bounds_before_escape(0, 0);
-        assert_eq!(content_start, 1);
-        assert_eq!(content_end, 0); // This will result in empty range, which is handled elsewhere
-    }
-
-    #[test]
     fn test_error_constructors() {
         // Test state_mismatch error constructor
         let error = ParserErrorHandler::state_mismatch("string", "end");
@@ -409,17 +332,6 @@ mod tests {
     }
 
     #[test]
-    fn test_content_end_from_current() {
-        // Test content end calculation - should back up by 1
-        assert_eq!(ContentRange::content_end_from_current(1), 0);
-        assert_eq!(ContentRange::content_end_from_current(10), 9);
-        assert_eq!(ContentRange::content_end_from_current(100), 99);
-
-        // Test edge case - should not underflow
-        assert_eq!(ContentRange::content_end_from_current(0), 0);
-    }
-
-    #[test]
     fn test_string_content_bounds_from_content_start() {
         // Test string content bounds using content start position
         let content_start = 6; // After opening quote
@@ -442,24 +354,5 @@ mod tests {
         let (start, end) = ContentRange::string_content_bounds_from_content_start(5, 0);
         assert_eq!(start, 5);
         assert_eq!(end, 0); // saturating_sub protects from underflow
-    }
-
-    #[test]
-    fn test_content_vs_quote_position_comparison() {
-        // Compare new content tracking with old quote tracking
-        let current_pos = 10; // Position after processing opening quote
-
-        // Old approach: track quote position
-        let quote_pos = ContentRange::quote_position_from_current(current_pos);
-        let (old_content_start, _) = ContentRange::string_content_bounds(quote_pos, 20);
-
-        // New approach: track content position
-        let content_start = ContentRange::content_start_from_current(current_pos);
-
-        // They should produce the same content start position
-        assert_eq!(old_content_start, content_start);
-
-        // But quote_pos should be 1 less than content_start
-        assert_eq!(quote_pos, content_start.saturating_sub(1));
     }
 }

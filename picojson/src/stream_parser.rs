@@ -65,6 +65,7 @@ impl<'b, R: Reader> StreamParser<'b, R, DefaultConfig> {
     /// Uses the default BitStack configuration (u32 bucket, u8 counter)
     /// for most common use cases.
     pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
+        log::debug!("Creating StreamParser with default configuration");
         Self::with_config(reader, buffer)
     }
 }
@@ -513,7 +514,9 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
             if offset == 0 {
                 // SOL: Buffer too small for current token
-                log::debug!("Compaction failed: offset = 0, buffer too small");
+                log::debug!(
+                    "🚨 ScratchBufferFull #1: Compaction failed: offset = 0, buffer too small"
+                );
                 return Err(ParseError::ScratchBufferFull);
             }
 
@@ -553,6 +556,11 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
             crate::shared::State::Number(pos) if *pos > 0 && *pos < offset => {
                 // Number start was discarded - this shouldn't happen for numbers
                 // Numbers are typically short and parsed completely
+                log::debug!(
+                    "🚨 ScratchBufferFull #2: Number start discarded, pos={}, offset={}",
+                    pos,
+                    offset
+                );
                 return Err(ParseError::ScratchBufferFull);
             }
             _ => None,
@@ -631,7 +639,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         if discarded_content > 0 {
             // We lost some actual key content - this would require content recovery
             // For now, this is unsupported
-            log::debug!("Key content was discarded - unsupported case");
+            log::debug!("🚨 ScratchBufferFull #3: Key content was discarded - unsupported case, discarded_content={}", discarded_content);
             return Err(ParseError::ScratchBufferFull);
         }
 
@@ -1805,5 +1813,72 @@ mod tests {
 
         assert_eq!(parser.next_event().unwrap(), Event::EndObject);
         assert_eq!(parser.next_event().unwrap(), Event::EndDocument);
+    }
+
+    /// Helper function to test escape sequence parsing with specific buffer size
+    fn test_simple_escape_with_buffer_size(buffer_size: usize) -> Result<(), crate::ParseError> {
+        // DEBUG TEST: Simple escape sequence should need minimal buffer
+        // JSON: ["hello\\"] = 10 bytes total, should work with ~7 byte buffer
+        let json_stream = br#"["hello\\"]"#;
+
+        println!("Testing escape sequence with buffer size: {}", buffer_size);
+        println!(
+            "JSON input: {:?}",
+            core::str::from_utf8(json_stream).unwrap()
+        );
+        let mut buffer = vec![0u8; buffer_size];
+        let mut parser = StreamParser::new(SliceReader::new(json_stream), &mut buffer);
+
+        // Array start
+        match parser.next_event()? {
+            Event::StartArray => println!("  ✅ StartArray OK"),
+            other => panic!("Expected StartArray, got: {:?}", other),
+        }
+
+        // String with escape
+        match parser.next_event()? {
+            Event::String(s) => {
+                println!("  ✅ String OK: '{}'", s.as_str());
+                assert_eq!(s.as_str(), "hello\\");
+            }
+            other => panic!("Expected String, got: {:?}", other),
+        }
+
+        // Array end
+        match parser.next_event()? {
+            Event::EndArray => println!("  ✅ EndArray OK"),
+            other => panic!("Expected EndArray, got: {:?}", other),
+        }
+
+        // End document
+        match parser.next_event()? {
+            Event::EndDocument => println!("  ✅ EndDocument OK"),
+            other => panic!("Expected EndDocument, got: {:?}", other),
+        }
+
+        println!("  🎉 SUCCESS with buffer size: {}", buffer_size);
+        Ok(())
+    }
+
+    #[test_log::test]
+    fn test_minimal_buffer_simple_escape_1() {
+        // Buffer size 4 - clearly not enough
+        match test_simple_escape_with_buffer_size(4) {
+            Ok(()) => panic!("Expected failure with 4-byte buffer, but succeeded!"),
+            Err(e) => println!("Expected failure with 4-byte buffer: {:?}", e),
+        }
+    }
+
+    #[test_log::test]
+    fn test_minimal_buffer_simple_escape_2() {
+        // Buffer size 12 - test if larger buffer avoids compaction bugs
+        test_simple_escape_with_buffer_size(12)
+            .expect("12-byte buffer should be sufficient for simple escape");
+    }
+
+    #[test_log::test]
+    fn test_minimal_buffer_simple_escape_3() {
+        // Buffer size 24 - known working boundary from stress tests
+        test_simple_escape_with_buffer_size(24).expect("24-byte buffer should definitely work");
     }
 }
