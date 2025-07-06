@@ -25,37 +25,23 @@ pub trait NumberExtractor {
     fn is_empty(&self) -> bool;
 }
 
-/// Unified number parsing logic shared between SliceParser and StreamParser.
+/// Number parsing with explicit position control - used by both parsers.
 ///
 /// This function encapsulates the common pattern:
 /// 1. Extract number slice from buffer
 /// 2. Convert to UTF-8 string
 /// 3. Parse using shared number parsing logic
 /// 4. Create JsonNumber::Borrowed event
+/// All position logic is handled by the calling parser.
 pub fn parse_number_event<T: NumberExtractor>(
     extractor: &T,
     start_pos: usize,
-    from_container_end: bool,
+    end_pos: usize,
 ) -> Result<Event<'_, '_>, ParseError> {
-    let current_pos = extractor.current_position();
-
-    // Determine if we should exclude a delimiter from the number
-    let number_end = if from_container_end || (!extractor.is_empty()) {
-        // Came from container end OR not at EOF - number was terminated by delimiter, exclude it
-        current_pos.saturating_sub(1)
-    } else {
-        // At EOF and not from container end - number wasn't terminated by delimiter, use full span
-        current_pos
-    };
-
-    // Extract number bytes and parse directly
-    let number_bytes = extractor.get_number_slice(start_pos, number_end)?;
+    let number_bytes = extractor.get_number_slice(start_pos, end_pos)?;
     let parsed_result = crate::parse_number_from_str(number_bytes)?;
-
-    // Convert to string for JsonNumber event
     let number_str = crate::shared::from_utf8(number_bytes)?;
 
-    // Create event
     Ok(Event::Number(JsonNumber::Borrowed {
         raw: number_str,
         parsed: parsed_result,
@@ -105,7 +91,7 @@ mod tests {
         let data = b"56}"; // Number followed by container end
         let extractor = MockExtractor::new(data, 3, false); // Position after '}'
 
-        let result = parse_number_event(&extractor, 0, true).unwrap();
+        let result = parse_number_event(&extractor, 0, 2).unwrap();
         if let Event::Number(num) = result {
             assert_eq!(num.as_str(), "56"); // Should exclude the '}'
             assert_eq!(num.as_int(), Some(56));
@@ -119,7 +105,7 @@ mod tests {
         let data = b"89";
         let extractor = MockExtractor::new(data, 2, true); // At EOF
 
-        let result = parse_number_event(&extractor, 0, false).unwrap();
+        let result = parse_number_event(&extractor, 0, 2).unwrap();
         if let Event::Number(num) = result {
             assert_eq!(num.as_str(), "89"); // Should include full number
             assert_eq!(num.as_int(), Some(89));
