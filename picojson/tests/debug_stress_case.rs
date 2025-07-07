@@ -1,39 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use picojson::{Event, PullParser, Reader, StreamParser};
-
-/// Configurable reader that provides data in specified chunk sizes
-struct ChunkReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-    chunk_size: usize,
-}
-
-impl<'a> ChunkReader<'a> {
-    fn new(data: &'a [u8], chunk_size: usize) -> Self {
-        Self {
-            data,
-            pos: 0,
-            chunk_size: chunk_size.max(1),
-        }
-    }
-}
-
-impl<'a> Reader for ChunkReader<'a> {
-    type Error = ();
-
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let remaining = self.data.len().saturating_sub(self.pos);
-        if remaining == 0 {
-            return Ok(0);
-        }
-
-        let to_copy = remaining.min(buf.len()).min(self.chunk_size);
-        buf[..to_copy].copy_from_slice(&self.data[self.pos..self.pos + to_copy]);
-        self.pos += to_copy;
-        Ok(to_copy)
-    }
-}
+use picojson::{ChunkReader, Event, PullParser, StreamParser};
 
 #[test]
 fn debug_specific_failure_case() {

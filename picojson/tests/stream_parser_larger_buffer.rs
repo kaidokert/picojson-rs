@@ -1,38 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use picojson::{Event, PullParser, Reader, StreamParser};
-
-struct SliceReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> SliceReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-}
-
-impl<'a> Reader for SliceReader<'a> {
-    type Error = ();
-
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let remaining = self.data.len().saturating_sub(self.pos);
-        if remaining == 0 {
-            return Ok(0);
-        }
-
-        let to_copy = remaining.min(buf.len());
-        buf[..to_copy].copy_from_slice(&self.data[self.pos..self.pos + to_copy]);
-        self.pos += to_copy;
-        Ok(to_copy)
-    }
-}
+use picojson::{ChunkReader, Event, PullParser, StreamParser};
 
 #[test]
 fn test_key_value_pair_with_10_byte_buffer() {
     let json = b"{ \"hello\" : \"world\" }";
-    let reader = SliceReader::new(json);
+    let reader = ChunkReader::full_slice(json);
     let mut buffer = [0u8; 10];
     let mut parser = StreamParser::new(reader, &mut buffer);
 

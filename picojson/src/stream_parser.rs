@@ -79,26 +79,11 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
     ///
     /// # Example
     /// ```
-    /// use picojson::{StreamParser, BitStackStruct, ArrayBitStack};
+    /// use picojson::{StreamParser, BitStackStruct, ChunkReader};
     ///
-    /// # // Example Reader implementation
-    /// # struct JsonReader<'a> { data: &'a [u8], pos: usize }
-    /// # impl<'a> JsonReader<'a> {
-    /// #     fn new(data: &'a [u8]) -> Self { Self { data, pos: 0 } }
-    /// # }
-    /// # impl picojson::Reader for JsonReader<'_> {
-    /// #     type Error = ();
-    /// #     fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-    /// #         let remaining = &self.data[self.pos..];
-    /// #         let to_copy = buf.len().min(remaining.len());
-    /// #         buf[..to_copy].copy_from_slice(&remaining[..to_copy]);
-    /// #         self.pos += to_copy;
-    /// #         Ok(to_copy)
-    /// #     }
-    /// # }
-    /// #
-    /// # let json = b"{\"test\": 42}";
-    /// let reader = JsonReader::new(json);
+    /// let json = b"{\"test\": 42}";
+    /// // For testing, ChunkReader is a convenient Reader implementation
+    /// let reader = ChunkReader::new(json, 10);
     /// let mut buffer = [0u8; 256];
     ///
     /// // Custom configuration: u64 bucket + u16 counter for deeper nesting

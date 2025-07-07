@@ -89,3 +89,6 @@ mod number_parser;
 
 pub use slice_parser::SliceParser;
 pub use stream_parser::{Reader, StreamParser};
+
+mod chunk_reader;
+pub use chunk_reader::ChunkReader;
