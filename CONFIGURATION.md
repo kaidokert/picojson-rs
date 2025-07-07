@@ -22,7 +22,7 @@ Choose what happens when floats are encountered:
 - **Default**: Return `FloatDisabled` with raw string preserved for manual parsing
 - **`float-error`**: Fail parsing when floats are encountered (embedded fail-fast)
 - **`float-truncate`**: Truncate simple decimals to integers (1.7 → 1, errors on scientific notation)
-- **`float-skip`**: Skip float values during parsing (continue with next token) [TODO]
+- **`float-skip`**: Skip float values during parsing (continue with next token)
 
 ## Configuration Examples
 
@@ -63,37 +63,52 @@ picojson = { path = "../picojson", features = ["int64"] }
 
 ## API Usage
 
-All configurations preserve the exact raw string while providing different parsed representations:
+All configurations preserve the exact raw string of a number, while providing different parsed representations through the `JsonNumber` enum.
 
 ```rust
+use picojson::{Event, JsonNumber};
+
+// In your parsing loop:
 match event {
     Event::Number(num) => {
-        // Raw string always available (exact precision)
-        println!("Raw: {}", num.as_str());
+        // The raw string is always available for full precision.
+        println!("Raw number: {}", num.as_str());
 
-        // Parsed value depends on configuration
-        match num.parsed {
-            NumberResult::Integer(i) => println!("Integer: {}", i),
-            NumberResult::IntegerOverflow => println!("Overflow: {}", num.as_str()),
-
-            #[cfg(feature = "float")]
-            NumberResult::Float(f) => println!("Float: {}", f),
-
-            #[cfg(all(not(feature = "float"), feature = "float-truncate"))]
-            NumberResult::FloatTruncated(i) => println!("Truncated: {}", i),
-
-            #[cfg(not(feature = "float"))]
-            NumberResult::FloatDisabled => {
-                // Manual parsing still available
-                let manual: f64 = num.parse().unwrap();
+        // Match on the JsonNumber enum to handle different parsing outcomes.
+        match num {
+            JsonNumber::Integer(i) => {
+                println!("Parsed as integer: {}", i);
+            }
+            JsonNumber::Float(f) => {
+                // This variant is only available if the "float" feature is enabled.
+                println!("Parsed as float: {}", f);
+            }
+            JsonNumber::IntegerOverflow => {
+                println!("Integer overflow! Raw value: {}", num.as_str());
+            }
+            JsonNumber::FloatDisabled => {
+                // This variant is used when the "float" feature is disabled
+                // and no other float handling (like truncate or error) is active.
+                println!("Float parsing is disabled. Raw value: {}", num.as_str());
+                // You can still manually parse if needed:
+                // let manual: f64 = num.as_str().parse().unwrap_or(0.0);
+            }
+            JsonNumber::FloatTruncated(i) => {
+                // This variant is used with the "float-truncate" feature.
+                println!("Float was truncated to integer: {}", i);
             }
         }
 
-        // Convenience methods adapt to configuration
+        // Convenience methods are also available.
         if let Some(int_val) = num.as_int() {
-            println!("As configured int: {}", int_val);
+            println!("Successfully read as integer: {}", int_val);
+        }
+        if let Some(float_val) = num.as_f64() {
+            // This will only return Some if the "float" feature is enabled.
+            println!("Successfully read as float: {}", float_val);
         }
     }
+    _ => {}
 }
 ```
 

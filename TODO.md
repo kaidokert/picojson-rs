@@ -1,5 +1,5 @@
 ## TODO list
-- [ ] Constify what's possible
+- [?] Constify what's possible ( most is probably done )
 - [x] Remove `.unwrap()` calls
 - [x] Remove copy_from_slice - can panic
 - [x] Remove all bounds checked slice indexing that could panic!
@@ -13,7 +13,8 @@
 - [ ] Provide user guide docs
 - [ ] Direct defmt support
 - [x] Stack size benchmarks
-- [x]  Code size benchmarks
+- [x] Code size benchmarks
 - [ ] Sax-style push parser
 - [x] See if we can bring an Iterator impl back
     - Can't practically be done with borrowing return values
+- [ ] Conformance tests at parser level, not just tokenizer

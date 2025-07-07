@@ -7,7 +7,7 @@
 
 This document outlines the design for the `picojson` crate, a high-level, allocation-free JSON pull-parser.
 
-The primary philosophy is to build upon the lean, compact, and low-level `ujson` tokenizer to provide an ergonomic and highly efficient API for consumers.
+The primary philosophy is to build upon the lean, compact, and low-level `ujson` tokenizer to provide an ergonomic API for consumers.
 
 The core design goals are:
 - **Zero Heap Allocations**: The parser must not perform any heap allocations during its operation. All memory will be provided by the caller.
@@ -21,26 +21,31 @@ Standard `Iterator` trait cannot be implemented because of borrowed return value
 
 ## 3. Memory Management: External Scratch Buffer
 
-To achieve the zero-allocation goal while still handling complex cases like string un-escaping, the parser will not manage its own memory. Instead, the caller must provide a temporary "scratch" buffer during instantiation.
+To achieve the zero-allocation goal while still handling complex cases like string un-escaping, the parser will not manage its own memory. Instead, the caller can provide a temporary "scratch" buffer during instantiation for operations that require it.
 
 This design was chosen over an internal, fixed-size buffer to avoid complex lifetime issues with the borrow checker and to give the user full control over the memory's size and location (stack, static arena, etc.).
 
-The parser's constructor will have the following signature:
+The parser offers constructors that support both zero-copy parsing (when no escapes are present) and parsing with a scratch buffer for handling escaped strings:
 
 ```rust
+// Conceptual representation of constructors
 impl<'a, 'b> SliceParser<'a, 'b> {
-    /// Creates a new parser for the given JSON input.
-    ///
-    /// - `input`: A string slice containing the JSON data to be parsed.
-    /// - `scratch_buffer`: A mutable byte slice for temporary operations,
-    ///   like string un-escaping.
-    pub fn new(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
+    /// Creates a new parser for inputs with no string escapes.
+    /// This is a zero-copy, zero-allocation operation.
+    pub fn new(input: &'a str) -> Self {
+        // ...
+    }
+
+    /// Creates a new parser with a scratch buffer for handling escapes.
+    /// - `input`: A string slice containing the JSON data.
+    /// - `scratch_buffer`: A mutable byte slice for temporary operations.
+    pub fn with_buffer(input: &'a str, scratch_buffer: &'b mut [u8]) -> Self {
         // ...
     }
 }
 ```
 
-The `'a` lifetime is tied to the input data, while `'b` is tied to the scratch buffer.
+The 'a lifetime is tied to the input data, while 'b is tied to the scratch buffer.
 
 ## 4. Handling String Values: The `String` Enum
 
@@ -77,19 +82,28 @@ The algorithm is as follows:
 
 This ensures that work is only done when absolutely necessary.
 
-## 6. Final Data Structures
+## 6. Core Data Structures
 
 Here is a summary of the core public-facing data structures.
 
 ```rust
-// The main parser struct
+// The main parser for slices
 pub struct SliceParser<'a, 'b> { /* ... private fields ... */ }
+
+// The main parser for streams
+pub struct StreamParser<'b, R: Reader> { /* ... private fields ... */ }
 
 // The custom "Cow-like" string type
 #[derive(Debug, PartialEq, Eq)]
 pub enum String<'a, 'b> {
     Borrowed(&'a str),
     Unescaped(&'b str),
+}
+
+// The custom number type for flexible parsing
+pub enum JsonNumber<'a> {
+    Borrowed { raw: &'a str, ... },
+    // ... other variants for parsed numbers
 }
 
 // The events yielded by the iterator
@@ -101,7 +115,7 @@ pub enum Event<'a, 'b> {
     EndArray,
     Key(String<'a, 'b>),
     String(String<'a, 'b>),
-    Number(f64), // Assuming f64 for now
+    Number(JsonNumber<'a>),
     Bool(bool),
     Null,
 }
@@ -109,39 +123,39 @@ pub enum Event<'a, 'b> {
 // The comprehensive error type
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
-    /// An error bubbled up from the underlying tokenizer.
-    Tokenizer(ujson::Error),
-    /// The provided scratch buffer was not large enough for an operation.
+    /// An error from the underlying tokenizer (e.g., invalid syntax).
+    TokenizerError,
+    /// The provided scratch buffer was not large enough.
     ScratchBufferFull,
     /// A string slice was not valid UTF-8.
-    InvalidUtf8(core::str::Utf8Error),
-    /// A number string could not be parsed.
-    InvalidNumber(core::num::ParseFloatError),
-    /// The parser entered an unexpected internal state.
-    UnexpectedState(&'static str),
+    InvalidUtf8,
+    /// A number string could not be parsed as the configured type.
+    InvalidNumber,
+    // ... other specific error conditions
 }
 ```
 
 ## 6. Dealing with non-slice input
 
-IMPORTANT!!!
+To support parsing from sources other than in-memory slices (like files, network sockets, or serial ports), the library provides a `StreamParser`. This parser is built upon a custom `Reader` trait, which is analogous to `std::io::Read` but is available in `no_std` environments.
 
-More: In addition of taking just slice [u8] as input, we should accept an `impl Reader` of some sort.
-So that the input can come no-copy from any source with low buffering
+```rust
+pub trait Reader {
+    type Error;
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
+}
+```
 
-Note std::io has Read trait, but unfortunately that's not available in core::, so probably have to
-make our own, and auto-implement it for arrays and slices or for anything that looks like AsRef<[u8]>
+The `StreamParser` takes an implementation of this `Reader` and an internal buffer, processing the input as data becomes available. This allows for efficient parsing of large JSON documents with a small, fixed-size memory footprint.
 
-## 7. TODO: Working with returned values
+For convenience, the crate provides `picojson::ChunkReader`, a panic-free `Reader` implementation for parsing from byte slices, which is especially useful for testing and examples.
 
-String values in picojson now have Deref, AsRef and Format support, so using them in default examples
-with things like println! is convenient and easy.
+## 7. Ergonomics and Returned Values
 
-Same should be done with Number, but it's a little more tricky to design, given the configuration
-variability
+String and number values returned by the parser are designed for ease of use.
 
-## 8. TODO: Add direct defmt support for user API
+-   `picojson::String` implements `Deref<Target=str>`, so it can be used just like a regular `&str`.
+-   `picojson::JsonNumber` provides `as_int()` and `as_f64()` methods for easy conversion, along with `Deref<Target=str>` to access the raw number string. This design supports both zero-copy access to the raw number and convenient conversion to standard numeric types.
 
-For any user of the pull parser with defmt:: enabled, all the formatting should do sensible
-default things. Most tricky is number formatting. The objective is to have clean, ergonomic, readable
-examples
+
+```
