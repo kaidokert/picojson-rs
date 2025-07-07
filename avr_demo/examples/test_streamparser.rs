@@ -4,7 +4,7 @@
 
 use avr_demo as _;
 use avr_demo::stack_measurement::*;
-use picojson::{self, Event, ParseError, PullParser, Reader, StreamParser};
+use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]
 use picojson::ArrayBitStack;
@@ -71,37 +71,6 @@ struct Doc<'b> {
     status: &'b str,
 }
 
-// Simple Reader implementation for testing that wraps a slice
-struct SliceReader<'a> {
-    data: &'a [u8],
-    position: usize,
-}
-
-impl<'a> SliceReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self { data, position: 0 }
-    }
-}
-
-impl<'a> Reader for SliceReader<'a> {
-    type Error = ();
-
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let remaining = self.data.len().saturating_sub(self.position);
-        if remaining == 0 {
-            return Ok(0);
-        }
-
-        let to_copy = remaining.min(buf.len());
-        if let Ok(copied) = copy_subslice(self.data, self.position, buf, 0, to_copy) {
-            self.position = self.position.wrapping_add(copied);
-            Ok(copied)
-        } else {
-            Err(())
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum KeyContext {
     None,
@@ -117,7 +86,7 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
 
     // Create a streaming buffer for StreamParser (balanced size for testing)
     let mut stream_buffer = [0u8; 12];
-    let reader = SliceReader::new(json_data);
+    let reader = ChunkReader::full_slice(json_data);
     let mut parser = StreamParser::<_, PicoConfig>::with_config(reader, &mut stream_buffer);
 
     let mut key_context = KeyContext::None;

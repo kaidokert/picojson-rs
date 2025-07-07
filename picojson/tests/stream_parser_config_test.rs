@@ -1,34 +1,5 @@
 // Integration test for StreamParser configurability
-use picojson::{ArrayBitStack, BitStackStruct, Event, PullParser, Reader, StreamParser};
-
-/// Test Reader that reads from a byte slice in small chunks
-struct ChunkReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-    chunk_size: usize,
-}
-
-impl<'a> ChunkReader<'a> {
-    fn new(data: &'a [u8], chunk_size: usize) -> Self {
-        Self {
-            data,
-            pos: 0,
-            chunk_size,
-        }
-    }
-}
-
-impl Reader for ChunkReader<'_> {
-    type Error = ();
-
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        let remaining = &self.data[self.pos..];
-        let to_copy = buf.len().min(remaining.len()).min(self.chunk_size);
-        buf[..to_copy].copy_from_slice(&remaining[..to_copy]);
-        self.pos += to_copy;
-        Ok(to_copy)
-    }
-}
+use picojson::{ArrayBitStack, BitStackStruct, ChunkReader, Event, PullParser, StreamParser};
 
 #[test]
 fn test_stream_parser_default_config() {

@@ -1,40 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use picojson::{Event, JsonNumber, NumberResult, PullParser, Reader, StreamParser};
-
-// --- Readers for Testing ---
-
-/// Reader that provides data in fixed-size chunks.
-struct FixedChunkReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-    chunk_size: usize,
-}
-
-impl<'a> FixedChunkReader<'a> {
-    fn new(data: &'a [u8], chunk_size: usize) -> Self {
-        Self {
-            data,
-            pos: 0,
-            chunk_size: chunk_size.max(1),
-        }
-    }
-}
-
-impl<'a> Reader for FixedChunkReader<'a> {
-    type Error = ();
-
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let remaining = self.data.len().saturating_sub(self.pos);
-        if remaining == 0 {
-            return Ok(0);
-        }
-        let to_copy = remaining.min(buf.len()).min(self.chunk_size);
-        buf[..to_copy].copy_from_slice(&self.data[self.pos..self.pos + to_copy]);
-        self.pos += to_copy;
-        Ok(to_copy)
-    }
-}
+use picojson::{ChunkReader, Event, JsonNumber, NumberResult, PullParser, Reader, StreamParser};
 
 /// Reader that provides data in chunks of varying sizes, following a repeating pattern.
 struct VariableChunkReader<'a> {
@@ -222,7 +188,7 @@ fn test_stress_buffer_sizes_with_full_reads() {
         let chunk_size = scenario.json.len() + 1; // Read entire JSON at once
 
         for buffer_size in 1..=40 {
-            let reader = FixedChunkReader::new(scenario.json, chunk_size);
+            let reader = ChunkReader::new(scenario.json, chunk_size);
             let result = test_parsing_with_config(scenario, buffer_size, reader);
             let expected_success = should_succeed(buffer_size, scenario.min_buffer_size);
 
@@ -258,7 +224,7 @@ fn test_stress_chunk_sizes_with_adequate_buffer() {
         let chunk_sizes = [1, 2, 3, 5, 8, 10, 15, 28, 50];
 
         for &chunk_size in &chunk_sizes {
-            let reader = FixedChunkReader::new(scenario.json, chunk_size);
+            let reader = ChunkReader::new(scenario.json, chunk_size);
             let result = test_parsing_with_config(scenario, buffer_size, reader);
 
             match result {
@@ -283,7 +249,7 @@ fn test_stress_matrix_critical_sizes() {
 
         for &buffer_size in &critical_buffer_sizes {
             for &chunk_size in &chunk_sizes {
-                let reader = FixedChunkReader::new(scenario.json, chunk_size);
+                let reader = ChunkReader::new(scenario.json, chunk_size);
                 let result = test_parsing_with_config(scenario, buffer_size, reader);
                 let expected_success = should_succeed(buffer_size, scenario.min_buffer_size);
 
