@@ -22,7 +22,7 @@ Choose what happens when floats are encountered:
 - **Default**: Return `FloatDisabled` with raw string preserved for manual parsing
 - **`float-error`**: Fail parsing when floats are encountered (embedded fail-fast)
 - **`float-truncate`**: Truncate simple decimals to integers (1.7 → 1, errors on scientific notation)
-- **`float-skip`**: Skip float values during parsing (continue with next token) [TODO]
+- **`float-skip`**: Skip float values during parsing (continue with next token)
 
 ## Configuration Examples
 
@@ -63,37 +63,58 @@ picojson = { path = "../picojson", features = ["int64"] }
 
 ## API Usage
 
-All configurations preserve the exact raw string while providing different parsed representations:
+All configurations preserve the exact raw string of a number, while providing different parsed representations through the `JsonNumber` enum. The `parsed()` method on `JsonNumber` returns a `NumberResult` which can be matched to handle all possible outcomes.
 
 ```rust
+use picojson::{Event, JsonNumber, NumberResult};
+
+// In your parsing loop:
 match event {
     Event::Number(num) => {
-        // Raw string always available (exact precision)
-        println!("Raw: {}", num.as_str());
+        // The raw string is always available for full precision.
+        println!("Raw number: {}", num.as_str());
 
-        // Parsed value depends on configuration
-        match num.parsed {
-            NumberResult::Integer(i) => println!("Integer: {}", i),
-            NumberResult::IntegerOverflow => println!("Overflow: {}", num.as_str()),
-
-            #[cfg(feature = "float")]
-            NumberResult::Float(f) => println!("Float: {}", f),
-
-            #[cfg(all(not(feature = "float"), feature = "float-truncate"))]
-            NumberResult::FloatTruncated(i) => println!("Truncated: {}", i),
-
-            #[cfg(not(feature = "float"))]
+        // Match on the result of `num.parsed()` to handle different outcomes.
+        match num.parsed() {
+            NumberResult::Integer(i) => {
+                // This variant is used for integers that fit within the configured size (i32/i64).
+                println!("Parsed as integer: {}", i);
+            }
+            NumberResult::Float(f) => {
+                // This variant is only available if the "float" feature is enabled.
+                println!("Parsed as float: {}", f);
+            }
+            NumberResult::IntegerOverflow => {
+                // Used when an integer exceeds the configured size (e.g., > i32::MAX on an i32 build).
+                println!("Integer overflow! Raw value: {}", num.as_str());
+            }
             NumberResult::FloatDisabled => {
-                // Manual parsing still available
-                let manual: f64 = num.parse().unwrap();
+                // Used when the "float" feature is disabled and no other float-handling
+                // feature (like truncate or error) is active.
+                println!("Float parsing is disabled. Raw value: {}", num.as_str());
+            }
+            NumberResult::FloatTruncated(i) => {
+                // Used with the "float-truncate" feature for simple decimals.
+                println!("Float was truncated to integer: {}", i);
+            }
+            NumberResult::FloatSkipped => {
+                // This variant is used with the "float-skip" feature.
+                println!("Float value was skipped.");
             }
         }
 
-        // Convenience methods adapt to configuration
+        // Convenience methods are also available.
         if let Some(int_val) = num.as_int() {
-            println!("As configured int: {}", int_val);
+            // This will only return Some if the number was successfully parsed as an integer
+            // within the configured size.
+            println!("Successfully read as integer: {}", int_val);
+        }
+        if let Some(float_val) = num.as_f64() {
+            // This will only return Some if the "float" feature is enabled.
+            println!("Successfully read as float: {}", float_val);
         }
     }
+    _ => {}
 }
 ```
 
