@@ -115,7 +115,7 @@ pub enum Event<'a, 'b> {
     EndArray,
     Key(String<'a, 'b>),
     String(String<'a, 'b>),
-    Number(JsonNumber<'a>),
+    Number(JsonNumber<'a, 'b>),
     Bool(bool),
     Null,
 }
