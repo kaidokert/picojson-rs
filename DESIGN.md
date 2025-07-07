@@ -101,9 +101,9 @@ pub enum String<'a, 'b> {
 }
 
 // The custom number type for flexible parsing
-pub enum JsonNumber<'a> {
-    Borrowed { raw: &'a str, ... },
-    // ... other variants for parsed numbers
+pub enum JsonNumber<'a, 'b> {
+    Borrowed { raw: &'a str, parsed: NumberResult },
+    Copied { raw: &'b str, parsed: NumberResult },
 }
 
 // The events yielded by the iterator
@@ -148,7 +148,7 @@ pub trait Reader {
 
 The `StreamParser` takes an implementation of this `Reader` and an internal buffer, processing the input as data becomes available. This allows for efficient parsing of large JSON documents with a small, fixed-size memory footprint.
 
-For convenience, the crate provides `picojson::ChunkReader`, a panic-free `Reader` implementation for parsing from byte slices, which is mostlt useful for testing and examples.
+For convenience, the crate provides `picojson::ChunkReader`, a panic-free `Reader` implementation for parsing from byte slices, which is mostly useful for testing and examples.
 
 ## 7. Ergonomics and Returned Values
 
