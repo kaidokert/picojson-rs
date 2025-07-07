@@ -148,7 +148,7 @@ pub trait Reader {
 
 The `StreamParser` takes an implementation of this `Reader` and an internal buffer, processing the input as data becomes available. This allows for efficient parsing of large JSON documents with a small, fixed-size memory footprint.
 
-For convenience, the crate provides `picojson::ChunkReader`, a panic-free `Reader` implementation for parsing from byte slices, which is especially useful for testing and examples.
+For convenience, the crate provides `picojson::ChunkReader`, a panic-free `Reader` implementation for parsing from byte slices, which is mostlt useful for testing and examples.
 
 ## 7. Ergonomics and Returned Values
 
