@@ -33,4 +33,9 @@ float-skip = []         # Skip float values during parsing (continue with next t
 float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
 
-[dependencies]
+# Remote conformance testing
+remote-tests = []
+
+[build-dependencies]
+ureq = { version = "2.0" }
+zip = { version = "0.6" }
