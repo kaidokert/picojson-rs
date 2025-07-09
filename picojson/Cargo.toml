@@ -34,8 +34,8 @@ float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
 
 # Remote conformance testing
-remote-tests = []
+remote-tests = ["dep:ureq", "dep:zip"]
 
 [build-dependencies]
-ureq = { version = "2.0" }
-zip = { version = "0.6" }
+ureq = { version = "2.0", optional = true }
+zip = { version = "0.6", optional = true }
