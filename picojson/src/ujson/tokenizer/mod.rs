@@ -929,9 +929,13 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Object::Colon,
                     },
                     b':',
-                ) => State::Object {
-                    expect: Object::Value,
-                },
+                ) => {
+                    // Reset the after_comma flag when starting a new object value to avoid false trailing comma errors in nested containers
+                    self.context.after_comma = None;
+                    State::Object {
+                        expect: Object::Value,
+                    }
+                }
                 (
                     State::Object {
                         expect: Object::CommaOrEnd,
@@ -1443,6 +1447,13 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_array_with_whitespace() {
+        let mut m: [Event; 2] = core::array::from_fn(|_| Event::Uninitialized);
+        let r = collect(&mut Tokenizer::new(), b"[ ]", &mut m);
+        assert_eq!(r, (3, [Event::ArrayStart, Event::ArrayEnd].as_slice()));
+    }
+
+    #[test]
     fn test_array_with_trailing_comma() {
         let mut m: [Event; 6] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b"[1,]", &mut m);
@@ -1461,6 +1472,105 @@ mod tests {
         let mut m: [Event; 16] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b"{ \"d\": [\"f\",\"b\",] }", &mut m);
         assert_eq!(r, Error::new(ErrKind::TrailingComma, b',', 15));
+    }
+
+    #[test]
+    fn test_comma_resets_before_containers() {
+        // This test reproduces a bug where the `after_comma` flag was not being reset
+        // after a key-value pair, causing a subsequent container to be misinterpreted
+        // as a trailing comma error.
+
+        // Test case 1: Object after a comma
+        let mut m1: [Event; 10] = core::array::from_fn(|_| Event::Uninitialized);
+        let r1 = collect(&mut Tokenizer::new(), b"{\"a\":1,\"b\":{}}", &mut m1);
+        assert_eq!(
+            r1,
+            (
+                14,
+                [
+                    Event::ObjectStart,
+                    Event::Begin(EventToken::Key),
+                    Event::End(EventToken::Key),
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::Number),
+                    Event::Begin(EventToken::Key),
+                    Event::End(EventToken::Key),
+                    Event::ObjectStart,
+                    Event::ObjectEnd,
+                    Event::ObjectEnd,
+                ]
+                .as_slice()
+            )
+        );
+
+        // Test case 2: Array after a comma
+        let mut m2: [Event; 10] = core::array::from_fn(|_| Event::Uninitialized);
+        let r2 = collect(&mut Tokenizer::new(), b"{\"a\":1,\"b\":[]}", &mut m2);
+        assert_eq!(
+            r2,
+            (
+                14,
+                [
+                    Event::ObjectStart,
+                    Event::Begin(EventToken::Key),
+                    Event::End(EventToken::Key),
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::Number),
+                    Event::Begin(EventToken::Key),
+                    Event::End(EventToken::Key),
+                    Event::ArrayStart,
+                    Event::ArrayEnd,
+                    Event::ObjectEnd,
+                ]
+                .as_slice()
+            )
+        );
+    }
+
+    #[test]
+    fn test_comma_resets_before_nested_containers_in_array() {
+        // Verify that the `after_comma` flag is correctly reset before starting
+        // a nested container within an array.
+
+        // Test case 1: Nested array after a comma
+        let mut m1: [Event; 8] = core::array::from_fn(|_| Event::Uninitialized);
+        let r1 = collect(&mut Tokenizer::new(), b"[1,[2]]", &mut m1);
+        assert_eq!(
+            r1,
+            (
+                7,
+                [
+                    Event::ArrayStart,
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::Number),
+                    Event::ArrayStart,
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::NumberAndArray),
+                    Event::ArrayEnd,
+                    Event::ArrayEnd,
+                ]
+                .as_slice()
+            )
+        );
+
+        // Test case 2: Nested object after a comma
+        let mut m2: [Event; 8] = core::array::from_fn(|_| Event::Uninitialized);
+        let r2 = collect(&mut Tokenizer::new(), b"[1,{}]", &mut m2);
+        assert_eq!(
+            r2,
+            (
+                6,
+                [
+                    Event::ArrayStart,
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::Number),
+                    Event::ObjectStart,
+                    Event::ObjectEnd,
+                    Event::ArrayEnd,
+                ]
+                .as_slice()
+            )
+        );
     }
 
     #[test]
