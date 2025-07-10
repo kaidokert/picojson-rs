@@ -1528,6 +1528,52 @@ mod tests {
     }
 
     #[test]
+    fn test_comma_resets_before_nested_containers_in_array() {
+        // Verify that the `after_comma` flag is correctly reset before starting
+        // a nested container within an array.
+
+        // Test case 1: Nested array after a comma
+        let mut m1: [Event; 8] = core::array::from_fn(|_| Event::Uninitialized);
+        let r1 = collect(&mut Tokenizer::new(), b"[1,[2]]", &mut m1);
+        assert_eq!(
+            r1,
+            (
+                7,
+                [
+                    Event::ArrayStart,
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::Number),
+                    Event::ArrayStart,
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::NumberAndArray),
+                    Event::ArrayEnd,
+                    Event::ArrayEnd,
+                ]
+                .as_slice()
+            )
+        );
+
+        // Test case 2: Nested object after a comma
+        let mut m2: [Event; 8] = core::array::from_fn(|_| Event::Uninitialized);
+        let r2 = collect(&mut Tokenizer::new(), b"[1,{}]", &mut m2);
+        assert_eq!(
+            r2,
+            (
+                6,
+                [
+                    Event::ArrayStart,
+                    Event::Begin(EventToken::Number),
+                    Event::End(EventToken::Number),
+                    Event::ObjectStart,
+                    Event::ObjectEnd,
+                    Event::ArrayEnd,
+                ]
+                .as_slice()
+            )
+        );
+    }
+
+    #[test]
     fn test_unicode_escape() {
         let mut m: [Event; 5] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect(&mut Tokenizer::new(), b"\"\\u0041\"", &mut m);
