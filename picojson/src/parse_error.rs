@@ -77,19 +77,8 @@ impl core::fmt::Display for ParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ParseError::TokenizerError(e) => write!(f, "{}", e),
-            ParseError::ScratchBufferFull => write!(f, "Scratch buffer is full"),
-            ParseError::InvalidUtf8(e) => write!(f, "Invalid UTF-8 sequence: {}", e),
-            ParseError::InvalidNumber => write!(f, "Invalid number format"),
-            ParseError::Unexpected(e) => write!(f, "Unexpected parser state: {:?}", e),
-            ParseError::EndOfData => write!(f, "Unexpected end of data"),
-            ParseError::InvalidUnicodeHex => {
-                write!(f, "Invalid hexadecimal digit in Unicode escape")
-            }
-            ParseError::InvalidUnicodeCodepoint => write!(f, "Invalid Unicode codepoint"),
-            ParseError::InvalidEscapeSequence => write!(f, "Invalid escape sequence"),
-            ParseError::FloatNotAllowed => write!(f, "Floating point numbers are not allowed"),
-            ParseError::ReaderError => write!(f, "Underlying reader error"),
-            ParseError::NumericOverflow => write!(f, "Numeric overflow detected"),
+            ParseError::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {}", e),
+            _ => write!(f, "{:?}", self),
         }
     }
 }

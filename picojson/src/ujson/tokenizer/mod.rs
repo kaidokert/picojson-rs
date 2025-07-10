@@ -221,7 +221,7 @@ impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "Tokenizer error: {:?} at position {} near '{}'",
+            "Tokenizer error: {:?} at position {} near {:?}",
             self.kind, self.position, self.character as char
         )
     }
