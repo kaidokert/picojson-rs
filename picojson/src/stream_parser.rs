@@ -139,8 +139,8 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                             }
                         };
 
-                        if self.tokenizer.finish(&mut callback).is_err() {
-                            return Err(ParseError::TokenizerError);
+                        if let Err(e) = self.tokenizer.finish(&mut callback) {
+                            return Err(ParseError::TokenizerError(e));
                         }
                     }
 
@@ -165,8 +165,8 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                         }
                     };
 
-                    if self.tokenizer.parse_chunk(&[byte], &mut callback).is_err() {
-                        return Err(ParseError::TokenizerError);
+                    if let Err(e) = self.tokenizer.parse_chunk(&[byte], &mut callback) {
+                        return Err(ParseError::TokenizerError(e));
                     }
 
                     // Special case processing removed - let all escape handling go through event system

@@ -257,8 +257,8 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
             Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
         };
 
-        if let Err(_tokenizer_error) = res {
-            return Err(ParseError::TokenizerError);
+        if let Err(tokenizer_error) = res {
+            return Err(ParseError::TokenizerError(tokenizer_error));
         }
         Ok(())
     }

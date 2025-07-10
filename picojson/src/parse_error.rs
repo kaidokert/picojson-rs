@@ -4,11 +4,13 @@ use crate::shared::UnexpectedState;
 use crate::slice_input_buffer;
 use crate::stream_buffer;
 
+use crate::ujson;
+
 /// Errors that can occur during JSON parsing
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
     /// An error bubbled up from the underlying tokenizer.
-    TokenizerError,
+    TokenizerError(ujson::Error),
     /// The provided scratch buffer was not large enough for an operation.
     ScratchBufferFull,
     /// A string slice was not valid UTF-8.
@@ -68,6 +70,16 @@ impl From<core::str::Utf8Error> for ParseError {
 impl From<UnexpectedState> for ParseError {
     fn from(info: UnexpectedState) -> Self {
         ParseError::Unexpected(info)
+    }
+}
+
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseError::TokenizerError(e) => write!(f, "{}", e),
+            ParseError::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {}", e),
+            _ => write!(f, "{:?}", self),
+        }
     }
 }
 

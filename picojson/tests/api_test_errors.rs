@@ -11,7 +11,7 @@ fn test_malformed_json_missing_quotes() {
 
     // Should fail when parsing the unquoted key
     match parser.next_event() {
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Expected - tokenizer should reject unquoted keys
         }
         other => panic!("Expected TokenizerError for unquoted key, got: {:?}", other),
@@ -31,7 +31,7 @@ fn test_malformed_json_unterminated_string() {
 
     // Should fail when trying to parse the unterminated string
     match parser.next_event() {
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Expected behavior
         }
         other => panic!(
@@ -58,7 +58,7 @@ fn test_malformed_json_invalid_escape() {
         Err(ParseError::InvalidEscapeSequence) => {
             // Expected behavior
         }
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Also acceptable - tokenizer might catch this first
         }
         other => panic!("Expected escape sequence error, got: {:?}", other),
@@ -82,7 +82,7 @@ fn test_malformed_json_invalid_unicode_escape() {
         Err(ParseError::InvalidUnicodeHex) => {
             // Expected behavior
         }
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Also acceptable - tokenizer might catch this first
         }
         other => panic!("Expected Unicode hex error, got: {:?}", other),
@@ -123,7 +123,7 @@ fn test_empty_input_error() {
         Err(ParseError::EndOfData) => {
             // This is also acceptable
         }
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // This is also acceptable
         }
         other => panic!("Unexpected result for empty input: {:?}", other),
@@ -145,7 +145,7 @@ fn test_incomplete_json_error() {
 
     // Should fail when trying to find the value or colon
     match parser.next_event() {
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Expected behavior when tokenizer hits end unexpectedly
         }
         Err(ParseError::EndOfData) => {
@@ -178,7 +178,7 @@ fn test_malformed_json_unexpected_comma() {
         Ok(Event::EndObject) => {
             // Parser accepts trailing comma (lenient behavior)
         }
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Strict parser would reject trailing comma
         }
         other => panic!(
@@ -201,7 +201,7 @@ fn test_malformed_json_invalid_number() {
 
     // Should fail on invalid number format
     match parser.next_event() {
-        Err(ParseError::TokenizerError) => {
+        Err(ParseError::TokenizerError(_)) => {
             // Expected behavior
         }
         other => panic!(

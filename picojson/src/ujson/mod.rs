@@ -14,6 +14,7 @@ pub use bitstack::DepthCounter;
 
 pub(super) use tokenizer::Tokenizer;
 
+pub use tokenizer::Error;
 pub(super) use tokenizer::Event;
 pub(super) use tokenizer::EventToken;
 
