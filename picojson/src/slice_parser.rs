@@ -207,6 +207,10 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         &mut self,
         escape_char: u8,
     ) -> Result<Option<Event<'_, '_>>, ParseError> {
+        // Clear any pending high surrogate state when we encounter a simple escape
+        // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
+        self.unicode_escape_collector.reset_all();
+
         if let State::String(_) | State::Key(_) = self.parser_state.state {
             self.copy_on_escape
                 .handle_escape(self.buffer.current_pos(), escape_char)?;
@@ -220,17 +224,36 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
+        // Check if we had a pending high surrogate before processing
+        let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
+
         let mut utf8_buf = [0u8; 4];
-        let (utf8_bytes, escape_start_pos) =
-            crate::escape_processor::process_unicode_escape_sequence(
+        let (utf8_bytes_opt, escape_start_pos) =
+            crate::escape_processor::process_unicode_escape_sequence_with_surrogate_support(
                 current_pos,
                 &mut self.unicode_escape_collector,
                 hex_slice_provider,
                 &mut utf8_buf,
             )?;
 
-        self.copy_on_escape
-            .handle_unicode_escape(escape_start_pos, utf8_bytes)
+        // Only process UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
+        if let Some(utf8_bytes) = utf8_bytes_opt {
+            if had_pending_high_surrogate {
+                // This is completing a surrogate pair - need to consume both escapes
+                // First call: consume the high surrogate (6 bytes earlier)
+                self.copy_on_escape
+                    .handle_unicode_escape(escape_start_pos, &[])?;
+                // Second call: consume the low surrogate and write UTF-8
+                self.copy_on_escape
+                    .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+            } else {
+                // Single Unicode escape - normal processing
+                self.copy_on_escape
+                    .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn pull_tokenizer_events(&mut self) -> Result<(), ParseError> {
@@ -890,5 +913,117 @@ mod tests {
 
         // Should have successfully parsed a 5-level deep structure
         assert_eq!(depth, 0); // All objects should be closed
+    }
+
+    // Note: Basic surrogate pair tests moved to tests/surrogate_pairs.rs for shared testing
+    // This ensures both SliceParser and StreamParser handle surrogate pairs identically
+
+    #[test]
+    fn test_surrogate_pair_pathological_cases() {
+        // Test 1: High surrogate at end of string (returns literal text, doesn't error)
+        let input1 = r#"["\uD801"]"#;
+        let mut scratch1 = [0u8; 1024];
+        let mut parser1 = SliceParser::with_buffer(input1, &mut scratch1);
+        assert_eq!(parser1.next_event(), Ok(Event::StartArray));
+        match parser1.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    String::Borrowed(c) => c,
+                    String::Unescaped(c) => c,
+                };
+                // High surrogate at end becomes literal text (not an error)
+                assert_eq!(content, "\\uD801");
+            }
+            other => panic!(
+                "Expected String with literal high surrogate, got: {:?}",
+                other
+            ),
+        }
+
+        // Test 2: High surrogate followed by another high surrogate
+        let input2 = r#"["\uD801\uD802"]"#;
+        let mut scratch2 = [0u8; 1024];
+        let mut parser2 = SliceParser::with_buffer(input2, &mut scratch2);
+        assert_eq!(parser2.next_event(), Ok(Event::StartArray));
+        let result2 = parser2.next_event();
+        assert!(
+            result2.is_err(),
+            "High surrogate + high surrogate should error"
+        );
+
+        // Test 3: Multiple valid surrogate pairs
+        let input3 = r#"["\uD801\uDC37\uD834\uDD1E"]"#;
+        let mut scratch3 = [0u8; 1024];
+        let mut parser3 = SliceParser::with_buffer(input3, &mut scratch3);
+        assert_eq!(parser3.next_event(), Ok(Event::StartArray));
+        match parser3.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    String::Borrowed(c) => c,
+                    String::Unescaped(c) => c,
+                };
+                // Should contain two characters: U+10437 (𐐷) + U+1D11E (𝄞)
+                assert_eq!(content.chars().count(), 2);
+                let chars: Vec<char> = content.chars().collect();
+                assert_eq!(chars[0] as u32, 0x10437); // 𐐷
+                assert_eq!(chars[1] as u32, 0x1D11E); // 𝄞 (musical G clef)
+            }
+            other => panic!(
+                "Expected String with multiple surrogate pairs, got: {:?}",
+                other
+            ),
+        }
+
+        // Test 4: Surrogate pairs in object keys
+        let input4 = r#"{"\uD801\uDC37": "value"}"#;
+        let mut scratch4 = [0u8; 1024];
+        let mut parser4 = SliceParser::with_buffer(input4, &mut scratch4);
+        assert_eq!(parser4.next_event(), Ok(Event::StartObject));
+        match parser4.next_event() {
+            Ok(Event::Key(s)) => {
+                let content = match s {
+                    String::Borrowed(c) => c,
+                    String::Unescaped(c) => c,
+                };
+                assert_eq!(content, "𐐷");
+            }
+            other => panic!("Expected Key with surrogate pair, got: {:?}", other),
+        }
+
+        // Test 5: High surrogate interrupted by other escape
+        // Fixed: Now properly errors when \n interrupts surrogate pair
+        // The \uDC37 should be treated as lone low surrogate after \n interruption
+        let input5 = r#"["\uD801\n\uDC37"]"#;
+        let mut scratch5 = [0u8; 1024];
+        let mut parser5 = SliceParser::with_buffer(input5, &mut scratch5);
+        assert_eq!(parser5.next_event(), Ok(Event::StartArray));
+        let result5 = parser5.next_event();
+        assert!(
+            result5.is_err(),
+            "High surrogate interrupted by other escape should error (lone low surrogate)"
+        );
+
+        // Test 6: Characters outside surrogate ranges (should work normally)
+        let input6 = r#"["\uD7FF\uE000"]"#; // D7FF is just below high range, E000 is just above low range
+        let mut scratch6 = [0u8; 1024];
+        let mut parser6 = SliceParser::with_buffer(input6, &mut scratch6);
+        assert_eq!(parser6.next_event(), Ok(Event::StartArray));
+        match parser6.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    String::Borrowed(c) => c,
+                    String::Unescaped(c) => c,
+                };
+                // Should be two separate characters, not a surrogate pair
+                assert_eq!(content.chars().count(), 2);
+                let chars: Vec<char> = content.chars().collect();
+                assert_eq!(chars[0] as u32, 0xD7FF); // Just below high surrogate range
+                assert_eq!(chars[1] as u32, 0xE000); // Just above low surrogate range
+            }
+            other => panic!(
+                "Expected String with non-surrogate Unicode, got: {:?}",
+                other
+            ),
+        }
     }
 }

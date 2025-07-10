@@ -7,6 +7,7 @@ use crate::stream_buffer::StreamBuffer;
 use crate::{ujson, PullParser};
 use ujson::{EventToken, Tokenizer};
 
+use log::trace;
 use ujson::{BitStackConfig, DefaultConfig};
 
 /// Trait for input sources that can provide data to the streaming parser.
@@ -607,8 +608,24 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
             };
 
             // Normal byte accumulation - all escape processing now goes through event system
-            if !in_escape && self.stream_buffer.has_unescaped_content() {
+            // Skip writing bytes to escape buffer when we have a pending high surrogate
+            // (prevents literal \uD801 text from being included in final string)
+            if !in_escape
+                && self.stream_buffer.has_unescaped_content()
+                && !self.unicode_escape_collector.has_pending_high_surrogate()
+            {
+                trace!(
+                    "Appending normal byte to escape buffer: {:?} ('{}')",
+                    byte,
+                    byte as char
+                );
                 self.append_byte_to_escape_buffer(byte)?;
+            } else if !in_escape && self.stream_buffer.has_unescaped_content() {
+                trace!(
+                    "SKIPPING byte due to pending high surrogate: {:?} ('{}')",
+                    byte,
+                    byte as char
+                );
             }
         }
 
@@ -617,6 +634,11 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
     /// Start escape processing using StreamBuffer
     fn start_escape_processing(&mut self) -> Result<(), ParseError> {
+        trace!(
+            "start_escape_processing called, has_pending_surrogate={}",
+            self.unicode_escape_collector.has_pending_high_surrogate()
+        );
+
         // Update escape state in enum
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -628,6 +650,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
         // Initialize escape processing with StreamBuffer if not already started
         if !self.stream_buffer.has_unescaped_content() {
+            trace!("Initializing escape buffer for first escape");
             if let crate::shared::State::String(start_pos) | crate::shared::State::Key(start_pos) =
                 self.parser_state.state
             {
@@ -636,7 +659,13 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 // With content tracking, start_pos is the content_start
                 let content_start = start_pos;
                 // Content to copy ends right before the escape character
-                let content_end = ContentRange::end_position_excluding_delimiter(current_pos);
+                let content_end = if self.unicode_escape_collector.has_pending_high_surrogate() {
+                    // Skip copying high surrogate text when processing low surrogate
+                    trace!("Skipping high surrogate text copy due to pending surrogate");
+                    content_start
+                } else {
+                    ContentRange::end_position_excluding_delimiter(current_pos)
+                };
 
                 // Estimate max length needed for unescaping (content so far + remaining buffer)
                 let content_len = content_end.wrapping_sub(content_start);
@@ -647,6 +676,12 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     .ok_or(ParseError::NumericOverflow)?;
 
                 // Start unescaping with StreamBuffer and copy existing content
+                trace!(
+                    "Copying content to escape buffer: start={}, end={}, len={}",
+                    content_start,
+                    content_end,
+                    content_end.wrapping_sub(content_start)
+                );
                 self.stream_buffer.start_unescaping_with_copy(
                     max_escaped_len,
                     content_start,
@@ -660,6 +695,10 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
     /// Handle simple escape sequence using unified EscapeProcessor
     fn handle_simple_escape(&mut self, escape_token: &EventToken) -> Result<(), ParseError> {
+        // Clear any pending high surrogate state when we encounter a simple escape
+        // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
+        self.unicode_escape_collector.reset_all();
+
         // Update escape state in enum
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -679,6 +718,11 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
     /// Extracts hex digits from buffer and processes them through the collector
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
+        trace!(
+            "process_unicode_escape_with_collector called, has_pending_surrogate={}",
+            self.unicode_escape_collector.has_pending_high_surrogate()
+        );
+
         // Update escape state in enum - Unicode escape processing is complete
         if let ProcessingState::Active {
             ref mut in_escape_sequence,
@@ -697,22 +741,34 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
             };
 
             let mut utf8_buf = [0u8; 4];
-            let (utf8_bytes, _escape_start_pos) =
-                crate::escape_processor::process_unicode_escape_sequence(
+            let (utf8_bytes_opt, _escape_start_pos) =
+                crate::escape_processor::process_unicode_escape_sequence_with_surrogate_support(
                     current_pos,
                     &mut self.unicode_escape_collector,
                     hex_slice_provider,
                     &mut utf8_buf,
                 )?;
-            let mut copy = [0u8; 4];
-            let len = utf8_bytes.len();
-            if let Some(dest) = copy.get_mut(..len) {
-                dest.copy_from_slice(utf8_bytes);
+            if let Some(utf8_bytes) = utf8_bytes_opt {
+                trace!("Unicode escape produced UTF-8 bytes: {:?}", utf8_bytes);
+                let mut copy = [0u8; 4];
+                let len = utf8_bytes.len();
+                if let Some(dest) = copy.get_mut(..len) {
+                    dest.copy_from_slice(utf8_bytes);
+                }
+                (copy, len)
+            } else {
+                // High surrogate waiting for low surrogate - no UTF-8 bytes to process
+                trace!("Unicode escape is high surrogate - no UTF-8 bytes yet");
+                ([0u8; 4], 0)
             }
-            (copy, len)
         };
 
         if let Some(bytes_to_copy) = utf8_bytes_copy.0.get(..utf8_bytes_copy.1) {
+            trace!(
+                "Writing {} UTF-8 bytes to escape buffer: {:?}",
+                bytes_to_copy.len(),
+                bytes_to_copy
+            );
             for &byte in bytes_to_copy {
                 self.append_byte_to_escape_buffer(byte)?;
             }
@@ -1778,5 +1834,219 @@ mod tests {
     fn test_minimal_buffer_simple_escape_3() {
         // Buffer size 24 - known working boundary from stress tests
         test_simple_escape_with_buffer_size(24).expect("24-byte buffer should definitely work");
+    }
+
+    // Note: Basic surrogate pair tests moved to tests/surrogate_pairs.rs for shared testing
+    // This ensures both SliceParser and StreamParser handle surrogate pairs identically
+
+    #[test]
+    fn test_surrogate_pair_pathological_cases() {
+        // Test 1: High surrogate at end of string (returns literal text, doesn't error)
+        let input1 = r#"["\uD801"]"#;
+        let mut buffer1 = [0u8; 1024];
+        let reader1 = crate::chunk_reader::ChunkReader::new(input1.as_bytes(), 8);
+        let mut parser1 = StreamParser::<_, DefaultConfig>::with_config(reader1, &mut buffer1);
+        assert_eq!(parser1.next_event(), Ok(Event::StartArray));
+        match parser1.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    crate::String::Borrowed(c) => c,
+                    crate::String::Unescaped(c) => c,
+                };
+                // High surrogate at end becomes literal text (not an error)
+                assert_eq!(content, "\\uD801");
+            }
+            other => panic!(
+                "Expected String with literal high surrogate, got: {:?}",
+                other
+            ),
+        }
+
+        // Test 2: High surrogate followed by another high surrogate
+        let input2 = r#"["\uD801\uD802"]"#;
+        let mut buffer2 = [0u8; 1024];
+        let reader2 = crate::chunk_reader::ChunkReader::new(input2.as_bytes(), 8);
+        let mut parser2 = StreamParser::<_, DefaultConfig>::with_config(reader2, &mut buffer2);
+        assert_eq!(parser2.next_event(), Ok(Event::StartArray));
+        let result2 = parser2.next_event();
+        assert!(
+            result2.is_err(),
+            "High surrogate + high surrogate should error"
+        );
+
+        // Test 3: Multiple valid surrogate pairs
+        let input3 = r#"["\uD801\uDC37\uD834\uDD1E"]"#;
+        let mut buffer3 = [0u8; 1024];
+        let reader3 = crate::chunk_reader::ChunkReader::new(input3.as_bytes(), 8);
+        let mut parser3 = StreamParser::<_, DefaultConfig>::with_config(reader3, &mut buffer3);
+        assert_eq!(parser3.next_event(), Ok(Event::StartArray));
+        match parser3.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    crate::String::Borrowed(c) => c,
+                    crate::String::Unescaped(c) => c,
+                };
+                // Should contain two characters: U+10437 (𐐷) + U+1D11E (𝄞)
+                assert_eq!(content.chars().count(), 2);
+                let chars: Vec<char> = content.chars().collect();
+                assert_eq!(chars[0] as u32, 0x10437); // 𐐷
+                assert_eq!(chars[1] as u32, 0x1D11E); // 𝄞 (musical G clef)
+            }
+            other => panic!(
+                "Expected String with multiple surrogate pairs, got: {:?}",
+                other
+            ),
+        }
+
+        // Test 4: Surrogate pairs in object keys
+        let input4 = r#"{"\uD801\uDC37": "value"}"#;
+        let mut buffer4 = [0u8; 1024];
+        let reader4 = crate::chunk_reader::ChunkReader::new(input4.as_bytes(), 8);
+        let mut parser4 = StreamParser::<_, DefaultConfig>::with_config(reader4, &mut buffer4);
+        assert_eq!(parser4.next_event(), Ok(Event::StartObject));
+        match parser4.next_event() {
+            Ok(Event::Key(s)) => {
+                let content = match s {
+                    crate::String::Borrowed(c) => c,
+                    crate::String::Unescaped(c) => c,
+                };
+                assert_eq!(content, "𐐷");
+            }
+            other => panic!("Expected Key with surrogate pair, got: {:?}", other),
+        }
+
+        // Test 5: High surrogate interrupted by other escape
+        // Fixed: Now properly errors when \n interrupts surrogate pair
+        // The \uDC37 should be treated as lone low surrogate after \n interruption
+        let input5 = r#"["\uD801\n\uDC37"]"#;
+        let mut buffer5 = [0u8; 1024];
+        let reader5 = crate::chunk_reader::ChunkReader::new(input5.as_bytes(), 8);
+        let mut parser5 = StreamParser::<_, DefaultConfig>::with_config(reader5, &mut buffer5);
+        assert_eq!(parser5.next_event(), Ok(Event::StartArray));
+        let result5 = parser5.next_event();
+        assert!(
+            result5.is_err(),
+            "High surrogate interrupted by other escape should error (lone low surrogate)"
+        );
+
+        // Test 6: Characters outside surrogate ranges (should work normally)
+        let input6 = r#"["\uD7FF\uE000"]"#; // D7FF is just below high range, E000 is just above low range
+        let mut buffer6 = [0u8; 1024];
+        let reader6 = crate::chunk_reader::ChunkReader::new(input6.as_bytes(), 8);
+        let mut parser6 = StreamParser::<_, DefaultConfig>::with_config(reader6, &mut buffer6);
+        assert_eq!(parser6.next_event(), Ok(Event::StartArray));
+        match parser6.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    crate::String::Borrowed(c) => c,
+                    crate::String::Unescaped(c) => c,
+                };
+                // Should be two separate characters, not a surrogate pair
+                assert_eq!(content.chars().count(), 2);
+                let chars: Vec<char> = content.chars().collect();
+                assert_eq!(chars[0] as u32, 0xD7FF); // Just below high surrogate range
+                assert_eq!(chars[1] as u32, 0xE000); // Just above low surrogate range
+            }
+            other => panic!(
+                "Expected String with non-surrogate Unicode, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_surrogate_pair_buffer_boundary_cases() {
+        // Test 7: Surrogate pair split across very small buffer chunks
+        let input7 = r#"["\uD801\uDC37"]"#;
+        let mut buffer7 = [0u8; 16]; // Small buffer
+        let reader7 = crate::chunk_reader::ChunkReader::new(input7.as_bytes(), 3); // Tiny chunks
+        let mut parser7 = StreamParser::<_, DefaultConfig>::with_config(reader7, &mut buffer7);
+        assert_eq!(parser7.next_event(), Ok(Event::StartArray));
+        match parser7.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    crate::String::Borrowed(c) => c,
+                    crate::String::Unescaped(c) => c,
+                };
+                assert_eq!(content, "𐐷");
+            }
+            other => panic!(
+                "Expected String with surrogate pair across buffer boundary, got: {:?}",
+                other
+            ),
+        }
+
+        // Test 8: Surrogate pair with small buffer (still needs minimum space)
+        let input8 = r#"["\uD801\uDC37"]"#;
+        let mut buffer8 = [0u8; 32]; // Small but sufficient buffer
+        let reader8 = crate::chunk_reader::ChunkReader::new(input8.as_bytes(), 6); // Split at surrogate boundary
+        let mut parser8 = StreamParser::<_, DefaultConfig>::with_config(reader8, &mut buffer8);
+        assert_eq!(parser8.next_event(), Ok(Event::StartArray));
+        match parser8.next_event() {
+            Ok(Event::String(s)) => {
+                let content = match s {
+                    crate::String::Borrowed(c) => c,
+                    crate::String::Unescaped(c) => c,
+                };
+                assert_eq!(content, "𐐷");
+            }
+            other => panic!(
+                "Expected String with surrogate pair at small buffer, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test_log::test]
+    fn test_surrogate_pair_debug() {
+        let input = r#"["\uD801\uDC37"]"#;
+        let mut buffer = [0u8; 1024];
+        let reader = crate::chunk_reader::ChunkReader::new(input.as_bytes(), 1024);
+        let mut parser = StreamParser::new(reader, &mut buffer);
+
+        trace!("=== Starting surrogate pair debug test ===");
+        trace!("Input: {}", input);
+
+        // Parse the array
+        match parser.next_event() {
+            Ok(Event::StartArray) => trace!("✓ StartArray"),
+            other => panic!("Expected StartArray, got: {:?}", other),
+        }
+
+        // Parse the string containing surrogate pair
+        match parser.next_event() {
+            Ok(Event::String(s)) => {
+                trace!("✓ String event received");
+                match s {
+                    crate::String::Borrowed(content) => {
+                        trace!("String content (borrowed): {:?}", content);
+                    }
+                    crate::String::Unescaped(content) => {
+                        trace!("String content (unescaped): {:?}", content);
+                        trace!("String as bytes: {:?}", content.as_bytes());
+
+                        // Check if it contains the expected character U+10437 (𐐷)
+                        let expected = "𐐷";
+                        if content == expected {
+                            trace!("✅ SUCCESS: String contains correct surrogate pair result");
+                        } else {
+                            trace!("❌ FAILURE: Expected '{}', got '{}'", expected, content);
+                        }
+                    }
+                }
+            }
+            other => panic!("Expected String, got: {:?}", other),
+        }
+
+        // Continue parsing
+        match parser.next_event() {
+            Ok(Event::EndArray) => trace!("✓ EndArray"),
+            other => panic!("Expected EndArray, got: {:?}", other),
+        }
+
+        match parser.next_event() {
+            Ok(Event::EndDocument) => trace!("✓ EndDocument"),
+            other => panic!("Expected EndDocument, got: {:?}", other),
+        }
     }
 }
