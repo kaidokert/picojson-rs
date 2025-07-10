@@ -930,6 +930,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b':',
                 ) => {
+                    // Reset the after_comma flag when starting a new object value to avoid false trailing comma errors in nested containers
                     self.context.after_comma = None;
                     State::Object {
                         expect: Object::Value,
