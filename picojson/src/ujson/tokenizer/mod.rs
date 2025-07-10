@@ -1485,7 +1485,7 @@ mod tests {
         assert_eq!(
             r1,
             (
-                12,
+                14,
                 [
                     Event::ObjectStart,
                     Event::Begin(EventToken::Key),
@@ -1508,7 +1508,7 @@ mod tests {
         assert_eq!(
             r2,
             (
-                12,
+                14,
                 [
                     Event::ObjectStart,
                     Event::Begin(EventToken::Key),
