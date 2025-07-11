@@ -54,8 +54,8 @@ impl EscapeProcessor {
     /// assert_eq!(EscapeProcessor::process_escape_token(&EventToken::EscapeNewline).unwrap(), b'\n');
     /// ```
     pub fn process_escape_token(escape_token: &ujson::EventToken) -> Result<u8, ParseError> {
-        let escape_char = Self::token_to_escape_char(escape_token)
-            .ok_or_else(|| UnexpectedState::InvalidEscapeToken)?;
+        let escape_char =
+            Self::token_to_escape_char(escape_token).ok_or(UnexpectedState::InvalidEscapeToken)?;
         Self::process_simple_escape(escape_char)
     }
 

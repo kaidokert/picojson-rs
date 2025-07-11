@@ -61,14 +61,11 @@ impl<'a> StreamBuffer<'a> {
         };
 
         for i in iterator {
-            match (
+            if let (Some(src_byte), Some(dest_slot)) = (
                 self.buffer.get(src_start.wrapping_add(i)).copied(),
                 self.buffer.get_mut(dest.wrapping_add(i)),
             ) {
-                (Some(src_byte), Some(dest_slot)) => {
-                    *dest_slot = src_byte;
-                }
-                _ => {}
+                *dest_slot = src_byte;
             }
         }
     }
@@ -141,7 +138,7 @@ impl<'a> StreamBuffer<'a> {
         let remaining_data = self.data_end.saturating_sub(start_offset);
 
         // Copy existing content if there is any - EXACT same pattern as start_unescaping_with_copy
-        if self.data_end > start_offset && start_offset < self.data_end {
+        if self.data_end > start_offset {
             let span_len = remaining_data;
 
             // Ensure the span fits in the buffer - return error instead of silent truncation

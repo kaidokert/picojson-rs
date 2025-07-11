@@ -67,26 +67,30 @@ fn test_error_fixture<P: PullParser>(mut parser: P, error_description: &str) {
 }
 
 /// Create a SliceParser for testing
-fn create_slice_parser(input: &str) -> SliceParser {
-    let scratch = vec![0u8; 1024];
-    SliceParser::with_buffer(input, scratch.leak())
+fn create_slice_parser<'a>(input: &'a str, scratch_buffer: &'a mut [u8]) -> SliceParser<'a, 'a> {
+    scratch_buffer.fill(0); // Clear the buffer
+    SliceParser::with_buffer(input, scratch_buffer)
 }
 
 /// Create a StreamParser with full-size chunks for testing
-fn create_stream_parser_full(input: &str) -> StreamParser<ChunkReader, DefaultConfig> {
-    let buffer = vec![0u8; 1024];
+fn create_stream_parser_full<'a>(
+    input: &'a str,
+    buffer: &'a mut [u8],
+) -> StreamParser<'a, ChunkReader<'a>, DefaultConfig> {
+    buffer.fill(0); // Clear the buffer
     let reader = ChunkReader::new(input.as_bytes(), input.len());
-    StreamParser::with_config(reader, buffer.leak())
+    StreamParser::with_config(reader, buffer)
 }
 
 /// Create a StreamParser with small chunks to test buffer boundaries
-fn create_stream_parser_chunked(
-    input: &str,
+fn create_stream_parser_chunked<'a>(
+    input: &'a str,
     chunk_size: usize,
-) -> StreamParser<ChunkReader, DefaultConfig> {
-    let buffer = vec![0u8; 1024];
+    buffer: &'a mut [u8],
+) -> StreamParser<'a, ChunkReader<'a>, DefaultConfig> {
+    buffer.fill(0); // Clear the buffer
     let reader = ChunkReader::new(input.as_bytes(), chunk_size);
-    StreamParser::with_config(reader, buffer.leak())
+    StreamParser::with_config(reader, buffer)
 }
 
 #[test]
@@ -100,10 +104,19 @@ fn test_basic_surrogate_pair() {
     ];
 
     // Test all parser configurations
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 8), &expected);
-    test_fixture(create_stream_parser_chunked(input, 3), &expected); // Very small chunks
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 8, &mut buffer),
+        &expected,
+    );
+    test_fixture(
+        create_stream_parser_chunked(input, 3, &mut buffer),
+        &expected,
+    ); // Very small chunks
 }
 
 #[test]
@@ -116,9 +129,15 @@ fn test_musical_clef_surrogate_pair() {
         Event::EndDocument,
     ];
 
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 6), &expected);
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 6, &mut buffer),
+        &expected,
+    );
 }
 
 #[test]
@@ -131,9 +150,15 @@ fn test_multiple_surrogate_pairs() {
         Event::EndDocument,
     ];
 
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 10), &expected);
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 10, &mut buffer),
+        &expected,
+    );
 }
 
 #[test]
@@ -147,9 +172,15 @@ fn test_surrogate_pairs_in_object_keys() {
         Event::EndDocument,
     ];
 
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 7), &expected);
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 7, &mut buffer),
+        &expected,
+    );
 }
 
 #[test]
@@ -163,9 +194,15 @@ fn test_mixed_content_with_surrogate_pairs() {
         Event::EndDocument,
     ];
 
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 5), &expected);
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 5, &mut buffer),
+        &expected,
+    );
 }
 
 #[test]
@@ -179,9 +216,15 @@ fn test_edge_of_surrogate_ranges() {
         Event::EndDocument,
     ];
 
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 4), &expected);
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 4, &mut buffer),
+        &expected,
+    );
 }
 
 // Error cases
@@ -190,25 +233,40 @@ fn test_edge_of_surrogate_ranges() {
 fn test_lone_low_surrogate_error() {
     let input = r#"["\uDC37"]"#;
 
-    test_error_fixture(create_slice_parser(input), "Lone low surrogate");
-    test_error_fixture(create_stream_parser_full(input), "Lone low surrogate");
-    test_error_fixture(create_stream_parser_chunked(input, 5), "Lone low surrogate");
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_error_fixture(
+        create_slice_parser(input, &mut scratch),
+        "Lone low surrogate",
+    );
+    test_error_fixture(
+        create_stream_parser_full(input, &mut buffer),
+        "Lone low surrogate",
+    );
+    test_error_fixture(
+        create_stream_parser_chunked(input, 5, &mut buffer),
+        "Lone low surrogate",
+    );
 }
 
 #[test]
 fn test_high_surrogate_followed_by_non_low_surrogate_error() {
     let input = r#"["\uD801\u0041"]"#;
 
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
     test_error_fixture(
-        create_slice_parser(input),
+        create_slice_parser(input, &mut scratch),
         "High surrogate + non-low surrogate",
     );
     test_error_fixture(
-        create_stream_parser_full(input),
+        create_stream_parser_full(input, &mut buffer),
         "High surrogate + non-low surrogate",
     );
     test_error_fixture(
-        create_stream_parser_chunked(input, 6),
+        create_stream_parser_chunked(input, 6, &mut buffer),
         "High surrogate + non-low surrogate",
     );
 }
@@ -217,16 +275,19 @@ fn test_high_surrogate_followed_by_non_low_surrogate_error() {
 fn test_double_high_surrogate_error() {
     let input = r#"["\uD801\uD802"]"#;
 
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
     test_error_fixture(
-        create_slice_parser(input),
+        create_slice_parser(input, &mut scratch),
         "High surrogate + high surrogate",
     );
     test_error_fixture(
-        create_stream_parser_full(input),
+        create_stream_parser_full(input, &mut buffer),
         "High surrogate + high surrogate",
     );
     test_error_fixture(
-        create_stream_parser_chunked(input, 8),
+        create_stream_parser_chunked(input, 8, &mut buffer),
         "High surrogate + high surrogate",
     );
 }
@@ -237,13 +298,19 @@ fn test_interrupted_surrogate_pair_error() {
     // \n should clear the pending high surrogate, making \uDC37 a lone low surrogate
     let input = r#"["\uD801\n\uDC37"]"#;
 
-    test_error_fixture(create_slice_parser(input), "Interrupted surrogate pair");
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
     test_error_fixture(
-        create_stream_parser_full(input),
+        create_slice_parser(input, &mut scratch),
         "Interrupted surrogate pair",
     );
     test_error_fixture(
-        create_stream_parser_chunked(input, 4),
+        create_stream_parser_full(input, &mut buffer),
+        "Interrupted surrogate pair",
+    );
+    test_error_fixture(
+        create_stream_parser_chunked(input, 4, &mut buffer),
         "Interrupted surrogate pair",
     );
 }
@@ -258,10 +325,16 @@ fn test_various_escape_interruptions() {
         (r#"["\uD801\"\uDC37"]"#, "Quote escape interruption"),
     ];
 
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
     for (input, description) in &test_cases {
-        test_error_fixture(create_slice_parser(input), description);
-        test_error_fixture(create_stream_parser_full(input), description);
-        test_error_fixture(create_stream_parser_chunked(input, 3), description);
+        test_error_fixture(create_slice_parser(input, &mut scratch), description);
+        test_error_fixture(create_stream_parser_full(input, &mut buffer), description);
+        test_error_fixture(
+            create_stream_parser_chunked(input, 3, &mut buffer),
+            description,
+        );
     }
 }
 
@@ -277,10 +350,21 @@ fn test_surrogate_pair_across_chunk_boundaries() {
         Event::EndDocument,
     ];
 
+    let mut buffer = [0u8; 1024];
+
     // Test with chunk boundaries that split the surrogate pair
-    test_fixture(create_stream_parser_chunked(input, 1), &expected); // Every byte
-    test_fixture(create_stream_parser_chunked(input, 7), &expected); // Split between surrogates
-    test_fixture(create_stream_parser_chunked(input, 11), &expected); // Split within low surrogate
+    test_fixture(
+        create_stream_parser_chunked(input, 1, &mut buffer),
+        &expected,
+    ); // Every byte
+    test_fixture(
+        create_stream_parser_chunked(input, 7, &mut buffer),
+        &expected,
+    ); // Split between surrogates
+    test_fixture(
+        create_stream_parser_chunked(input, 11, &mut buffer),
+        &expected,
+    ); // Split within low surrogate
 }
 
 #[test]
@@ -293,9 +377,17 @@ fn test_very_small_buffers() {
         Event::EndDocument,
     ];
 
+    let mut buffer = [0u8; 1024];
+
     // Test with extremely small chunks to stress buffer management
-    test_fixture(create_stream_parser_chunked(input, 1), &expected);
-    test_fixture(create_stream_parser_chunked(input, 2), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 1, &mut buffer),
+        &expected,
+    );
+    test_fixture(
+        create_stream_parser_chunked(input, 2, &mut buffer),
+        &expected,
+    );
 }
 
 #[test]
@@ -303,16 +395,19 @@ fn test_pathological_cases() {
     // High surrogate at end of string (should error)
     let input1 = r#"["\uD801"]"#;
 
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
     test_error_fixture(
-        create_slice_parser(input1),
+        create_slice_parser(input1, &mut scratch),
         "High surrogate at end of string",
     );
     test_error_fixture(
-        create_stream_parser_full(input1),
+        create_stream_parser_full(input1, &mut buffer),
         "High surrogate at end of string",
     );
     test_error_fixture(
-        create_stream_parser_chunked(input1, 3),
+        create_stream_parser_chunked(input1, 3, &mut buffer),
         "High surrogate at end of string",
     );
 }
@@ -335,7 +430,13 @@ fn test_complex_nested_structures() {
         Event::EndDocument,
     ];
 
-    test_fixture(create_slice_parser(input), &expected);
-    test_fixture(create_stream_parser_full(input), &expected);
-    test_fixture(create_stream_parser_chunked(input, 12), &expected);
+    let mut scratch = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
+
+    test_fixture(create_slice_parser(input, &mut scratch), &expected);
+    test_fixture(create_stream_parser_full(input, &mut buffer), &expected);
+    test_fixture(
+        create_stream_parser_chunked(input, 12, &mut buffer),
+        &expected,
+    );
 }

@@ -461,10 +461,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 crate::shared::State::Number(start_pos) => start_pos,
                 crate::shared::State::Key(start_pos) => start_pos,
                 crate::shared::State::String(start_pos) => start_pos,
-                _ => {
-                    let pos = self.stream_buffer.current_position();
-                    pos
-                }
+                _ => self.stream_buffer.current_position(),
             };
 
             let offset = self.stream_buffer.compact_from(compact_start_pos)?;
@@ -624,7 +621,6 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                 && !self.unicode_escape_collector.has_pending_high_surrogate()
             {
                 self.append_byte_to_escape_buffer(byte)?;
-            } else if !in_escape && self.stream_buffer.has_unescaped_content() {
             }
         }
 
