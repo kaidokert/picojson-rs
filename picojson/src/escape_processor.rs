@@ -54,8 +54,8 @@ impl EscapeProcessor {
     /// assert_eq!(EscapeProcessor::process_escape_token(&EventToken::EscapeNewline).unwrap(), b'\n');
     /// ```
     pub fn process_escape_token(escape_token: &ujson::EventToken) -> Result<u8, ParseError> {
-        let escape_char = Self::token_to_escape_char(escape_token)
-            .ok_or_else(|| UnexpectedState::InvalidEscapeToken)?;
+        let escape_char =
+            Self::token_to_escape_char(escape_token).ok_or(UnexpectedState::InvalidEscapeToken)?;
         Self::process_simple_escape(escape_char)
     }
 
@@ -102,26 +102,44 @@ impl EscapeProcessor {
         }
     }
 
-    /// Process a Unicode escape sequence (\uXXXX) and return the UTF-8 encoded bytes.
+    /// Check if a Unicode codepoint is a high surrogate (0xD800-0xDBFF)
+    pub fn is_high_surrogate(codepoint: u32) -> bool {
+        (0xD800..=0xDBFF).contains(&codepoint)
+    }
+
+    /// Check if a Unicode codepoint is a low surrogate (0xDC00-0xDFFF)
+    pub fn is_low_surrogate(codepoint: u32) -> bool {
+        (0xDC00..=0xDFFF).contains(&codepoint)
+    }
+
+    /// Combine a high and low surrogate pair into a single Unicode codepoint
+    pub fn combine_surrogate_pair(high: u32, low: u32) -> Result<u32, ParseError> {
+        if !Self::is_high_surrogate(high) || !Self::is_low_surrogate(low) {
+            return Err(ParseError::InvalidUnicodeCodepoint);
+        }
+
+        // Combine surrogates according to UTF-16 specification
+        let codepoint = 0x10000 + ((high & 0x3FF) << 10) + (low & 0x3FF);
+        Ok(codepoint)
+    }
+
+    /// Process a Unicode escape sequence with surrogate pair support.
+    /// This function handles both individual Unicode escapes and surrogate pairs.
     ///
     /// # Arguments
     /// * `hex_slice` - A 4-byte slice containing the hexadecimal digits
     /// * `utf8_buffer` - A buffer to write the UTF-8 encoded result (must be at least 4 bytes)
+    /// * `pending_high_surrogate` - Optional high surrogate from previous escape
     ///
     /// # Returns
-    /// A slice containing the UTF-8 encoded bytes, or an error if the escape is invalid.
-    ///
-    /// # Examples
-    /// ```ignore
-    /// // Internal API - see unit tests for usage examples
-    /// let mut buffer = [0u8; 4];
-    /// let result = EscapeProcessor::process_unicode_escape(b"0041", &mut buffer).unwrap();
-    /// assert_eq!(result, b"A");
-    /// ```
+    /// A tuple containing:
+    /// - Optional UTF-8 encoded bytes (None if this is a high surrogate waiting for low)
+    /// - Optional high surrogate to save for next escape (Some if this is a high surrogate)
     pub fn process_unicode_escape<'a>(
         hex_slice: &[u8],
         utf8_buffer: &'a mut [u8],
-    ) -> Result<&'a [u8], ParseError> {
+        pending_high_surrogate: Option<u32>,
+    ) -> Result<(Option<&'a [u8]>, Option<u32>), ParseError> {
         if hex_slice.len() != 4 {
             return Err(ParseError::InvalidUnicodeHex);
         }
@@ -133,21 +151,48 @@ impl EscapeProcessor {
             codepoint = (codepoint << 4) | digit;
         }
 
-        // Convert codepoint to character and encode as UTF-8
-        let ch = char::from_u32(codepoint).ok_or(ParseError::InvalidUnicodeCodepoint)?;
-        let utf8_str = ch.encode_utf8(utf8_buffer);
-        Ok(utf8_str.as_bytes())
+        // Check if we have a pending high surrogate
+        if let Some(high) = pending_high_surrogate {
+            // We should have a low surrogate now
+            if Self::is_low_surrogate(codepoint) {
+                // Combine the surrogate pair
+                let combined = Self::combine_surrogate_pair(high, codepoint)?;
+                let ch = char::from_u32(combined).ok_or(ParseError::InvalidUnicodeCodepoint)?;
+                let utf8_str = ch.encode_utf8(utf8_buffer);
+                Ok((Some(utf8_str.as_bytes()), None))
+            } else {
+                // Error: high surrogate not followed by low surrogate
+                Err(ParseError::InvalidUnicodeCodepoint)
+            }
+        } else {
+            // No pending high surrogate
+            if Self::is_high_surrogate(codepoint) {
+                // Save this high surrogate for the next escape
+                Ok((None, Some(codepoint)))
+            } else if Self::is_low_surrogate(codepoint) {
+                // Error: low surrogate without preceding high surrogate
+                Err(ParseError::InvalidUnicodeCodepoint)
+            } else {
+                // Regular Unicode character
+                let ch = char::from_u32(codepoint).ok_or(ParseError::InvalidUnicodeCodepoint)?;
+                let utf8_str = ch.encode_utf8(utf8_buffer);
+                Ok((Some(utf8_str.as_bytes()), None))
+            }
+        }
     }
 }
 
 /// Shared Unicode escape hex digit collector for both parsers.
 /// Provides a common interface for collecting the 4 hex digits in \uXXXX sequences.
+/// Supports surrogate pairs by tracking pending high surrogates.
 #[derive(Debug)]
 pub struct UnicodeEscapeCollector {
     /// Buffer to collect the 4 hex digits
     hex_buffer: [u8; 4],
     /// Current position in the hex buffer (0-4)
     hex_pos: usize,
+    /// Pending high surrogate waiting for low surrogate
+    pending_high_surrogate: Option<u32>,
 }
 
 impl UnicodeEscapeCollector {
@@ -156,12 +201,21 @@ impl UnicodeEscapeCollector {
         Self {
             hex_buffer: [0u8; 4],
             hex_pos: 0,
+            pending_high_surrogate: None,
         }
     }
 
     /// Reset the collector for a new Unicode escape sequence
     pub fn reset(&mut self) {
         self.hex_pos = 0;
+        // Note: We don't reset pending_high_surrogate here since it needs to persist
+        // across Unicode escape sequences to properly handle surrogate pairs
+    }
+
+    /// Reset the collector completely, including any pending surrogate state
+    pub fn reset_all(&mut self) {
+        self.hex_pos = 0;
+        self.pending_high_surrogate = None;
     }
 
     /// Add a hex digit to the collector
@@ -185,14 +239,32 @@ impl UnicodeEscapeCollector {
         Ok(self.hex_pos == 4)
     }
 
-    /// Process the collected hex digits and return UTF-8 bytes
+    /// Process the collected hex digits with surrogate pair support
     /// Should only be called when is_complete() returns true
-    pub fn process_to_utf8<'a>(&self, utf8_buffer: &'a mut [u8]) -> Result<&'a [u8], ParseError> {
+    /// Returns (optional UTF-8 bytes, whether surrogate state changed)
+    pub fn process_to_utf8<'a>(
+        &mut self,
+        utf8_buffer: &'a mut [u8],
+    ) -> Result<(Option<&'a [u8]>, bool), ParseError> {
         if self.hex_pos != 4 {
             return Err(UnexpectedState::InvalidUnicodeEscape.into());
         }
 
-        EscapeProcessor::process_unicode_escape(&self.hex_buffer, utf8_buffer)
+        let (result, new_pending) = EscapeProcessor::process_unicode_escape(
+            &self.hex_buffer,
+            utf8_buffer,
+            self.pending_high_surrogate,
+        )?;
+
+        let surrogate_state_changed = self.pending_high_surrogate != new_pending;
+        self.pending_high_surrogate = new_pending;
+
+        Ok((result, surrogate_state_changed))
+    }
+
+    /// Check if there's a pending high surrogate waiting for a low surrogate
+    pub fn has_pending_high_surrogate(&self) -> bool {
+        self.pending_high_surrogate.is_some()
     }
 }
 
@@ -244,12 +316,16 @@ mod tests {
         let mut buffer = [0u8; 4];
 
         // Test basic ASCII character \u0041 -> 'A'
-        let result = EscapeProcessor::process_unicode_escape(b"0041", &mut buffer).unwrap();
-        assert_eq!(result, b"A");
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"0041", &mut buffer, None).unwrap();
+        assert_eq!(result.unwrap(), b"A");
+        assert_eq!(pending, None);
 
         // Test another ASCII character \u0048 -> 'H'
-        let result = EscapeProcessor::process_unicode_escape(b"0048", &mut buffer).unwrap();
-        assert_eq!(result, b"H");
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"0048", &mut buffer, None).unwrap();
+        assert_eq!(result.unwrap(), b"H");
+        assert_eq!(pending, None);
     }
 
     #[test]
@@ -257,13 +333,18 @@ mod tests {
         let mut buffer = [0u8; 4];
 
         // Test Greek alpha \u03B1 -> 'α' (2 bytes in UTF-8: 0xCE, 0xB1)
-        let result = EscapeProcessor::process_unicode_escape(b"03B1", &mut buffer).unwrap();
-        assert_eq!(result, "α".as_bytes());
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"03B1", &mut buffer, None).unwrap();
+        assert_eq!(result.unwrap(), "α".as_bytes());
+        assert_eq!(pending, None);
 
         // Test emoji \u1F60A -> '😊' (4 bytes in UTF-8)
-        let _result = EscapeProcessor::process_unicode_escape(b"1F60", &mut buffer).unwrap();
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"1F60", &mut buffer, None).unwrap();
         // Note: This is actually incomplete - \u1F60A requires surrogate pairs
         // But for basic testing this verifies the hex parsing works
+        assert!(result.is_some());
+        assert_eq!(pending, None);
     }
 
     #[test]
@@ -271,12 +352,12 @@ mod tests {
         let mut buffer = [0u8; 4];
 
         // Invalid hex characters
-        assert!(EscapeProcessor::process_unicode_escape(b"00GG", &mut buffer).is_err());
-        assert!(EscapeProcessor::process_unicode_escape(b"ZZZZ", &mut buffer).is_err());
+        assert!(EscapeProcessor::process_unicode_escape(b"00GG", &mut buffer, None).is_err());
+        assert!(EscapeProcessor::process_unicode_escape(b"ZZZZ", &mut buffer, None).is_err());
 
         // Wrong length
-        assert!(EscapeProcessor::process_unicode_escape(b"123", &mut buffer).is_err());
-        assert!(EscapeProcessor::process_unicode_escape(b"12345", &mut buffer).is_err());
+        assert!(EscapeProcessor::process_unicode_escape(b"123", &mut buffer, None).is_err());
+        assert!(EscapeProcessor::process_unicode_escape(b"12345", &mut buffer, None).is_err());
     }
 
     #[test]
@@ -286,8 +367,10 @@ mod tests {
         // Note: Most values in the BMP are valid Unicode codepoints
         // Invalid surrogate codepoints would be D800-DFFF but they're complex to test
         // For now, test basic valid cases to ensure the function works
-        let result = EscapeProcessor::process_unicode_escape(b"0000", &mut buffer).unwrap();
-        assert_eq!(result, "\0".as_bytes());
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"0000", &mut buffer, None).unwrap();
+        assert_eq!(result.unwrap(), "\0".as_bytes());
+        assert_eq!(pending, None);
     }
 
     #[test]
@@ -389,8 +472,9 @@ mod tests {
         assert!(collector.add_hex_digit(b'1').unwrap()); // Complete!
 
         // Process to UTF-8
-        let result = collector.process_to_utf8(&mut utf8_buffer).unwrap();
-        assert_eq!(result, b"A");
+        let (result, _surrogate_state_changed) =
+            collector.process_to_utf8(&mut utf8_buffer).unwrap();
+        assert_eq!(result.unwrap(), b"A");
     }
 
     #[test]
@@ -413,11 +497,45 @@ mod tests {
         assert!(!collector.add_hex_digit(b'0').unwrap());
         assert!(!collector.add_hex_digit(b'1').unwrap());
 
-        // Reset should clear state
+        // Reset should clear hex position but not surrogate state
         collector.reset();
 
         // Should be able to start fresh
         assert!(!collector.add_hex_digit(b'A').unwrap());
+    }
+
+    #[test]
+    fn test_unicode_escape_collector_surrogate_support() {
+        let mut collector = UnicodeEscapeCollector::new();
+        let mut utf8_buffer = [0u8; 4];
+
+        // Process high surrogate \uD801
+        assert!(!collector.add_hex_digit(b'D').unwrap());
+        assert!(!collector.add_hex_digit(b'8').unwrap());
+        assert!(!collector.add_hex_digit(b'0').unwrap());
+        assert!(collector.add_hex_digit(b'1').unwrap());
+
+        let (result, state_changed) = collector.process_to_utf8(&mut utf8_buffer).unwrap();
+        assert_eq!(result, None); // No UTF-8 output yet
+        assert!(state_changed); // Surrogate state changed
+        assert!(collector.has_pending_high_surrogate());
+
+        // Reset for next escape sequence
+        collector.reset();
+
+        // Process low surrogate \uDC37
+        assert!(!collector.add_hex_digit(b'D').unwrap());
+        assert!(!collector.add_hex_digit(b'C').unwrap());
+        assert!(!collector.add_hex_digit(b'3').unwrap());
+        assert!(collector.add_hex_digit(b'7').unwrap());
+
+        let (result, state_changed) = collector.process_to_utf8(&mut utf8_buffer).unwrap();
+        assert!(result.is_some()); // Should have UTF-8 output
+        assert!(state_changed); // Surrogate state changed (cleared)
+        assert!(!collector.has_pending_high_surrogate());
+
+        // Verify it's the correct UTF-8 encoding for U+10437
+        assert_eq!(result.unwrap(), [0xF0, 0x90, 0x90, 0xB7]);
     }
 
     #[test]
@@ -431,8 +549,9 @@ mod tests {
         assert!(!collector.add_hex_digit(b'B').unwrap());
         assert!(collector.add_hex_digit(b'1').unwrap());
 
-        let result = collector.process_to_utf8(&mut utf8_buffer).unwrap();
-        assert_eq!(result, "α".as_bytes());
+        let (result, _surrogate_state_changed) =
+            collector.process_to_utf8(&mut utf8_buffer).unwrap();
+        assert_eq!(result.unwrap(), "α".as_bytes());
     }
 
     #[test]
@@ -447,9 +566,80 @@ mod tests {
         // Should fail to process incomplete sequence
         assert!(collector.process_to_utf8(&mut utf8_buffer).is_err());
     }
+
+    #[test]
+    fn test_surrogate_pair_detection() {
+        // Test high surrogate detection
+        assert!(EscapeProcessor::is_high_surrogate(0xD800));
+        assert!(EscapeProcessor::is_high_surrogate(0xD801));
+        assert!(EscapeProcessor::is_high_surrogate(0xDBFF));
+        assert!(!EscapeProcessor::is_high_surrogate(0xD7FF));
+        assert!(!EscapeProcessor::is_high_surrogate(0xDC00));
+
+        // Test low surrogate detection
+        assert!(EscapeProcessor::is_low_surrogate(0xDC00));
+        assert!(EscapeProcessor::is_low_surrogate(0xDC37));
+        assert!(EscapeProcessor::is_low_surrogate(0xDFFF));
+        assert!(!EscapeProcessor::is_low_surrogate(0xDBFF));
+        assert!(!EscapeProcessor::is_low_surrogate(0xE000));
+    }
+
+    #[test]
+    fn test_surrogate_pair_combination() {
+        // Test valid surrogate pair: \uD801\uDC37 -> U+10437
+        let combined = EscapeProcessor::combine_surrogate_pair(0xD801, 0xDC37).unwrap();
+        assert_eq!(combined, 0x10437);
+
+        // Test another valid pair: \uD834\uDD1E -> U+1D11E (musical symbol)
+        let combined = EscapeProcessor::combine_surrogate_pair(0xD834, 0xDD1E).unwrap();
+        assert_eq!(combined, 0x1D11E);
+
+        // Test invalid combinations
+        assert!(EscapeProcessor::combine_surrogate_pair(0x0041, 0xDC37).is_err()); // Not high surrogate
+        assert!(EscapeProcessor::combine_surrogate_pair(0xD801, 0x0041).is_err());
+        // Not low surrogate
+    }
+
+    #[test]
+    fn test_unicode_escape_with_surrogate_support() {
+        let mut buffer = [0u8; 4];
+
+        // Test regular Unicode character (not surrogate)
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"0041", &mut buffer, None).unwrap();
+        assert_eq!(result, Some(b"A".as_slice()));
+        assert_eq!(pending, None);
+
+        // Test high surrogate - should return None and save the high surrogate
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"D801", &mut buffer, None).unwrap();
+        assert_eq!(result, None);
+        assert_eq!(pending, Some(0xD801));
+
+        // Test low surrogate following high surrogate - should combine
+        let (result, pending) =
+            EscapeProcessor::process_unicode_escape(b"DC37", &mut buffer, Some(0xD801)).unwrap();
+        assert!(result.is_some());
+        assert_eq!(pending, None);
+        // The result should be the UTF-8 encoding of U+10437
+        assert_eq!(result.unwrap(), [0xF0, 0x90, 0x90, 0xB7]);
+    }
+
+    #[test]
+    fn test_unicode_escape_surrogate_error_cases() {
+        let mut buffer = [0u8; 4];
+
+        // Test low surrogate without preceding high surrogate - should error
+        let result = EscapeProcessor::process_unicode_escape(b"DC37", &mut buffer, None);
+        assert!(result.is_err());
+
+        // Test high surrogate followed by non-low-surrogate - should error
+        let result = EscapeProcessor::process_unicode_escape(b"0041", &mut buffer, Some(0xD801));
+        assert!(result.is_err());
+    }
 }
 
-/// Shared implementation for processing a Unicode escape sequence.
+/// Shared implementation for processing a Unicode escape sequence WITH surrogate pair support.
 ///
 /// This function centralizes the logic for handling `\uXXXX` escapes, which is
 /// common to both the pull-based and stream-based parsers. It uses a generic
@@ -463,13 +653,15 @@ mod tests {
 /// * `utf8_buf` - A buffer to write the UTF-8 encoded result into.
 ///
 /// # Returns
-/// A tuple containing the resulting UTF-8 byte slice and the start position of the escape sequence (`\uXXXX`).
+/// A tuple containing:
+/// - Optional UTF-8 byte slice (None if this is a high surrogate waiting for low surrogate)
+/// - The start position of the escape sequence (`\uXXXX`)
 pub(crate) fn process_unicode_escape_sequence<'a, F>(
     current_pos: usize,
     unicode_escape_collector: &mut UnicodeEscapeCollector,
     mut hex_slice_provider: F,
     utf8_buf: &'a mut [u8; 4],
-) -> Result<(&'a [u8], usize), ParseError>
+) -> Result<(Option<&'a [u8]>, usize), ParseError>
 where
     F: FnMut(usize, usize) -> Result<&'a [u8], ParseError>,
 {
@@ -488,8 +680,21 @@ where
         unicode_escape_collector.add_hex_digit(hex_digit)?;
     }
 
-    // Process the complete sequence to UTF-8
-    let utf8_bytes = unicode_escape_collector.process_to_utf8(utf8_buf)?;
+    // Check if we had a pending high surrogate before processing
+    let had_pending_high_surrogate = unicode_escape_collector.has_pending_high_surrogate();
 
-    Ok((utf8_bytes, escape_start_pos))
+    // Process the complete sequence to UTF-8 with surrogate support
+    let (utf8_bytes_opt, _surrogate_state_changed) =
+        unicode_escape_collector.process_to_utf8(utf8_buf)?;
+
+    // If we're completing a surrogate pair (had pending high surrogate and now have UTF-8 bytes),
+    // return the position of the high surrogate start instead of the low surrogate start
+    let final_escape_start_pos = if had_pending_high_surrogate && utf8_bytes_opt.is_some() {
+        // High surrogate started 6 bytes before the current low surrogate
+        escape_start_pos.saturating_sub(6)
+    } else {
+        escape_start_pos
+    };
+
+    Ok((utf8_bytes_opt, final_escape_start_pos))
 }
