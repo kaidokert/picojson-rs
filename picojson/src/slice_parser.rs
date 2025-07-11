@@ -176,7 +176,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         start: usize,
         from_container_end: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // SliceParser delimiter logic (same as the legacy wrapper)
+        // SliceParser delimiter logic
         let current_pos = self.buffer.current_position();
         let end_pos = if !from_container_end && self.buffer.is_empty() {
             // At EOF - use full span
@@ -207,6 +207,10 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         &mut self,
         escape_char: u8,
     ) -> Result<Option<Event<'_, '_>>, ParseError> {
+        // Clear any pending high surrogate state when we encounter a simple escape
+        // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
+        self.unicode_escape_collector.reset_all();
+
         if let State::String(_) | State::Key(_) = self.parser_state.state {
             self.copy_on_escape
                 .handle_escape(self.buffer.current_pos(), escape_char)?;
@@ -220,8 +224,11 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
+        // Check if we had a pending high surrogate before processing
+        let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
+
         let mut utf8_buf = [0u8; 4];
-        let (utf8_bytes, escape_start_pos) =
+        let (utf8_bytes_opt, escape_start_pos) =
             crate::escape_processor::process_unicode_escape_sequence(
                 current_pos,
                 &mut self.unicode_escape_collector,
@@ -229,8 +236,24 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                 &mut utf8_buf,
             )?;
 
-        self.copy_on_escape
-            .handle_unicode_escape(escape_start_pos, utf8_bytes)
+        // Only process UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
+        if let Some(utf8_bytes) = utf8_bytes_opt {
+            if had_pending_high_surrogate {
+                // This is completing a surrogate pair - need to consume both escapes
+                // First call: consume the high surrogate (6 bytes earlier)
+                self.copy_on_escape
+                    .handle_unicode_escape(escape_start_pos, &[])?;
+                // Second call: consume the low surrogate and write UTF-8
+                self.copy_on_escape
+                    .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+            } else {
+                // Single Unicode escape - normal processing
+                self.copy_on_escape
+                    .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn pull_tokenizer_events(&mut self) -> Result<(), ParseError> {
@@ -406,6 +429,10 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                     EventResult::Continue => continue,
                     EventResult::ExtractKey => {
                         if let State::Key(_start) = self.parser_state.state {
+                            // Check for incomplete surrogate pairs before ending the key
+                            if self.unicode_escape_collector.has_pending_high_surrogate() {
+                                break Err(ParseError::InvalidUnicodeCodepoint);
+                            }
                             self.parser_state.state = State::None;
                             // Use CopyOnEscape to get the final key result
                             let end_pos = ContentRange::end_position_excluding_delimiter(
@@ -419,6 +446,10 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                     }
                     EventResult::ExtractString => {
                         if let State::String(_value) = self.parser_state.state {
+                            // Check for incomplete surrogate pairs before ending the string
+                            if self.unicode_escape_collector.has_pending_high_surrogate() {
+                                break Err(ParseError::InvalidUnicodeCodepoint);
+                            }
                             self.parser_state.state = State::None;
                             // Use CopyOnEscape to get the final string result
                             let end_pos = ContentRange::end_position_excluding_delimiter(
