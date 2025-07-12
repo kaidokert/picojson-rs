@@ -153,6 +153,17 @@ impl ContentRange {
     }
 }
 
+/// Trait for abstracting byte input sources between SliceParser and StreamParser
+pub trait ByteProvider {
+    /// Get the next byte from the input source
+    /// Returns None when end of input is reached
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError>;
+
+    /// Check if the input source is finished (no more data can be provided)
+    /// This helps distinguish between temporary empty state and true EOF
+    fn is_finished(&self) -> bool;
+}
+
 pub fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     core::str::from_utf8(v).map_err(Into::into)
 }

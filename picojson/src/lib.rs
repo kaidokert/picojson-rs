@@ -75,6 +75,8 @@ pub use parse_error::ParseError;
 mod shared;
 pub use shared::{Event, PullParser};
 
+mod event_processor;
+
 mod slice_input_buffer;
 
 mod json_number;

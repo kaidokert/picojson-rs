@@ -17,4 +17,5 @@
 - [ ] Sax-style push parser
 - [x] See if we can bring an Iterator impl back
     - Can't practically be done with borrowing return values
-- [ ] Conformance tests at parser level, not just tokenizer
+- [x] Conformance tests at parser level, not just tokenizer
+- [ ] Clean up match { foo , => panic!("expected foo") } pattern in tests.
