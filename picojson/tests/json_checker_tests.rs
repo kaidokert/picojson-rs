@@ -34,7 +34,10 @@ mod json_checker_tests {
     }
 
     fn load_test_file(filename: &str) -> String {
-        let path = Path::new("../json_checker_tests").join(filename);
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+        let path = Path::new(&manifest_dir)
+            .join("tests/data/json_checker")
+            .join(filename);
         fs::read_to_string(&path)
             .unwrap_or_else(|_| panic!("Failed to read test file: {}", filename))
     }
@@ -83,6 +86,12 @@ mod json_checker_tests {
             );
         }
     }
+
+    // Indices of fail*.json files that should fail to parse (excluding known deviations)
+    const EXPECTED_FAIL_INDICES: &[u32] = &[
+        2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+        28, 29, 30, 31, 32, 33,
+    ];
 
     mod should_fail {
         use super::*;
@@ -157,11 +166,7 @@ mod json_checker_tests {
         }
 
         // Test all fail files (excluding known deviations)
-        let fail_indices = [
-            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26,
-            27, 28, 29, 30, 31, 32, 33,
-        ];
-        for i in &fail_indices {
+        for i in EXPECTED_FAIL_INDICES {
             let filename = format!("fail{}.json", i);
             let content = load_test_file(&filename);
             if run_parser_test(&content).is_err() {
@@ -185,15 +190,24 @@ mod json_checker_tests {
 
         println!("JSON_checker test suite results:");
         println!("  Pass tests: {}/3 ✓", pass_count);
-        println!("  Fail tests: {}/31 ✓", fail_count);
+        println!(
+            "  Fail tests: {}/{} ✓",
+            fail_count,
+            EXPECTED_FAIL_INDICES.len()
+        );
         println!("  Known deviations (passing): {}/2 ✓", deviation_count);
         println!(
-            "  Total: {}/36 tests behaved as expected",
-            pass_count + fail_count + deviation_count
+            "  Total: {}/{} tests behaved as expected",
+            pass_count + fail_count + deviation_count,
+            3 + EXPECTED_FAIL_INDICES.len() + 2
         );
 
         assert_eq!(pass_count, 3, "All pass tests should succeed");
-        assert_eq!(fail_count, 31, "All fail tests should error");
+        assert_eq!(
+            fail_count,
+            EXPECTED_FAIL_INDICES.len(),
+            "All fail tests should error"
+        );
         assert_eq!(deviation_count, 2, "All deviation tests should succeed");
     }
 }

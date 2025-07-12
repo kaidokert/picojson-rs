@@ -1,5 +1,6 @@
 #[cfg(feature = "remote-tests")]
 fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
+    use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
 
@@ -14,6 +15,7 @@ fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
     let mut should_pass_tests = String::new();
     let mut should_fail_tests = String::new();
     let mut impl_dependent_tests = String::new();
+    let mut test_name_counts: HashMap<String, u32> = HashMap::new();
 
     // Process JSONTestSuite tests
     if jsontest_suite_dir.exists() {
@@ -23,7 +25,7 @@ fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
 
             if path.extension().unwrap_or_default() == "json" {
                 let filename = path.file_name().unwrap().to_string_lossy();
-                let test_name = sanitize_test_name(&filename);
+                let test_name = sanitize_test_name(&filename, &mut test_name_counts);
 
                 // Skip files that contain invalid UTF-8 (include_str! can't handle them)
                 if fs::read_to_string(&path).is_err() {
@@ -34,7 +36,7 @@ fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
                     should_pass_tests.push_str(&format!(
                         r#"    #[test]
     fn test_should_pass_jsontest_{test_name}() {{
-        let content = include_str!("../tests/data/JSONTestSuite/test_parsing/{filename}");
+        let content = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/JSONTestSuite/test_parsing/{filename}"));
         let result = run_parser_test(content);
         assert!(result.is_ok(), "JSONTestSuite test {filename} should pass but failed: {{:?}}", result.err());
     }}
@@ -46,7 +48,7 @@ fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
                     should_fail_tests.push_str(&format!(
                         r#"    #[test]
     fn test_should_fail_jsontest_{test_name}() {{
-        let content = include_str!("../tests/data/JSONTestSuite/test_parsing/{filename}");
+        let content = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/JSONTestSuite/test_parsing/{filename}"));
         let result = run_parser_test(content);
         assert!(result.is_err(), "JSONTestSuite test {filename} should fail but passed");
     }}
@@ -58,7 +60,7 @@ fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
                     impl_dependent_tests.push_str(&format!(
                         r#"    #[test]
     fn test_impl_dependent_jsontest_{test_name}() {{
-        let content = include_str!("../tests/data/JSONTestSuite/test_parsing/{filename}");
+        let content = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/JSONTestSuite/test_parsing/{filename}"));
         let result = run_parser_test(content);
         // Implementation dependent - just run it, don't assert result
         println!("JSONTestSuite test {filename}: {{:?}}", result);
@@ -72,50 +74,8 @@ fn generate_conformance_tests() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Process JSON_checker tests
-    if json_checker_dir.exists() {
-        for entry in fs::read_dir(json_checker_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.extension().unwrap_or_default() == "json" {
-                let filename = path.file_name().unwrap().to_string_lossy();
-                let test_name = sanitize_test_name(&filename);
-
-                // Skip files that contain invalid UTF-8
-                if fs::read_to_string(&path).is_err() {
-                    continue;
-                }
-
-                // JSON_checker naming convention: pass*.json should pass, fail*.json should fail
-                if filename.starts_with("pass") {
-                    should_pass_tests.push_str(&format!(
-                        r#"    #[test]
-    fn test_should_pass_json_checker_{test_name}() {{
-        let content = include_str!("../tests/data/json_checker/{filename}");
-        let result = run_parser_test(content);
-        assert!(result.is_ok(), "JSON_checker test {filename} should pass but failed: {{:?}}", result.err());
-    }}
-"#,
-                        test_name = test_name,
-                        filename = filename
-                    ));
-                } else if filename.starts_with("fail") {
-                    should_fail_tests.push_str(&format!(
-                        r#"    #[test]
-    fn test_should_fail_json_checker_{test_name}() {{
-        let content = include_str!("../tests/data/json_checker/{filename}");
-        let result = run_parser_test(content);
-        assert!(result.is_err(), "JSON_checker test {filename} should fail but passed");
-    }}
-"#,
-                        test_name = test_name,
-                        filename = filename
-                    ));
-                }
-            }
-        }
-    }
+    // Note: JSON_checker tests are handled by the dedicated tests/json_checker_tests.rs
+    // which provides proper categorization and handles known deviations correctly
 
     let generated_code = format!(
         r#"// Generated by build.rs - DO NOT EDIT
@@ -139,13 +99,13 @@ mod conformance_generated {{
         Ok(event_count)
     }}
 
-    #[cfg(feature = "json-checker-tests")]
+    #[cfg(feature = "remote-tests")]
     mod should_pass {{
         use super::run_parser_test;
 {should_pass_tests}
     }}
 
-    #[cfg(feature = "json-checker-tests")]
+    #[cfg(feature = "remote-tests")]
     mod should_fail {{
         use super::run_parser_test;
 {should_fail_tests}
@@ -169,19 +129,37 @@ mod conformance_generated {{
     Ok(())
 }
 
-fn sanitize_test_name(filename: &str) -> String {
-    filename
-        .replace(".json", "")
-        .replace("-", "_")
-        .replace("+", "_plus")
-        .replace(".", "_dot")
-        .replace("#", "_hash")
-        .replace("(", "_lparen")
-        .replace(")", "_rparen")
-        .replace("[", "_lbracket")
-        .replace("]", "_rbracket")
-        .replace(" ", "_space")
-        .replace(":", "_colon")
+fn sanitize_test_name(
+    filename: &str,
+    test_name_counts: &mut std::collections::HashMap<String, u32>,
+) -> String {
+    let mut result = filename
+        .strip_suffix(".json")
+        .unwrap_or(filename)
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    // Collapse multiple consecutive underscores to avoid very long names
+    while result.contains("__") {
+        result = result.replace("__", "_");
+    }
+
+    // Handle duplicates by adding a counter suffix
+    let count = test_name_counts.entry(result.clone()).or_insert(0);
+    *count += 1;
+
+    if *count > 1 {
+        format!("{}_{}", result, count)
+    } else {
+        result
+    }
 }
 
 // Configuration from Cargo.toml metadata
@@ -197,7 +175,7 @@ fn get_jsontest_suite_commit() -> String {
 
 fn get_json_checker_url() -> String {
     std::env::var("CARGO_PKG_METADATA_CONFORMANCE_TESTS_JSON_CHECKER_URL")
-        .unwrap_or_else(|_| "http://www.json.org/JSON_checker/test.zip".to_string())
+        .unwrap_or_else(|_| "https://www.json.org/JSON_checker/test.zip".to_string())
 }
 
 #[cfg(feature = "remote-tests")]
@@ -256,7 +234,7 @@ fn download_json_test_suite() -> Result<(), Box<dyn std::error::Error>> {
             None => continue,
         };
 
-        if file.name().ends_with('/') {
+        if file.is_dir() {
             // Directory
             fs::create_dir_all(&outpath)?;
         } else {
@@ -331,7 +309,7 @@ fn download_json_checker() -> Result<(), Box<dyn std::error::Error>> {
             None => continue,
         };
 
-        if file.name().ends_with('/') {
+        if file.is_dir() {
             // Skip directories
             continue;
         } else {
