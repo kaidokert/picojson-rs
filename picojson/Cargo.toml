@@ -33,4 +33,26 @@ float-skip = []         # Skip float values during parsing (continue with next t
 float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
 
+# Remote conformance testing
+remote-tests = ["dep:ureq", "dep:zip"]
+
+# JSON_checker test suite from json.org
+json-checker-tests = []
+
+[package.metadata.conformance-tests]
+# JSONTestSuite configuration
+jsontest-suite-url = "https://github.com/nst/JSONTestSuite/archive/{commit}.zip"
+jsontest-suite-commit = "1ef36fa01286573e846ac449e8683f8833c5b26a"
+# JSON_checker URL - stable URL from json.org
+json-checker-url = "http://www.json.org/JSON_checker/test.zip"
+
+[build-dependencies]
+ureq = { version = "2.0", optional = true }
+zip = { version = "0.6", optional = true }
+
+[dev-dependencies]
+test-log = "0.2.18"
+paste = "1.0"
+
 [dependencies]
+log = "0.4.27"
