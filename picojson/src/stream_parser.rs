@@ -7,7 +7,7 @@ use crate::event_processor::{
     take_first_event, ContentExtractor, EscapeHandler, EventResult, ParserContext,
 };
 use crate::parse_error::ParseError;
-use crate::shared::{ContentRange, Event, ParserState, UnexpectedState};
+use crate::shared::{ContentRange, Event, ParserState};
 use crate::stream_buffer::StreamBuffer;
 use crate::{ujson, PullParser};
 use ujson::{EventToken, Tokenizer};
@@ -432,38 +432,6 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         Ok(())
     }
 
-    /// Handle byte accumulation for strings/keys and Unicode escape sequences
-    fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
-        // Check if we're in a string or key state
-        let in_string_mode = matches!(
-            self.parser_state.state,
-            crate::shared::State::String(_) | crate::shared::State::Key(_)
-        );
-
-        if in_string_mode {
-            // Access escape state from enum
-            let in_escape = if let ProcessingState::Active {
-                in_escape_sequence, ..
-            } = &self.processing_state
-            {
-                *in_escape_sequence
-            } else {
-                false
-            };
-
-            // Normal byte accumulation - all escape processing now goes through event system
-            // Skip writing bytes to escape buffer when we have a pending high surrogate
-            // (prevents literal \uD801 text from being included in final string)
-            if !in_escape
-                && self.stream_buffer.has_unescaped_content()
-                && !self.unicode_escape_collector.has_pending_high_surrogate()
-            {
-                self.append_byte_to_escape_buffer(byte)?;
-            }
-        }
-
-        Ok(())
-    }
 
     /// Start escape processing using StreamBuffer
     fn start_escape_processing(&mut self) -> Result<(), ParseError> {
@@ -551,6 +519,112 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
             self.stream_buffer.clear_unescaped();
         }
     }
+
+    /// Wrapper to handle Begin(EscapeSequence) without double borrow
+    fn handle_begin_escape_sequence(&mut self) -> Result<(), ParseError> {
+        // Only process if we're inside a string or key
+        match self.parser_state.state {
+            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                // Calculate escape start position (current position - 1 to include the backslash)
+                let escape_start = self.stream_buffer.current_position().saturating_sub(1);
+                let last_literal_pos = self.parser_state.last_literal_pos;
+                
+                // Store escape start for later use
+                self.parser_state.current_escape_start = escape_start;
+                
+                // Append literal range from last_literal_pos to escape_start
+                // Skip if we have a pending high surrogate (prevents literal \uD801 text inclusion)
+                if !self.unicode_escape_collector.has_pending_high_surrogate() {
+                    if last_literal_pos < escape_start {
+                        self.append_literal_range(last_literal_pos, escape_start)?;
+                    }
+                }
+            }
+            _ => {} // Ignore if not in string/key context
+        }
+        Ok(())
+    }
+
+    /// Wrapper to update literal position after simple escape without double borrow
+    fn update_literal_pos_after_simple_escape(&mut self) -> Result<(), ParseError> {
+        // Only process if we're inside a string or key
+        match self.parser_state.state {
+            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                // Update last_literal_pos to position after this escape sequence (2 bytes: \x)
+                let escape_start = self.parser_state.current_escape_start;
+                self.parser_state.last_literal_pos = escape_start + 2; // 2 bytes for simple escape
+            }
+            _ => {} // Ignore if not in string/key context
+        }
+        Ok(())
+    }
+
+    /// Wrapper to update literal position after Unicode escape without double borrow
+    fn update_literal_pos_after_unicode_escape(&mut self) -> Result<(), ParseError> {
+        // Only process if we're inside a string or key
+        match self.parser_state.state {
+            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                // Update last_literal_pos to position after this escape sequence (6 bytes: \uXXXX)
+                let escape_start = self.parser_state.current_escape_start;
+                self.parser_state.last_literal_pos = escape_start + 6; // 6 bytes for Unicode escape
+            }
+            _ => {} // Ignore if not in string/key context
+        }
+        Ok(())
+    }
+
+    /// Wrapper to process final literal range for extraction without double borrow
+    fn process_final_literal_range_for_extraction(&mut self) -> Result<(), ParseError> {
+        // Only process if we're inside a string or key
+        match self.parser_state.state {
+            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                let last_literal_pos = self.parser_state.last_literal_pos;
+                let current_pos = self.stream_buffer.current_position();
+                // End position excludes the closing quote
+                let content_end = current_pos.saturating_sub(1);
+                
+                // Append final literal range if any content remains
+                if last_literal_pos < content_end {
+                    self.append_literal_range(last_literal_pos, content_end)?;
+                }
+            }
+            _ => {} // Ignore if not in string/key context
+        }
+        Ok(())
+    }
+
+    /// Handle byte accumulation for strings/keys and Unicode escape sequences
+    fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
+        // Check if we're in a string or key state
+        let in_string_mode = matches!(
+            self.parser_state.state,
+            crate::shared::State::String(_) | crate::shared::State::Key(_)
+        );
+
+        if in_string_mode {
+            // Access escape state from enum
+            let in_escape = if let ProcessingState::Active {
+                in_escape_sequence, ..
+            } = &self.processing_state
+            {
+                *in_escape_sequence
+            } else {
+                false
+            };
+
+            // Normal byte accumulation - all escape processing now goes through event system
+            // Skip writing bytes to escape buffer when we have a pending high surrogate
+            // (prevents literal \uD801 text from being included in final string)
+            if !in_escape
+                && self.stream_buffer.has_unescaped_content()
+                && !self.unicode_escape_collector.has_pending_high_surrogate()
+            {
+                self.append_byte_to_escape_buffer(byte)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<'b, R: Reader, C: BitStackConfig> ParserContext for StreamParser<'b, R, C> {
@@ -565,6 +639,10 @@ impl<'b, R: Reader, C: BitStackConfig> ParserContext for StreamParser<'b, R, C> 
 
     fn set_parser_state(&mut self, state: crate::shared::State) {
         self.parser_state.state = state;
+    }
+
+    fn set_last_literal_pos(&mut self, pos: usize) {
+        self.parser_state.last_literal_pos = pos;
     }
 }
 
@@ -696,6 +774,19 @@ impl<'b, R: Reader, C: BitStackConfig> EscapeHandler for StreamParser<'b, R, C> 
         }
 
         self.append_byte_to_escape_buffer(escape_char)?;
+        Ok(())
+    }
+
+    fn get_last_literal_pos(&self) -> usize {
+        self.parser_state.last_literal_pos
+    }
+
+    fn set_last_literal_pos(&mut self, pos: usize) {
+        self.parser_state.last_literal_pos = pos;
+    }
+
+    fn append_literal_range(&mut self, start: usize, end: usize) -> Result<(), crate::ParseError> {
+        self.stream_buffer.append_unescaped_range(start, end)?;
         Ok(())
     }
 }

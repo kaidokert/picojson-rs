@@ -253,6 +253,64 @@ impl<'a> StreamBuffer<'a> {
         }
     }
 
+    /// Append a slice to the unescaped buffer (zero-copy range processing)
+    pub fn append_unescaped_slice(&mut self, slice: &[u8]) -> Result<(), StreamBufferError> {
+        let required_space = slice.len();
+        let available_space = self.buffer.len().saturating_sub(self.unescaped_len);
+        
+        if required_space > available_space {
+            return Err(StreamBufferError::BufferFull);
+        }
+        
+        // Copy slice to unescaped buffer
+        let dest_start = self.unescaped_len;
+        let dest_end = dest_start + required_space;
+        
+        if let Some(dest_slice) = self.buffer.get_mut(dest_start..dest_end) {
+            dest_slice.copy_from_slice(slice);
+            self.unescaped_len += required_space;
+            Ok(())
+        } else {
+            Err(StreamBufferError::BufferFull)
+        }
+    }
+
+    /// Append a range from the buffer to the unescaped buffer (avoids borrow conflicts)
+    pub fn append_unescaped_range(&mut self, start: usize, end: usize) -> Result<(), StreamBufferError> {
+        if start >= end || end > self.data_end {
+            return Ok(()); // Empty range or invalid bounds
+        }
+        
+        let required_space = end - start;
+        let available_space = self.buffer.len().saturating_sub(self.unescaped_len);
+        
+        if required_space > available_space {
+            return Err(StreamBufferError::BufferFull);
+        }
+        
+        // Copy range directly within the buffer to avoid borrow conflicts
+        let dest_start = self.unescaped_len;
+        
+        // We need to be careful about overlapping ranges, but in this case
+        // we're copying from the input portion to the unescaped portion, so no overlap
+        for i in 0..required_space {
+            // Get the source byte first
+            let src_byte = match self.buffer.get(start + i) {
+                Some(byte) => *byte,
+                None => return Err(StreamBufferError::BufferFull),
+            };
+            
+            // Then set the destination byte
+            match self.buffer.get_mut(dest_start + i) {
+                Some(dest) => *dest = src_byte,
+                None => return Err(StreamBufferError::BufferFull),
+            }
+        }
+        
+        self.unescaped_len += required_space;
+        Ok(())
+    }
+
     /// Get a string slice from the buffer (zero-copy)
     /// Used for strings without escapes
     pub fn get_string_slice(&self, start: usize, end: usize) -> Result<&[u8], StreamBufferError> {

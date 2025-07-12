@@ -57,6 +57,10 @@ pub enum State {
 pub(super) struct ParserState {
     pub state: State,
     pub evts: [Option<crate::ujson::Event>; 2],
+    /// Position of the last literal segment start for range-based escape processing
+    pub last_literal_pos: usize,
+    /// Position where the current escape sequence started (temporary storage)
+    pub current_escape_start: usize,
 }
 
 impl ParserState {
@@ -64,6 +68,8 @@ impl ParserState {
         Self {
             state: State::None,
             evts: core::array::from_fn(|_| None),
+            last_literal_pos: 0,
+            current_escape_start: 0,
         }
     }
 }

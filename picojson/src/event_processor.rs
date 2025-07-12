@@ -18,6 +18,9 @@ pub trait ParserContext {
 
     /// Set parser state
     fn set_parser_state(&mut self, state: crate::shared::State);
+
+    /// Set the last literal position for range-based escape processing
+    fn set_last_literal_pos(&mut self, pos: usize);
 }
 
 /// Escape handling trait for abstracting escape sequence processing between parsers
@@ -39,6 +42,15 @@ pub trait EscapeHandler {
 
     /// Handle a simple escape character (after EscapeProcessor conversion)
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), crate::ParseError>;
+
+    /// Get the last literal position for range-based processing
+    fn get_last_literal_pos(&self) -> usize;
+
+    /// Set the last literal position for range-based processing
+    fn set_last_literal_pos(&mut self, pos: usize);
+
+    /// Append a literal range to the escape buffer (for range-based processing)
+    fn append_literal_range(&mut self, start: usize, end: usize) -> Result<(), crate::ParseError>;
 }
 
 /// Minimal buffer interface for position tracking and content extraction
@@ -80,12 +92,14 @@ pub fn process_begin_events<C: ParserContext>(
             let pos = context.current_position();
             context.set_parser_state(State::Key(pos));
             context.begin_string_content(pos);
+            context.set_last_literal_pos(pos);
             Some(EventResult::Continue)
         }
         crate::ujson::Event::Begin(EventToken::String) => {
             let pos = context.current_position();
             context.set_parser_state(State::String(pos));
             context.begin_string_content(pos);
+            context.set_last_literal_pos(pos);
             Some(EventResult::Continue)
         }
 
@@ -214,6 +228,29 @@ pub fn take_first_event(
     event_storage.iter_mut().find_map(|e| e.take())
 }
 
+/// Process Begin(EscapeSequence) events for range-based escape processing
+pub fn process_begin_escape_sequence<E: EscapeHandler, C: ParserContext>(
+    escape_handler: &mut E,
+    context: &mut C,
+) -> Result<(), crate::ParseError> {
+    // Only process if we're inside a string or key
+    match escape_handler.parser_state() {
+        crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+            // Calculate escape start position (current position - 1 to include the backslash)
+            let escape_start = context.current_position().saturating_sub(1);
+            let last_literal_pos = escape_handler.get_last_literal_pos();
+            
+            // Append literal range from last_literal_pos to escape_start
+            // Skip if we have a pending high surrogate (prevents literal \uD801 text inclusion)
+            if !escape_handler.has_pending_high_surrogate() {
+                escape_handler.append_literal_range(last_literal_pos, escape_start)?;
+            }
+        }
+        _ => {} // Ignore if not in string/key context
+    }
+    Ok(())
+}
+
 /// Process simple escape sequence events that have similar patterns between parsers
 pub fn process_simple_escape_event<E: EscapeHandler>(
     escape_token: &EventToken,
@@ -235,6 +272,47 @@ pub fn process_simple_escape_event<E: EscapeHandler>(
         _ => {} // Ignore if not in string/key context
     }
 
+    Ok(())
+}
+
+/// Update literal position after escape processing for range-based handling
+pub fn update_literal_pos_after_escape<E: EscapeHandler, C: ParserContext>(
+    escape_handler: &mut E,
+    context: &mut C,
+    _escape_length: usize,
+) -> Result<(), crate::ParseError> {
+    // Only process if we're inside a string or key
+    match escape_handler.parser_state() {
+        crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+            // Update last_literal_pos to position after this escape sequence
+            let current_pos = context.current_position();
+            escape_handler.set_last_literal_pos(current_pos);
+        }
+        _ => {} // Ignore if not in string/key context
+    }
+    Ok(())
+}
+
+/// Process final literal range when extracting string/key content
+pub fn process_final_literal_range<E: EscapeHandler, C: ParserContext>(
+    escape_handler: &mut E,
+    context: &mut C,
+) -> Result<(), crate::ParseError> {
+    // Only process if we're inside a string or key
+    match escape_handler.parser_state() {
+        crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+            let last_literal_pos = escape_handler.get_last_literal_pos();
+            let current_pos = context.current_position();
+            // End position excludes the closing quote
+            let content_end = current_pos.saturating_sub(1);
+            
+            // Append final literal range if any content remains
+            if last_literal_pos < content_end {
+                escape_handler.append_literal_range(last_literal_pos, content_end)?;
+            }
+        }
+        _ => {} // Ignore if not in string/key context
+    }
     Ok(())
 }
 
@@ -387,6 +465,10 @@ mod tests {
 
         fn set_parser_state(&mut self, state: crate::shared::State) {
             self.state = Some(state);
+        }
+
+        fn set_last_literal_pos(&mut self, _pos: usize) {
+            // Mock implementation - not used in tests
         }
     }
 

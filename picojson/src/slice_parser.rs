@@ -307,6 +307,10 @@ impl<'a, 'b, C: BitStackConfig> ParserContext for SliceParser<'a, 'b, C> {
     fn set_parser_state(&mut self, state: State) {
         self.parser_state.state = state;
     }
+
+    fn set_last_literal_pos(&mut self, pos: usize) {
+        self.parser_state.last_literal_pos = pos;
+    }
 }
 
 impl<'a, 'b, C: BitStackConfig> ContentExtractor for SliceParser<'a, 'b, C> {
@@ -393,6 +397,22 @@ impl<'a, 'b, C: BitStackConfig> EscapeHandler for SliceParser<'a, 'b, C> {
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
+        Ok(())
+    }
+
+    fn get_last_literal_pos(&self) -> usize {
+        self.parser_state.last_literal_pos
+    }
+
+    fn set_last_literal_pos(&mut self, pos: usize) {
+        self.parser_state.last_literal_pos = pos;
+    }
+
+    fn append_literal_range(&mut self, _start: usize, _end: usize) -> Result<(), ParseError> {
+        // SliceParser uses CopyOnEscape which handles ranges internally
+        // This method is mainly for StreamParser's range-based processing
+        // For SliceParser, we don't need to explicitly append ranges since 
+        // CopyOnEscape handles this automatically during escape processing
         Ok(())
     }
 }
