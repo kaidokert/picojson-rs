@@ -91,11 +91,11 @@ jobs:
 
       - name: Verify conformance tests are available
         run: |
-          if [ ! -d "conformance_tests/test_parsing" ]; then
+          if [ ! -d "picojson/tests/data/JSONTestSuite/test_parsing" ]; then
             echo "::warning::Conformance tests not available - skipping remote test validation"
             exit 0
           fi
-          echo "Found $(find conformance_tests/test_parsing -name '*.json' | wc -l) conformance test files"
+          echo "Found $(find picojson/tests/data/JSONTestSuite/test_parsing -name '*.json' | wc -l) conformance test files"
 
       - name: Run JSONTestSuite conformance tests
         working-directory: picojson
