@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+  pull_request:
 
 name: Build and test
 
