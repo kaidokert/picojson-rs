@@ -5,6 +5,7 @@
 //! This module extracts the common event handling patterns to reduce code duplication
 //! while preserving the performance characteristics of each parser type.
 
+use crate::shared::ByteProvider;
 use crate::ujson::EventToken;
 use crate::{Event, ParseError};
 
@@ -301,6 +302,66 @@ pub fn process_simple_events(event: crate::ujson::Event) -> Option<EventResult<'
         // All other events need parser-specific handling
         _ => None,
     }
+}
+
+/// Shared event-pulling loop that works with both SliceParser and StreamParser
+///
+/// This function handles the common pattern of:
+/// 1. Get bytes from ByteProvider
+/// 2. Feed them to the tokenizer
+/// 3. Handle EOF with tokenizer.finish()
+/// 4. Store events in the provided event storage
+pub fn pull_events<B: ByteProvider, T: crate::ujson::BitBucket, C: crate::ujson::DepthCounter>(
+    provider: &mut B,
+    tokenizer: &mut crate::ujson::Tokenizer<T, C>,
+    event_storage: &mut [Option<crate::ujson::Event>; 2],
+) -> Result<(), ParseError> {
+    clear_events(event_storage);
+
+    if let Some(byte) = provider.next_byte()? {
+        // Got a byte, process it through tokenizer
+        let mut callback = create_tokenizer_callback(event_storage);
+        tokenizer
+            .parse_chunk(&[byte], &mut callback)
+            .map_err(ParseError::TokenizerError)?;
+    } else {
+        // No more bytes, finish tokenizer if not already finished
+        if !provider.is_finished() {
+            let mut callback = create_tokenizer_callback(event_storage);
+            tokenizer
+                .finish(&mut callback)
+                .map_err(ParseError::TokenizerError)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Process a specific byte through the tokenizer (for cases where byte is already available)
+pub fn process_byte_through_tokenizer<T: crate::ujson::BitBucket, C: crate::ujson::DepthCounter>(
+    byte: u8,
+    tokenizer: &mut crate::ujson::Tokenizer<T, C>,
+    event_storage: &mut [Option<crate::ujson::Event>; 2],
+) -> Result<(), ParseError> {
+    clear_events(event_storage);
+    let mut callback = create_tokenizer_callback(event_storage);
+    tokenizer
+        .parse_chunk(&[byte], &mut callback)
+        .map_err(ParseError::TokenizerError)?;
+    Ok(())
+}
+
+/// Finish the tokenizer and collect any final events
+pub fn finish_tokenizer<T: crate::ujson::BitBucket, C: crate::ujson::DepthCounter>(
+    tokenizer: &mut crate::ujson::Tokenizer<T, C>,
+    event_storage: &mut [Option<crate::ujson::Event>; 2],
+) -> Result<(), ParseError> {
+    clear_events(event_storage);
+    let mut callback = create_tokenizer_callback(event_storage);
+    tokenizer
+        .finish(&mut callback)
+        .map_err(ParseError::TokenizerError)?;
+    Ok(())
 }
 
 #[cfg(test)]

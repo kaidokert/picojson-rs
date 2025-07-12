@@ -18,3 +18,4 @@
 - [x] See if we can bring an Iterator impl back
     - Can't practically be done with borrowing return values
 - [x] Conformance tests at parser level, not just tokenizer
+- [ ] Clean up match { foo , => panic!("expected foo") } pattern in tests.

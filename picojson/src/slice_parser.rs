@@ -3,13 +3,15 @@
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::{
-    create_tokenizer_callback, have_events, process_begin_events, process_simple_escape_event,
-    process_simple_events, process_unicode_escape_events, take_first_event, ContentExtractor,
-    EscapeHandler, EventResult, ParserContext,
+    finish_tokenizer, have_events, process_begin_events, process_byte_through_tokenizer,
+    process_simple_escape_event, process_simple_events, process_unicode_escape_events,
+    take_first_event, ContentExtractor, EscapeHandler, EventResult, ParserContext,
 };
 use crate::number_parser::NumberExtractor;
 use crate::parse_error::ParseError;
-use crate::shared::{ContentRange, Event, ParserState, PullParser, State, UnexpectedState};
+use crate::shared::{
+    ByteProvider, ContentRange, Event, ParserState, PullParser, State, UnexpectedState,
+};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ujson;
 use ujson::{EventToken, Tokenizer};
@@ -180,26 +182,15 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
     }
 
     fn pull_tokenizer_events(&mut self) -> Result<(), ParseError> {
-        use crate::slice_input_buffer::InputBuffer;
         if self.buffer.is_past_end() {
             return Err(ParseError::EndOfData);
         }
-        let mut callback = create_tokenizer_callback(&mut self.parser_state.evts);
-
-        let res = match self.buffer.consume_byte() {
-            Err(crate::slice_input_buffer::Error::ReachedEnd) => {
-                self.tokenizer.finish(&mut callback)
-            }
-            Err(err) => {
-                return Err(err.into());
-            }
-            Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
-        };
-
-        if let Err(tokenizer_error) = res {
-            return Err(ParseError::TokenizerError(tokenizer_error));
+        // Use ByteProvider implementation to get the next byte and process it
+        if let Some(byte) = self.next_byte()? {
+            process_byte_through_tokenizer(byte, &mut self.tokenizer, &mut self.parser_state.evts)
+        } else {
+            finish_tokenizer(&mut self.tokenizer, &mut self.parser_state.evts)
         }
-        Ok(())
     }
 
     /// Returns the next JSON event or an error if parsing fails.
@@ -400,6 +391,21 @@ impl<'a, 'b, C: BitStackConfig> EscapeHandler for SliceParser<'a, 'b, C> {
 impl<'a, 'b, C: BitStackConfig> PullParser for SliceParser<'a, 'b, C> {
     fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.next_event_impl()
+    }
+}
+
+impl<'a, 'b, C: BitStackConfig> crate::shared::ByteProvider for SliceParser<'a, 'b, C> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        use crate::slice_input_buffer::InputBuffer;
+        match self.buffer.consume_byte() {
+            Ok(byte) => Ok(Some(byte)),
+            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn is_finished(&self) -> bool {
+        self.buffer.is_past_end()
     }
 }
 
