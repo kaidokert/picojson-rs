@@ -72,3 +72,35 @@ jobs:
       - name: Run cargo test
         working-directory: picojson
         run: cargo test ${{ matrix.features }}
+
+  conformance-tests:
+    name: JSONTestSuite Conformance Tests
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Don't fail the entire workflow if conformance tests fail to download or run
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive  # Ensure conformance test submodule is downloaded
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify conformance tests are available
+        run: |
+          if [ ! -d "conformance_tests/test_parsing" ]; then
+            echo "::warning::Conformance tests not available - skipping remote test validation"
+            exit 0
+          fi
+          echo "Found $(find conformance_tests/test_parsing -name '*.json' | wc -l) conformance test files"
+
+      - name: Run conformance tests (SliceParser)
+        working-directory: picojson
+        run: cargo test --features remote-tests
+        continue-on-error: true
+
+      - name: Report conformance test results
+        run: echo "::notice::Conformance tests completed - check logs above for any failures"
