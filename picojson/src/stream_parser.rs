@@ -163,6 +163,9 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     | EventToken::EscapeCarriageReturn
                     | EventToken::EscapeTab),
                 ) => {
+                    // StreamParser-specific: Handle simple escape sequences on End events
+                    // because StreamBuffer must wait until the token ends to accumulate
+                    // all bytes before processing the complete escape sequence
                     process_simple_escape_event(&escape_token, self)?;
                 }
                 _ => {

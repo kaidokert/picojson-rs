@@ -209,6 +209,9 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                     | EventToken::EscapeCarriageReturn
                     | EventToken::EscapeTab),
                 ) => {
+                    // SliceParser-specific: Handle simple escape sequences on Begin events
+                    // because CopyOnEscape requires starting unescaping immediately when
+                    // the escape token begins to maintain zero-copy optimization
                     process_simple_escape_event(&escape_token, self)?;
                 }
                 ujson::Event::End(EventToken::EscapeSequence) => {
