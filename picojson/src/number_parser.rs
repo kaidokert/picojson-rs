@@ -25,6 +25,40 @@ pub trait NumberExtractor {
     fn is_empty(&self) -> bool;
 }
 
+/// Shared number parsing with automatic delimiter handling.
+///
+/// This function encapsulates the complete number parsing pattern:
+/// 1. Calculate correct end position using delimiter logic
+/// 2. Extract number slice from buffer
+/// 3. Convert to UTF-8 string
+/// 4. Parse using shared number parsing logic
+/// 5. Create JsonNumber::Borrowed event
+///
+/// # Arguments
+/// * `extractor` - Buffer that implements NumberExtractor
+/// * `start_pos` - Starting position of the number content
+/// * `from_container_end` - True if number is terminated by container delimiter
+/// * `at_document_end` - True if we're at end of document (no delimiter to exclude)
+pub fn parse_number_with_delimiter_logic<T: NumberExtractor>(
+    extractor: &T,
+    start_pos: usize,
+    from_container_end: bool,
+    at_document_end: bool,
+) -> Result<Event<'_, '_>, ParseError> {
+    let current_pos = extractor.current_position();
+
+    // Shared delimiter logic: only use full span when NOT from container end AND at document end
+    let end_pos = if !from_container_end && at_document_end {
+        // End of document - no delimiter to exclude
+        crate::shared::ContentRange::number_end_position(current_pos, true)
+    } else {
+        // All other cases - exclude delimiter
+        crate::shared::ContentRange::number_end_position(current_pos, false)
+    };
+
+    parse_number_event(extractor, start_pos, end_pos)
+}
+
 /// Number parsing with explicit position control - used by both parsers.
 ///
 /// This function encapsulates the common pattern:
