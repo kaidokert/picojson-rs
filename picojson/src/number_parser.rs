@@ -47,14 +47,9 @@ pub fn parse_number_with_delimiter_logic<T: NumberExtractor>(
 ) -> Result<Event<'_, '_>, ParseError> {
     let current_pos = extractor.current_position();
 
-    // Shared delimiter logic: only use full span when NOT from container end AND at document end
-    let end_pos = if !from_container_end && at_document_end {
-        // End of document - no delimiter to exclude
-        crate::shared::ContentRange::number_end_position(current_pos, true)
-    } else {
-        // All other cases - exclude delimiter
-        crate::shared::ContentRange::number_end_position(current_pos, false)
-    };
+    // A standalone number at the end of the document has no trailing delimiter, so we use the full span.
+    let use_full_span = !from_container_end && at_document_end;
+    let end_pos = crate::shared::ContentRange::number_end_position(current_pos, use_full_span);
 
     parse_number_event(extractor, start_pos, end_pos)
 }

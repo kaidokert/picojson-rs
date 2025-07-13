@@ -153,17 +153,18 @@ impl ContentRange {
     }
 
     /// Calculate number end position with delimiter handling
-    /// Standardizes the pattern of excluding delimiters unless at container end
+    /// Standardizes the pattern of excluding delimiters unless at document end
     ///
     /// # Arguments
     /// * `current_pos` - Current parser position
-    /// * `from_container_end` - True if number is at end of container (no delimiter to exclude)
+    /// * `use_full_span` - True if the number is at the end of the document and not in a container,
+    ///   meaning there is no delimiter to exclude.
     ///
     /// # Returns
     /// End position for number content
-    pub fn number_end_position(current_pos: usize, from_container_end: bool) -> usize {
-        if from_container_end {
-            // At container end - use full span (no delimiter to exclude)
+    pub fn number_end_position(current_pos: usize, use_full_span: bool) -> usize {
+        if use_full_span {
+            // At document end and standalone - use full span (no delimiter to exclude)
             current_pos
         } else {
             // Normal case - exclude delimiter

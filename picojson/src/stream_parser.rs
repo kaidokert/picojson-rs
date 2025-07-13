@@ -116,83 +116,59 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
 impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Get the next JSON event from the stream
     fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
-        // Apply any queued unescaped content reset from previous call
         self.apply_unescaped_reset_if_queued();
 
         loop {
-            // Pull events from tokenizer until we have some
             while !have_events(&self.parser_state.evts) {
                 if !self.pull_tokenizer_events()? {
                     return Ok(Event::EndDocument);
                 }
             }
 
-            // Now we have events - process ONE event
             let taken_event = take_first_event(&mut self.parser_state.evts);
-
-            if let Some(taken) = taken_event {
-                // Process the event directly in the main loop
-                // First, try the shared simple event processor
-                if let Some(simple_result) = process_simple_events(taken.clone()) {
-                    match simple_result {
-                        EventResult::Complete(event) => return Ok(event),
-                        EventResult::ExtractString => return self.validate_and_extract_string(),
-                        EventResult::ExtractKey => return self.validate_and_extract_key(),
-                        EventResult::ExtractNumber(from_container_end) => {
-                            return self.validate_and_extract_number(from_container_end)
-                        }
-                        EventResult::Continue => {
-                            // Continue to next iteration for more events
-                        }
-                    }
-                } else if let Some(begin_result) = process_begin_events(&taken, self) {
-                    match begin_result {
-                        EventResult::Continue => {
-                            // Continue to next iteration for more events
-                        }
-                        _ => unreachable!("process_begin_events only returns Continue"),
-                    }
-                } else {
-                    // Handle parser-specific events
-                    match taken {
-                        // Shared escape sequence lifecycle events (common pattern #1)
-                        ujson::Event::Begin(EventToken::EscapeSequence) => {
-                            // Start of escape sequence using shared lifecycle interface
-                            process_begin_escape_sequence_event(self)?;
-                            // Continue processing
-                        }
-                        // Shared Unicode escape processing (common pattern #2)
-                        _ if process_unicode_escape_events(&taken, self)? => {
-                            // Unicode escape events handled by shared function
-                            // Continue processing
-                        }
-                        // Simple escape sequence handling - End events (StreamParser-specific)
-                        ujson::Event::End(
-                            escape_token @ (EventToken::EscapeQuote
-                            | EventToken::EscapeBackslash
-                            | EventToken::EscapeSlash
-                            | EventToken::EscapeBackspace
-                            | EventToken::EscapeFormFeed
-                            | EventToken::EscapeNewline
-                            | EventToken::EscapeCarriageReturn
-                            | EventToken::EscapeTab),
-                        ) => {
-                            // Handle simple escape sequences using shared function
-                            process_simple_escape_event(&escape_token, self)?;
-                            // Continue processing
-                        }
-
-                        // All other events - continue processing
-                        _ => {
-                            // Continue to next byte
-                        }
-                    }
-                }
-            } else {
-                // No event available - this shouldn't happen since we ensured have_events() above
+            let Some(taken) = taken_event else {
                 return Err(crate::shared::UnexpectedState::StateMismatch.into());
+            };
+
+            // Try shared event processors first
+            if let Some(result) =
+                process_simple_events(&taken).or_else(|| process_begin_events(&taken, self))
+            {
+                match result {
+                    EventResult::Complete(event) => return Ok(event),
+                    EventResult::ExtractString => return self.validate_and_extract_string(),
+                    EventResult::ExtractKey => return self.validate_and_extract_key(),
+                    EventResult::ExtractNumber(from_container_end) => {
+                        return self.validate_and_extract_number(from_container_end)
+                    }
+                    EventResult::Continue => continue,
+                }
             }
-            // If no event was processed, continue the outer loop to get more events
+
+            // Handle parser-specific events
+            match taken {
+                ujson::Event::Begin(EventToken::EscapeSequence) => {
+                    process_begin_escape_sequence_event(self)?;
+                }
+                _ if process_unicode_escape_events(&taken, self)? => {
+                    // Unicode escape events handled by shared function
+                }
+                ujson::Event::End(
+                    escape_token @ (EventToken::EscapeQuote
+                    | EventToken::EscapeBackslash
+                    | EventToken::EscapeSlash
+                    | EventToken::EscapeBackspace
+                    | EventToken::EscapeFormFeed
+                    | EventToken::EscapeNewline
+                    | EventToken::EscapeCarriageReturn
+                    | EventToken::EscapeTab),
+                ) => {
+                    process_simple_escape_event(&escape_token, self)?;
+                }
+                _ => {
+                    // All other events continue to next iteration
+                }
+            }
         }
     }
 

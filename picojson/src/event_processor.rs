@@ -221,8 +221,6 @@ pub fn process_begin_escape_sequence_event<H: EscapeHandler>(
     // Only process if we're inside a string or key
     match handler.parser_state() {
         crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-            // Create a temporary context reference to avoid borrow conflicts
-            // The ParserContext is implemented by the same type as EscapeHandler
             handler.begin_escape_sequence()?;
         }
         _ => {} // Ignore if not in string/key context
@@ -286,7 +284,7 @@ pub fn process_unicode_escape_events<C: ContentExtractor>(
 }
 
 /// Process simple container and primitive events that are identical between parsers
-pub fn process_simple_events(event: crate::ujson::Event) -> Option<EventResult<'static, 'static>> {
+pub fn process_simple_events(event: &crate::ujson::Event) -> Option<EventResult<'static, 'static>> {
     match event {
         // Container events - identical processing
         crate::ujson::Event::ObjectStart => Some(EventResult::Complete(Event::StartObject)),
@@ -353,12 +351,12 @@ mod tests {
     #[test]
     fn test_container_events() {
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::ObjectStart),
+            process_simple_events(&crate::ujson::Event::ObjectStart),
             Some(EventResult::Complete(Event::StartObject))
         ));
 
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::ArrayEnd),
+            process_simple_events(&crate::ujson::Event::ArrayEnd),
             Some(EventResult::Complete(Event::EndArray))
         ));
     }
@@ -366,12 +364,12 @@ mod tests {
     #[test]
     fn test_primitive_events() {
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::End(EventToken::True)),
+            process_simple_events(&crate::ujson::Event::End(EventToken::True)),
             Some(EventResult::Complete(Event::Bool(true)))
         ));
 
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::End(EventToken::Null)),
+            process_simple_events(&crate::ujson::Event::End(EventToken::Null)),
             Some(EventResult::Complete(Event::Null))
         ));
     }
@@ -379,26 +377,26 @@ mod tests {
     #[test]
     fn test_extraction_triggers() {
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::End(EventToken::String)),
+            process_simple_events(&crate::ujson::Event::End(EventToken::String)),
             Some(EventResult::ExtractString)
         ));
 
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::End(EventToken::Number)),
+            process_simple_events(&crate::ujson::Event::End(EventToken::Number)),
             Some(EventResult::ExtractNumber(false))
         ));
 
         assert!(matches!(
-            process_simple_events(crate::ujson::Event::End(EventToken::NumberAndArray)),
+            process_simple_events(&crate::ujson::Event::End(EventToken::NumberAndArray)),
             Some(EventResult::ExtractNumber(true))
         ));
     }
 
     #[test]
     fn test_complex_events_not_handled() {
-        assert!(process_simple_events(crate::ujson::Event::Begin(EventToken::String)).is_none());
+        assert!(process_simple_events(&crate::ujson::Event::Begin(EventToken::String)).is_none());
         assert!(
-            process_simple_events(crate::ujson::Event::Begin(EventToken::EscapeQuote)).is_none()
+            process_simple_events(&crate::ujson::Event::Begin(EventToken::EscapeQuote)).is_none()
         );
     }
 
