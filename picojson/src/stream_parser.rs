@@ -580,9 +580,11 @@ impl<'b, R: Reader, C: BitStackConfig> EscapeHandler for StreamParser<'b, R, C> 
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some((utf8_bytes, len)) = utf8_bytes_result {
             // StreamParser handles all escape sequences the same way - append bytes to escape buffer
-            let valid_bytes = &utf8_bytes[..len];
+            // Use safe slice access to avoid panic
+            if let Some(valid_bytes) = utf8_bytes.get(..len) {
             for &byte in valid_bytes {
                 self.append_byte_to_escape_buffer(byte)?;
+                }
             }
         }
 
