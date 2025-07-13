@@ -1,30 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::copy_on_escape::CopyOnEscape;
-use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
+use crate::escape_processor::UnicodeEscapeCollector;
+use crate::event_processor::{
+    finish_tokenizer, have_events, process_begin_escape_sequence_event, process_begin_events,
+    process_byte_through_tokenizer, process_simple_escape_event, process_simple_events,
+    process_unicode_escape_events, take_first_event, ContentExtractor, EscapeHandler, EventResult,
+};
 use crate::number_parser::NumberExtractor;
 use crate::parse_error::ParseError;
-use crate::shared::{ContentRange, Event, ParserState, PullParser, State, UnexpectedState};
+use crate::shared::{
+    ByteProvider, ContentRange, Event, ParserState, PullParser, State, UnexpectedState,
+};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ujson;
 use ujson::{EventToken, Tokenizer};
 
 use ujson::{BitStackConfig, DefaultConfig};
-
-/// Result of processing a tokenizer event
-enum EventResult<'a, 'b> {
-    /// Event processing complete, return this event
-    Complete(Event<'a, 'b>),
-    /// Continue processing, no event to return yet
-    Continue,
-    /// Extract string content from current state
-    ExtractString,
-    /// Extract key content from current state
-    ExtractKey,
-    /// Extract number content from current state,
-    /// bool indicates if number was terminated by container delimiter
-    ExtractNumber(bool),
-}
 
 /// A pull parser that parses JSON from a slice.
 ///
@@ -165,66 +157,148 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         }
     }
 
-    fn have_events(&self) -> bool {
-        self.parser_state.evts.iter().any(|evt| evt.is_some())
+    /// Returns the next JSON event or an error if parsing fails.
+    /// Parsing continues until `EndDocument` is returned or an error occurs.
+    fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
+        if self.buffer.is_past_end() {
+            return Ok(Event::EndDocument);
+        }
+
+        loop {
+            while !have_events(&self.parser_state.evts) {
+                if !self.pull_tokenizer_events()? {
+                    return Ok(Event::EndDocument);
+                }
+            }
+
+            let taken_event = take_first_event(&mut self.parser_state.evts);
+            let Some(taken) = taken_event else {
+                return Err(UnexpectedState::StateMismatch.into());
+            };
+
+            // Try shared event processors first
+            if let Some(result) =
+                process_simple_events(&taken).or_else(|| process_begin_events(&taken, self))
+            {
+                match result {
+                    EventResult::Complete(event) => return Ok(event),
+                    EventResult::ExtractString => return self.validate_and_extract_string(),
+                    EventResult::ExtractKey => return self.validate_and_extract_key(),
+                    EventResult::ExtractNumber(from_container_end) => {
+                        return self.validate_and_extract_number(from_container_end)
+                    }
+                    EventResult::Continue => continue,
+                }
+            }
+
+            // Handle parser-specific events
+            match taken {
+                ujson::Event::Begin(EventToken::EscapeSequence) => {
+                    process_begin_escape_sequence_event(self)?;
+                }
+                _ if process_unicode_escape_events(&taken, self)? => {
+                    // Unicode escape events handled by shared function
+                }
+                ujson::Event::Begin(
+                    escape_token @ (EventToken::EscapeQuote
+                    | EventToken::EscapeBackslash
+                    | EventToken::EscapeSlash
+                    | EventToken::EscapeBackspace
+                    | EventToken::EscapeFormFeed
+                    | EventToken::EscapeNewline
+                    | EventToken::EscapeCarriageReturn
+                    | EventToken::EscapeTab),
+                ) => {
+                    // SliceParser-specific: Handle simple escape sequences on Begin events
+                    // because CopyOnEscape requires starting unescaping immediately when
+                    // the escape token begins to maintain zero-copy optimization
+                    process_simple_escape_event(&escape_token, self)?;
+                }
+                ujson::Event::End(EventToken::EscapeSequence) => {
+                    // Ignore in SliceParser since it uses slice-based parsing
+                }
+                _ => {
+                    // All other events continue to next iteration
+                }
+            }
+        }
     }
 
-    /// Helper function to parse a number from the buffer given a start position.
-    /// SliceParser handles all delimiter logic directly.
-    fn parse_number_from_buffer(
+    /// Pull events from tokenizer and return whether parsing should continue
+    /// Returns false when past end (equivalent to self.buffer.is_past_end())
+    fn pull_tokenizer_events(&mut self) -> Result<bool, ParseError> {
+        if self.buffer.is_past_end() {
+            return Ok(false); // Indicate end state instead of error
+        }
+        // Use ByteProvider implementation to get the next byte and process it
+        if let Some(byte) = self.next_byte()? {
+            process_byte_through_tokenizer(byte, &mut self.tokenizer, &mut self.parser_state.evts)?;
+        } else {
+            finish_tokenizer(&mut self.tokenizer, &mut self.parser_state.evts)?;
+        }
+        Ok(!self.buffer.is_past_end()) // Return continue state
+    }
+}
+
+impl<'a, 'b, C: BitStackConfig> ContentExtractor for SliceParser<'a, 'b, C> {
+    fn parser_state_mut(&mut self) -> &mut State {
+        &mut self.parser_state.state
+    }
+
+    fn current_position(&self) -> usize {
+        self.buffer.current_pos()
+    }
+
+    fn begin_string_content(&mut self, pos: usize) {
+        self.copy_on_escape.begin_string(pos);
+    }
+
+    fn unicode_escape_collector_mut(
         &mut self,
-        start: usize,
+    ) -> &mut crate::escape_processor::UnicodeEscapeCollector {
+        &mut self.unicode_escape_collector
+    }
+
+    fn extract_string_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        // Use CopyOnEscape to get the final string result
+        let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
+        let value_result = self.copy_on_escape.end_string(end_pos)?;
+        Ok(Event::String(value_result))
+    }
+
+    fn extract_key_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        // Use CopyOnEscape to get the final key result
+        let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
+        let key_result = self.copy_on_escape.end_string(end_pos)?;
+        Ok(Event::Key(key_result))
+    }
+
+    fn extract_number_content(
+        &mut self,
+        start_pos: usize,
         from_container_end: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // SliceParser delimiter logic
-        let current_pos = self.buffer.current_position();
-        let end_pos = if !from_container_end && self.buffer.is_empty() {
-            // At EOF - use full span
-            current_pos
-        } else {
-            // All other cases - exclude delimiter
-            current_pos.saturating_sub(1)
-        };
+        // Use shared number parsing with SliceParser-specific document end detection
+        let at_document_end = self.buffer.is_empty();
+        crate::number_parser::parse_number_with_delimiter_logic(
+            &self.buffer,
+            start_pos,
+            from_container_end,
+            at_document_end,
+        )
+    }
+}
 
-        crate::number_parser::parse_number_event(&self.buffer, start, end_pos)
+impl<'a, 'b, C: BitStackConfig> EscapeHandler for SliceParser<'a, 'b, C> {
+    fn parser_state(&self) -> &State {
+        &self.parser_state.state
     }
 
-    /// Helper method to handle simple escape tokens using EscapeProcessor
-    /// Converts EventToken back to original escape character and processes it
-    fn handle_simple_escape_token(
-        &mut self,
-        escape_token: &EventToken,
-    ) -> Result<Option<Event<'_, '_>>, ParseError> {
-        // Use unified escape token processing
-        let unescaped_char = EscapeProcessor::process_escape_token(escape_token)?;
-
-        // Handle the escape using existing logic
-        self.handle_escape_event(unescaped_char)
-    }
-
-    /// Handles escape sequence events by delegating to CopyOnEscape if we're inside a string or key
-    fn handle_escape_event(
-        &mut self,
-        escape_char: u8,
-    ) -> Result<Option<Event<'_, '_>>, ParseError> {
-        // Clear any pending high surrogate state when we encounter a simple escape
-        // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
-        self.unicode_escape_collector.reset_all();
-
-        if let State::String(_) | State::Key(_) = self.parser_state.state {
-            self.copy_on_escape
-                .handle_escape(self.buffer.current_pos(), escape_char)?;
-        }
-        Ok(None)
-    }
-
-    /// Process Unicode escape sequence using shared UnicodeEscapeCollector
-    /// Extracts hex digits from buffer and processes them through the collector
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
-        // Check if we had a pending high surrogate before processing
+        // Shared Unicode escape processing pattern
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
 
         let mut utf8_buf = [0u8; 4];
@@ -236,7 +310,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
                 &mut utf8_buf,
             )?;
 
-        // Only process UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
+        // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some(utf8_bytes) = utf8_bytes_opt {
             if had_pending_high_surrogate {
                 // This is completing a surrogate pair - need to consume both escapes
@@ -256,235 +330,34 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         Ok(())
     }
 
-    fn pull_tokenizer_events(&mut self) -> Result<(), ParseError> {
-        use crate::slice_input_buffer::InputBuffer;
-        if self.buffer.is_past_end() {
-            return Err(ParseError::EndOfData);
-        }
-        let mut callback = |event, _len| {
-            for evt in self.parser_state.evts.iter_mut() {
-                if evt.is_none() {
-                    *evt = Some(event);
-                    return;
-                }
-            }
-        };
-
-        let res = match self.buffer.consume_byte() {
-            Err(crate::slice_input_buffer::Error::ReachedEnd) => {
-                self.tokenizer.finish(&mut callback)
-            }
-            Err(err) => {
-                return Err(err.into());
-            }
-            Ok(byte) => self.tokenizer.parse_chunk(&[byte], &mut callback),
-        };
-
-        if let Err(tokenizer_error) = res {
-            return Err(ParseError::TokenizerError(tokenizer_error));
-        }
+    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        self.copy_on_escape
+            .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())
     }
 
-    /// Returns the next JSON event or an error if parsing fails.
-    /// Parsing continues until `EndDocument` is returned or an error occurs.
-    fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
-        if self.buffer.is_past_end() {
-            return Ok(Event::EndDocument);
-        }
-        loop {
-            while !self.have_events() {
-                self.pull_tokenizer_events()?;
-                if self.buffer.is_past_end() {
-                    return Ok(Event::EndDocument);
-                }
-            }
-            // Find and move out the first available event to avoid holding mutable borrow during processing
-            let taken_event = {
-                let mut found_event = None;
-                for evt in self.parser_state.evts.iter_mut() {
-                    if evt.is_some() {
-                        found_event = evt.take();
-                        break;
-                    }
-                }
-                found_event
-            };
-
-            if let Some(taken) = taken_event {
-                let res = match taken {
-                    // Container events
-                    ujson::Event::ObjectStart => EventResult::Complete(Event::StartObject),
-                    ujson::Event::ObjectEnd => EventResult::Complete(Event::EndObject),
-                    ujson::Event::ArrayStart => EventResult::Complete(Event::StartArray),
-                    ujson::Event::ArrayEnd => EventResult::Complete(Event::EndArray),
-
-                    // String/Key events
-                    ujson::Event::Begin(EventToken::Key) => {
-                        self.parser_state.state = State::Key(self.buffer.current_pos());
-                        self.copy_on_escape.begin_string(self.buffer.current_pos());
-                        EventResult::Continue
-                    }
-                    ujson::Event::End(EventToken::Key) => EventResult::ExtractKey,
-                    ujson::Event::Begin(EventToken::String) => {
-                        self.parser_state.state = State::String(self.buffer.current_pos());
-                        self.copy_on_escape.begin_string(self.buffer.current_pos());
-                        EventResult::Continue
-                    }
-                    ujson::Event::End(EventToken::String) => EventResult::ExtractString,
-
-                    // Number events
-                    ujson::Event::Begin(
-                        EventToken::Number
-                        | EventToken::NumberAndArray
-                        | EventToken::NumberAndObject,
-                    ) => {
-                        let number_start =
-                            ContentRange::number_start_from_current(self.buffer.current_pos());
-                        self.parser_state.state = State::Number(number_start);
-                        EventResult::Continue
-                    }
-                    ujson::Event::End(EventToken::Number) => EventResult::ExtractNumber(false),
-                    ujson::Event::End(EventToken::NumberAndArray) => {
-                        EventResult::ExtractNumber(true)
-                    }
-                    ujson::Event::End(EventToken::NumberAndObject) => {
-                        EventResult::ExtractNumber(true)
-                    }
-                    // Boolean and null values
-                    ujson::Event::Begin(
-                        EventToken::True | EventToken::False | EventToken::Null,
-                    ) => EventResult::Continue,
-                    ujson::Event::End(EventToken::True) => EventResult::Complete(Event::Bool(true)),
-                    ujson::Event::End(EventToken::False) => {
-                        EventResult::Complete(Event::Bool(false))
-                    }
-                    ujson::Event::End(EventToken::Null) => EventResult::Complete(Event::Null),
-                    // Escape sequence handling
-                    ujson::Event::Begin(
-                        escape_token @ (EventToken::EscapeQuote
-                        | EventToken::EscapeBackslash
-                        | EventToken::EscapeSlash
-                        | EventToken::EscapeBackspace
-                        | EventToken::EscapeFormFeed
-                        | EventToken::EscapeNewline
-                        | EventToken::EscapeCarriageReturn
-                        | EventToken::EscapeTab),
-                    ) => {
-                        // Use EscapeProcessor for all simple escape sequences
-                        self.handle_simple_escape_token(&escape_token)?;
-                        EventResult::Continue
-                    }
-                    ujson::Event::Begin(EventToken::UnicodeEscape) => {
-                        // Start Unicode escape collection - reset collector for new sequence
-                        // Only handle if we're inside a string or key
-                        match self.parser_state.state {
-                            State::String(_) | State::Key(_) => {
-                                self.unicode_escape_collector.reset();
-                            }
-                            _ => {} // Ignore if not in string/key
-                        }
-                        EventResult::Continue
-                    }
-                    ujson::Event::End(EventToken::UnicodeEscape) => {
-                        // Handle end of Unicode escape sequence (\uXXXX) using shared collector
-                        match self.parser_state.state {
-                            State::String(_) | State::Key(_) => {
-                                // Process Unicode escape using shared collector logic
-                                self.process_unicode_escape_with_collector()?;
-                            }
-                            _ => {} // Ignore if not in string/key context
-                        }
-                        EventResult::Continue
-                    }
-                    // EscapeSequence events (only emitted when flag is enabled, ignored in original parser)
-                    ujson::Event::Begin(EventToken::EscapeSequence) => {
-                        // Ignore in original parser since it uses slice-based parsing
-                        EventResult::Continue
-                    }
-                    ujson::Event::End(EventToken::EscapeSequence) => {
-                        // Ignore in original parser since it uses slice-based parsing
-                        EventResult::Continue
-                    }
-                    ujson::Event::End(
-                        EventToken::EscapeQuote
-                        | EventToken::EscapeBackslash
-                        | EventToken::EscapeSlash
-                        | EventToken::EscapeBackspace
-                        | EventToken::EscapeFormFeed
-                        | EventToken::EscapeNewline
-                        | EventToken::EscapeCarriageReturn
-                        | EventToken::EscapeTab,
-                    ) => {
-                        // End of escape sequence - ignored here
-                        EventResult::Continue
-                    }
-                    #[cfg(test)]
-                    ujson::Event::Uninitialized => {
-                        return Err(UnexpectedState::StateMismatch.into());
-                    }
-                };
-                match res {
-                    EventResult::Complete(event) => break Ok(event),
-                    EventResult::Continue => continue,
-                    EventResult::ExtractKey => {
-                        if let State::Key(_start) = self.parser_state.state {
-                            // Check for incomplete surrogate pairs before ending the key
-                            if self.unicode_escape_collector.has_pending_high_surrogate() {
-                                break Err(ParseError::InvalidUnicodeCodepoint);
-                            }
-                            self.parser_state.state = State::None;
-                            // Use CopyOnEscape to get the final key result
-                            let end_pos = ContentRange::end_position_excluding_delimiter(
-                                self.buffer.current_pos(),
-                            );
-                            let key_result = self.copy_on_escape.end_string(end_pos)?;
-                            break Ok(Event::Key(key_result));
-                        } else {
-                            break Err(UnexpectedState::StateMismatch.into());
-                        }
-                    }
-                    EventResult::ExtractString => {
-                        if let State::String(_value) = self.parser_state.state {
-                            // Check for incomplete surrogate pairs before ending the string
-                            if self.unicode_escape_collector.has_pending_high_surrogate() {
-                                break Err(ParseError::InvalidUnicodeCodepoint);
-                            }
-                            self.parser_state.state = State::None;
-                            // Use CopyOnEscape to get the final string result
-                            let end_pos = ContentRange::end_position_excluding_delimiter(
-                                self.buffer.current_pos(),
-                            );
-                            let value_result = self.copy_on_escape.end_string(end_pos)?;
-                            break Ok(Event::String(value_result));
-                        } else {
-                            break Err(UnexpectedState::StateMismatch.into());
-                        }
-                    }
-                    EventResult::ExtractNumber(from_container_end) => {
-                        if let State::Number(start) = self.parser_state.state {
-                            // Reset state before parsing to stop selective copying
-                            self.parser_state.state = State::None;
-                            let number_token_start = start;
-                            let event = self
-                                .parse_number_from_buffer(number_token_start, from_container_end)?;
-                            break Ok(event);
-                        } else {
-                            break Err(UnexpectedState::StateMismatch.into());
-                        }
-                    }
-                }
-            } else {
-                // No event available - this shouldn't happen since we ensured have_events() above
-                break Err(UnexpectedState::StateMismatch.into());
-            }
-        }
+    /// Append a single literal byte - implement as single-byte range for consistency
+    fn append_literal_byte(&mut self, _byte: u8) -> Result<(), ParseError> {
+        // SliceParser doesn't typically need per-byte processing since it works with ranges
+        // This could be implemented as a single-byte range if needed, but for now it's a no-op
+        Ok(())
     }
 }
 
 impl<'a, 'b, C: BitStackConfig> PullParser for SliceParser<'a, 'b, C> {
     fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.next_event_impl()
+    }
+}
+
+impl<'a, 'b, C: BitStackConfig> crate::shared::ByteProvider for SliceParser<'a, 'b, C> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        use crate::slice_input_buffer::InputBuffer;
+        match self.buffer.consume_byte() {
+            Ok(byte) => Ok(Some(byte)),
+            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 }
 

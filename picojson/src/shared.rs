@@ -151,6 +151,33 @@ impl ContentRange {
     pub fn end_position_excluding_delimiter(current_pos: usize) -> usize {
         current_pos.saturating_sub(1)
     }
+
+    /// Calculate number end position with delimiter handling
+    /// Standardizes the pattern of excluding delimiters unless at document end
+    ///
+    /// # Arguments
+    /// * `current_pos` - Current parser position
+    /// * `use_full_span` - True if the number is at the end of the document and not in a container,
+    ///   meaning there is no delimiter to exclude.
+    ///
+    /// # Returns
+    /// End position for number content
+    pub fn number_end_position(current_pos: usize, use_full_span: bool) -> usize {
+        if use_full_span {
+            // At document end and standalone - use full span (no delimiter to exclude)
+            current_pos
+        } else {
+            // Normal case - exclude delimiter
+            current_pos.saturating_sub(1)
+        }
+    }
+}
+
+/// Trait for abstracting byte input sources between SliceParser and StreamParser
+pub trait ByteProvider {
+    /// Get the next byte from the input source
+    /// Returns None when end of input is reached
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError>;
 }
 
 pub fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
