@@ -215,6 +215,53 @@ fn test_stress_buffer_sizes_with_full_reads() {
 }
 
 #[test]
+fn debug_unicode_issue() {
+    let json = br#"["a\nb\t\"\\c\u1234d"]"#;
+    let reader = ChunkReader::new(json, 5);
+    let mut buffer = [0u8; 30];
+    
+    let mut parser = StreamParser::new(reader, &mut buffer);
+    let mut event_count = 0;
+    
+    loop {
+        let event = match parser.next_event() {
+            Ok(event) => event,
+            Err(e) => {
+                println!("Parse error: {:?}", e);
+                break;
+            }
+        };
+        
+        println!("Event[{}]: {:?}", event_count, event);
+        
+        // Check string content when we encounter it
+        if let Event::String(s) = &event {
+            match s {
+                picojson::String::Unescaped(content) => {
+                    println!("String Content Analysis:");
+                    println!("  Expected: 'a\\nb\\t\\\"\\\\cሴd'");
+                    println!("  Got:      '{}'", content);
+                    println!("  Character codes:");
+                    for (i, ch) in content.char_indices() {
+                        println!("    [{}] '{}' = U+{:04X}", i, ch, ch as u32);
+                    }
+                },
+                picojson::String::Borrowed(content) => {
+                    println!("Borrowed String: '{}'", content);
+                }
+            }
+        }
+        
+        event_count += 1;
+        
+        match event {
+            Event::EndDocument => break,
+            _ => {}
+        }
+    }
+}
+
+#[test]
 fn test_stress_chunk_sizes_with_adequate_buffer() {
     let scenarios = get_test_scenarios();
     for scenario in &scenarios {
@@ -283,7 +330,7 @@ fn test_stress_matrix_critical_sizes() {
     }
 }
 
-#[test]
+#[test_log::test]
 fn test_stress_variable_read_sizes() {
     let scenarios = get_test_scenarios();
     let patterns: &[&[usize]] = &[&[1, 5, 2], &[7, 1, 1, 10], &[1]];

@@ -21,6 +21,8 @@ pub struct SliceContentBuilder<'a, 'b> {
     parser_state: State,
     /// Unicode escape collector for \uXXXX sequences
     unicode_escape_collector: UnicodeEscapeCollector,
+    /// Flag to track when we're inside ANY escape sequence (like stream implementation)
+    in_escape_sequence: bool,
 }
 
 impl<'a, 'b> SliceContentBuilder<'a, 'b> {
@@ -31,6 +33,7 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
             copy_on_escape: CopyOnEscape::new(input, scratch_buffer),
             parser_state: State::None,
             unicode_escape_collector: UnicodeEscapeCollector::new(),
+            in_escape_sequence: false,
         }
     }
 
@@ -52,6 +55,10 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
     }
 
     fn handle_simple_escape(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.in_escape_sequence = false;
+        log::debug!("[SLICE] handle_simple_escape: Clearing in_escape_sequence flag, escape_char={:02x}", escape_char);
+        
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())
@@ -62,6 +69,8 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
         // The position calculation matches the existing SliceParser logic
         let current_pos = self.buffer.current_pos();
         let (_, _, escape_start_pos) = ContentRange::unicode_escape_bounds(current_pos);
+        // Fix: escape_start_pos should point to the backslash, not the 'u'
+        let actual_escape_start_pos = escape_start_pos.saturating_sub(1);
 
         // Check if this is completing a surrogate pair
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
@@ -70,14 +79,14 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
             // This is completing a surrogate pair - need to consume both escapes
             // First call: consume the high surrogate (6 bytes earlier)
             self.copy_on_escape
-                .handle_unicode_escape(escape_start_pos, &[])?;
+                .handle_unicode_escape(actual_escape_start_pos, &[])?;
             // Second call: consume the low surrogate and write UTF-8
             self.copy_on_escape
-                .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+                .handle_unicode_escape(actual_escape_start_pos + 6, utf8_bytes)?;
         } else {
             // Single Unicode escape - normal processing
             self.copy_on_escape
-                .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+                .handle_unicode_escape(actual_escape_start_pos, utf8_bytes)?;
         }
 
         Ok(())
@@ -90,7 +99,9 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
     }
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
-        // SliceParser doesn't need special escape sequence setup
+        // Set escape flag to prevent literal byte accumulation during escape processing
+        self.in_escape_sequence = true;
+        log::debug!("[SLICE] begin_escape_sequence: Setting in_escape_sequence=true");
         Ok(())
     }
 
@@ -192,6 +203,9 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when unicode escape completes
+        self.in_escape_sequence = false;
+        log::debug!("[SLICE] process_unicode_escape_with_collector: Clearing in_escape_sequence flag");
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
@@ -206,6 +220,10 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
                 hex_slice_provider,
                 &mut utf8_buf,
             )?;
+        // Fix: escape_start_pos should point to the backslash, not the 'u'  
+        // But don't subtract if it's already pointing to the backslash
+        let actual_escape_start_pos = escape_start_pos;
+        log::debug!("SLICE CONTENT BUILDER process_unicode_escape_with_collector_impl: using actual_escape_start_pos={} (was {})", actual_escape_start_pos, escape_start_pos);
 
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some(utf8_bytes) = utf8_bytes_opt {
@@ -213,14 +231,14 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
                 // This is completing a surrogate pair - need to consume both escapes
                 // First call: consume the high surrogate (6 bytes earlier)
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos, &[])?;
+                    .handle_unicode_escape(actual_escape_start_pos, &[])?;
                 // Second call: consume the low surrogate and write UTF-8
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+                    .handle_unicode_escape(actual_escape_start_pos + 6, utf8_bytes)?;
             } else {
                 // Single Unicode escape - normal processing
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+                    .handle_unicode_escape(actual_escape_start_pos, utf8_bytes)?;
             }
         }
 
@@ -228,6 +246,10 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
     }
 
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.in_escape_sequence = false;
+        log::debug!("[SLICE] handle_simple_escape_char: Clearing in_escape_sequence flag, escape_char={:02x}", escape_char);
+        
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())
