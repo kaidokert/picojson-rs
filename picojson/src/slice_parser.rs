@@ -592,15 +592,20 @@ mod tests {
         println!("=== SLICE PARSER DEBUG ===");
         println!("Input: {}", input);
         println!("Expected in string: 'HelloAWorld'");
-        
+
         // Print byte positions for the string part
         let string_start = input.find("Hello").unwrap();
         let string_part = &input[string_start..];
         println!("String part: '{}'", string_part);
         for (i, &byte) in string_part.as_bytes().iter().enumerate() {
-            println!("  pos {}: '{}' ({:02x})", string_start + i, byte as char, byte);
+            println!(
+                "  pos {}: '{}' ({:02x})",
+                string_start + i,
+                byte as char,
+                byte
+            );
         }
-        
+
         let mut scratch = [0u8; 1024];
         let mut parser = SliceParser::with_buffer(input, &mut scratch);
 

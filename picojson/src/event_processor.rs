@@ -30,7 +30,7 @@ pub trait EscapeHandler {
     fn append_literal_byte(&mut self, _byte: u8) -> Result<(), crate::ParseError> {
         Ok(())
     }
-    
+
     /// Begin unicode escape sequence processing
     /// Default implementation is no-op - suitable for parsers that don't need special handling
     fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
@@ -283,7 +283,9 @@ pub fn process_unicode_escape_events<C: ContentExtractor>(
                     content_extractor.begin_unicode_escape()?;
                 }
                 _ => {
-                    log::debug!("NEW event_processor: Ignoring unicode escape outside string/key context");
+                    log::debug!(
+                        "NEW event_processor: Ignoring unicode escape outside string/key context"
+                    );
                 } // Ignore if not in string/key context
             }
             Ok(true) // Event was handled

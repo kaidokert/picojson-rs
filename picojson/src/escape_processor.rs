@@ -150,8 +150,8 @@ impl EscapeProcessor {
             let digit = Self::validate_hex_digit(byte)?;
             codepoint = (codepoint << 4) | digit;
         }
-        
-        log::debug!("NEW process_unicode_escape: hex_slice={:?}, codepoint=0x{:04X}, pending_high_surrogate={:?}", 
+
+        log::debug!("NEW process_unicode_escape: hex_slice={:?}, codepoint=0x{:04X}, pending_high_surrogate={:?}",
                    hex_slice, codepoint, pending_high_surrogate);
 
         // Check if we have a pending high surrogate
@@ -162,7 +162,7 @@ impl EscapeProcessor {
                 let combined = Self::combine_surrogate_pair(high, codepoint)?;
                 let ch = char::from_u32(combined).ok_or(ParseError::InvalidUnicodeCodepoint)?;
                 let utf8_str = ch.encode_utf8(utf8_buffer);
-                log::debug!("NEW process_unicode_escape: Surrogate pair combined: high=0x{:04X}, low=0x{:04X}, combined=0x{:04X}, utf8={:?}", 
+                log::debug!("NEW process_unicode_escape: Surrogate pair combined: high=0x{:04X}, low=0x{:04X}, combined=0x{:04X}, utf8={:?}",
                            high, codepoint, combined, utf8_str.as_bytes());
                 Ok((Some(utf8_str.as_bytes()), None))
             } else {
@@ -174,7 +174,10 @@ impl EscapeProcessor {
             // No pending high surrogate
             if Self::is_high_surrogate(codepoint) {
                 // Save this high surrogate for the next escape
-                log::debug!("NEW process_unicode_escape: High surrogate saved: 0x{:04X}", codepoint);
+                log::debug!(
+                    "NEW process_unicode_escape: High surrogate saved: 0x{:04X}",
+                    codepoint
+                );
                 Ok((None, Some(codepoint)))
             } else if Self::is_low_surrogate(codepoint) {
                 // Error: low surrogate without preceding high surrogate
@@ -184,7 +187,11 @@ impl EscapeProcessor {
                 // Regular Unicode character
                 let ch = char::from_u32(codepoint).ok_or(ParseError::InvalidUnicodeCodepoint)?;
                 let utf8_str = ch.encode_utf8(utf8_buffer);
-                log::debug!("NEW process_unicode_escape: Regular Unicode character: 0x{:04X} -> {:?}", codepoint, utf8_str.as_bytes());
+                log::debug!(
+                    "NEW process_unicode_escape: Regular Unicode character: 0x{:04X} -> {:?}",
+                    codepoint,
+                    utf8_str.as_bytes()
+                );
                 Ok((Some(utf8_str.as_bytes()), None))
             }
         }
@@ -679,8 +686,8 @@ where
 
     // Extract the 4 hex digits from the buffer using the provider
     let hex_slice = hex_slice_provider(hex_start, hex_end)?;
-    
-    log::debug!("NEW process_unicode_escape_sequence: current_pos={}, hex_start={}, hex_end={}, escape_start_pos={}, hex_slice={:?}", 
+
+    log::debug!("NEW process_unicode_escape_sequence: current_pos={}, hex_start={}, hex_end={}, escape_start_pos={}, hex_slice={:?}",
                current_pos, hex_start, hex_end, escape_start_pos, hex_slice);
 
     if hex_slice.len() != 4 {

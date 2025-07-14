@@ -57,8 +57,11 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
     fn handle_simple_escape(&mut self, escape_char: u8) -> Result<(), ParseError> {
         // Clear the escape sequence flag when simple escape completes
         self.in_escape_sequence = false;
-        log::debug!("[SLICE] handle_simple_escape: Clearing in_escape_sequence flag, escape_char={:02x}", escape_char);
-        
+        log::debug!(
+            "[SLICE] handle_simple_escape: Clearing in_escape_sequence flag, escape_char={:02x}",
+            escape_char
+        );
+
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())
@@ -130,12 +133,13 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
         let at_document_end = self.buffer.is_empty();
         log::debug!("[NEW] SliceContentBuilder extract_number: start_pos={}, from_container_end={}, finished={} (ignored), buffer_empty={}, at_document_end={}",
             start_pos, from_container_end, finished, self.buffer.is_empty(), at_document_end);
-        crate::number_parser::parse_number_with_delimiter_logic(
-            &self.buffer,
-            start_pos,
-            from_container_end,
-            at_document_end,
-        )
+
+        // SliceParser-specific fix: at document end, current_pos points past the input,
+        // so we need to adjust the logic to always exclude the delimiter position
+        let current_pos = self.buffer.current_position();
+        let end_pos = current_pos.saturating_sub(1);
+        log::debug!("[NEW] SliceContentBuilder using SliceParser-specific end_pos: current_pos={}, end_pos={}", current_pos, end_pos);
+        crate::number_parser::parse_number_event(&self.buffer, start_pos, end_pos)
     }
 
     fn current_position(&self) -> usize {
@@ -205,7 +209,9 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         // Clear the escape sequence flag when unicode escape completes
         self.in_escape_sequence = false;
-        log::debug!("[SLICE] process_unicode_escape_with_collector: Clearing in_escape_sequence flag");
+        log::debug!(
+            "[SLICE] process_unicode_escape_with_collector: Clearing in_escape_sequence flag"
+        );
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
@@ -220,7 +226,7 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
                 hex_slice_provider,
                 &mut utf8_buf,
             )?;
-        // Fix: escape_start_pos should point to the backslash, not the 'u'  
+        // Fix: escape_start_pos should point to the backslash, not the 'u'
         // But don't subtract if it's already pointing to the backslash
         let actual_escape_start_pos = escape_start_pos;
         log::debug!("SLICE CONTENT BUILDER process_unicode_escape_with_collector_impl: using actual_escape_start_pos={} (was {})", actual_escape_start_pos, escape_start_pos);
@@ -249,7 +255,7 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
         // Clear the escape sequence flag when simple escape completes
         self.in_escape_sequence = false;
         log::debug!("[SLICE] handle_simple_escape_char: Clearing in_escape_sequence flag, escape_char={:02x}", escape_char);
-        
+
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())

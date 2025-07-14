@@ -219,10 +219,10 @@ fn debug_unicode_issue() {
     let json = br#"["a\nb\t\"\\c\u1234d"]"#;
     let reader = ChunkReader::new(json, 5);
     let mut buffer = [0u8; 30];
-    
+
     let mut parser = StreamParser::new(reader, &mut buffer);
     let mut event_count = 0;
-    
+
     loop {
         let event = match parser.next_event() {
             Ok(event) => event,
@@ -231,9 +231,9 @@ fn debug_unicode_issue() {
                 break;
             }
         };
-        
+
         println!("Event[{}]: {:?}", event_count, event);
-        
+
         // Check string content when we encounter it
         if let Event::String(s) = &event {
             match s {
@@ -245,15 +245,15 @@ fn debug_unicode_issue() {
                     for (i, ch) in content.char_indices() {
                         println!("    [{}] '{}' = U+{:04X}", i, ch, ch as u32);
                     }
-                },
+                }
                 picojson::String::Borrowed(content) => {
                     println!("Borrowed String: '{}'", content);
                 }
             }
         }
-        
+
         event_count += 1;
-        
+
         match event {
             Event::EndDocument => break,
             _ => {}
