@@ -356,7 +356,7 @@ mod integration_tests {
         test_delimiter_bug_helper(2, 128);
     }
 
-    #[test]
+    #[test_log::test]
     fn test_delimiter_bug_small_chunks_small_buffer() {
         // Test if larger chunks fix it: 3-byte chunks + 64-byte buffer
         test_delimiter_bug_helper(3, 64);

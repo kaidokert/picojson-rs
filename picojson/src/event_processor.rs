@@ -65,6 +65,7 @@ pub fn process_begin_events<C: ContentExtractor>(
         }
         crate::ujson::Event::Begin(EventToken::String) => {
             let pos = content_extractor.current_position();
+            log::debug!("[NEW] Begin(String): storing pos={} in State::String", pos);
             *content_extractor.parser_state_mut() = State::String(pos);
             content_extractor.begin_string_content(pos);
             Some(EventResult::Continue)
@@ -219,11 +220,18 @@ pub fn process_begin_escape_sequence_event<H: EscapeHandler>(
     handler: &mut H,
 ) -> Result<(), crate::ParseError> {
     // Only process if we're inside a string or key
+    log::debug!(
+        "[NEW] process_begin_escape_sequence_event called, state: {:?}",
+        handler.parser_state()
+    );
     match handler.parser_state() {
         crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+            log::debug!("[NEW] calling begin_escape_sequence()");
             handler.begin_escape_sequence()?;
         }
-        _ => {} // Ignore if not in string/key context
+        _ => {
+            log::debug!("[NEW] ignoring escape sequence - not in string/key context");
+        } // Ignore if not in string/key context
     }
     Ok(())
 }
