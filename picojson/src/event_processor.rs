@@ -5,6 +5,7 @@
 //! This module extracts the common event handling patterns to reduce code duplication
 //! while preserving the performance characteristics of each parser type.
 
+use crate::shared::{ContentRange, State};
 use crate::ujson::EventToken;
 use crate::{Event, ParseError};
 
@@ -53,8 +54,6 @@ pub fn process_begin_events<C: ContentExtractor>(
     event: &crate::ujson::Event,
     content_extractor: &mut C,
 ) -> Option<EventResult<'static, 'static>> {
-    use crate::shared::{ContentRange, State};
-
     match event {
         // String/Key Begin events - nearly identical patterns
         crate::ujson::Event::Begin(EventToken::Key) => {

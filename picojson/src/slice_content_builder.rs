@@ -7,7 +7,7 @@ use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::{ContentExtractor, EscapeHandler};
 use crate::number_parser::NumberExtractor;
 use crate::shared::{ContentRange, State};
-use crate::slice_input_buffer::SliceInputBuffer;
+use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ParseError;
 
 /// ContentBuilder implementation for SliceParser that uses CopyOnEscape for zero-copy optimization
@@ -131,7 +131,6 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
 impl crate::shared::ByteProvider for SliceContentBuilder<'_, '_> {
     fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
-        use crate::slice_input_buffer::InputBuffer;
         match self.buffer_mut().consume_byte() {
             Ok(byte) => Ok(Some(byte)),
             Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
@@ -162,24 +161,20 @@ impl EscapeHandler for SliceContentBuilder<'_, '_> {
                 hex_slice_provider,
                 &mut utf8_buf,
             )?;
-        // Fix: escape_start_pos should point to the backslash, not the 'u'
-        // But don't subtract if it's already pointing to the backslash
-        let actual_escape_start_pos = escape_start_pos;
-
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some(utf8_bytes) = utf8_bytes_opt {
             if had_pending_high_surrogate {
                 // This is completing a surrogate pair - need to consume both escapes
                 // First call: consume the high surrogate (6 bytes earlier)
                 self.copy_on_escape
-                    .handle_unicode_escape(actual_escape_start_pos, &[])?;
+                    .handle_unicode_escape(escape_start_pos, &[])?;
                 // Second call: consume the low surrogate and write UTF-8
                 self.copy_on_escape
-                    .handle_unicode_escape(actual_escape_start_pos + 6, utf8_bytes)?;
+                    .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
             } else {
                 // Single Unicode escape - normal processing
                 self.copy_on_escape
-                    .handle_unicode_escape(actual_escape_start_pos, utf8_bytes)?;
+                    .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
             }
         }
 

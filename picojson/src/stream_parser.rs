@@ -195,7 +195,6 @@ impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
         &mut self,
         from_container_end: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        use crate::event_processor::EscapeHandler;
         let start_pos = match *self.parser_state() {
             crate::shared::State::Number(pos) => pos,
             _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),

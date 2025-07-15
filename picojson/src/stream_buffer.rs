@@ -272,6 +272,7 @@ impl<'a> StreamBuffer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::State;
 
     #[test]
     fn test_lifetime_expectations() {
@@ -919,9 +920,6 @@ mod tests {
     #[test]
     fn test_position_update_state_transitions() {
         // Test the complete state transition logic for different parser states
-
-        // Mock the State enum variants and position update logic
-        use crate::shared::State;
 
         // Case 1: State::None - no position to update
         let state = State::None;

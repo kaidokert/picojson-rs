@@ -164,7 +164,6 @@ impl<C: BitStackConfig> PullParser for SliceParser<'_, '_, C> {
 
 impl<C: BitStackConfig> crate::shared::ByteProvider for SliceParser<'_, '_, C> {
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        use crate::slice_input_buffer::InputBuffer;
         match self.content_builder.buffer_mut().consume_byte() {
             Ok(byte) => Ok(Some(byte)),
             Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
