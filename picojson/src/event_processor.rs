@@ -5,6 +5,7 @@
 //! This module extracts the common event handling patterns to reduce code duplication
 //! while preserving the performance characteristics of each parser type.
 
+use crate::shared::{ContentRange, State};
 use crate::ujson::EventToken;
 use crate::{Event, ParseError};
 
@@ -21,15 +22,10 @@ pub trait EscapeHandler {
 
     /// Begin escape sequence processing (lifecycle method with default no-op implementation)
     /// Called when escape sequence processing begins (e.g., on Begin(EscapeSequence))
-    fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
-        Ok(())
-    }
+    fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError>;
 
-    /// Append a single literal byte (for per-byte accumulation patterns)
-    /// Default implementation is no-op - suitable for parsers that don't need per-byte processing
-    fn append_literal_byte(&mut self, _byte: u8) -> Result<(), crate::ParseError> {
-        Ok(())
-    }
+    /// Begin unicode escape sequence processing
+    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError>;
 }
 
 /// Result of processing a tokenizer event
@@ -53,8 +49,6 @@ pub fn process_begin_events<C: ContentExtractor>(
     event: &crate::ujson::Event,
     content_extractor: &mut C,
 ) -> Option<EventResult<'static, 'static>> {
-    use crate::shared::{ContentRange, State};
-
     match event {
         // String/Key Begin events - nearly identical patterns
         crate::ujson::Event::Begin(EventToken::Key) => {
@@ -125,11 +119,17 @@ pub trait ContentExtractor: EscapeHandler {
         start_pos: usize,
     ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
 
-    /// Extract number content using parser-specific logic
-    fn extract_number_content(
+    /// Extract a completed number using shared number parsing logic
+    ///
+    /// # Arguments
+    /// * `start_pos` - Position where the number started
+    /// * `from_container_end` - True if number was terminated by container delimiter
+    /// * `finished` - True if the parser has finished processing input (StreamParser-specific)
+    fn extract_number(
         &mut self,
         start_pos: usize,
         from_container_end: bool,
+        finished: bool,
     ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
 
     /// Shared validation and extraction for string content
@@ -181,7 +181,7 @@ pub trait ContentExtractor: EscapeHandler {
         };
 
         *self.parser_state_mut() = crate::shared::State::None;
-        self.extract_number_content(start_pos, from_container_end)
+        self.extract_number(start_pos, from_container_end, true)
     }
 }
 
@@ -189,9 +189,9 @@ pub trait ContentExtractor: EscapeHandler {
 ///
 /// This callback stores tokenizer events in the parser's event array, filling the first
 /// available slot. This pattern is identical across both SliceParser and StreamParser.
-pub fn create_tokenizer_callback<'a>(
-    event_storage: &'a mut [Option<crate::ujson::Event>; 2],
-) -> impl FnMut(crate::ujson::Event, usize) + 'a {
+pub fn create_tokenizer_callback(
+    event_storage: &mut [Option<crate::ujson::Event>; 2],
+) -> impl FnMut(crate::ujson::Event, usize) + '_ {
     |event, _len| {
         for evt in event_storage.iter_mut() {
             if evt.is_none() {
@@ -264,6 +264,7 @@ pub fn process_unicode_escape_events<C: ContentExtractor>(
             match content_extractor.parser_state() {
                 crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                     content_extractor.unicode_escape_collector_mut().reset();
+                    content_extractor.begin_unicode_escape()?;
                 }
                 _ => {} // Ignore if not in string/key context
             }
@@ -429,6 +430,14 @@ mod tests {
         fn handle_simple_escape_char(&mut self, _escape_char: u8) -> Result<(), crate::ParseError> {
             Ok(())
         }
+
+        fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
+
+        fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
     }
 
     impl ContentExtractor for MockContentExtractor {
@@ -464,10 +473,11 @@ mod tests {
             unimplemented!("Mock doesn't need extraction")
         }
 
-        fn extract_number_content(
+        fn extract_number(
             &mut self,
             _start_pos: usize,
             _from_container_end: bool,
+            _finished: bool,
         ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
             unimplemented!("Mock doesn't need extraction")
         }

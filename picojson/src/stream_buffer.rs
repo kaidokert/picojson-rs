@@ -146,10 +146,14 @@ impl<'a> StreamBuffer<'a> {
                 return Err(StreamBufferError::BufferFull);
             }
 
-            let src_range = start_offset..start_offset.wrapping_add(span_len);
-            if src_range.end > self.buffer.len() {
+            let src_range_end = start_offset
+                .checked_add(span_len)
+                .ok_or(StreamBufferError::InvalidSliceBounds)?;
+
+            if src_range_end > self.buffer.len() {
                 return Err(StreamBufferError::InvalidSliceBounds);
             }
+            let src_range = start_offset..src_range_end;
 
             // Copy within the same buffer: move data from [start_offset..end] to [0..span_len]
             // Use our panic-free copy implementation
@@ -268,6 +272,7 @@ impl<'a> StreamBuffer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::State;
 
     #[test]
     fn test_lifetime_expectations() {
@@ -718,7 +723,6 @@ mod tests {
         if _string_start_pos < offset {
             // Original string start was discarded - must use escape/copy mode
             // In real implementation, parser would copy what it had processed to unescaped buffer
-            println!("String start was discarded, switching to escape mode");
             _string_start_pos = 0; // Reset for escape mode
         } else {
             _string_start_pos = _string_start_pos.saturating_sub(offset); // Normal position update
@@ -916,9 +920,6 @@ mod tests {
     #[test]
     fn test_position_update_state_transitions() {
         // Test the complete state transition logic for different parser states
-
-        // Mock the State enum variants and position update logic
-        use crate::shared::State;
 
         // Case 1: State::None - no position to update
         let state = State::None;

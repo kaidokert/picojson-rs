@@ -63,9 +63,15 @@ mod copy_on_escape;
 
 mod escape_processor;
 
+mod parser_core;
+
 mod stream_buffer;
 
+mod stream_content_builder;
+
 mod stream_parser;
+
+mod slice_content_builder;
 
 mod slice_parser;
 
