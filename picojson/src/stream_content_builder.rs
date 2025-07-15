@@ -21,6 +21,10 @@ pub struct StreamContentBuilder<'b> {
     unescaped_reset_queued: bool,
     /// Flag to track when we're inside a Unicode escape sequence (collecting hex digits)
     in_unicode_escape: bool,
+    /// Flag to track when we're inside ANY escape sequence (like old implementation)
+    in_escape_sequence: bool,
+    /// Flag to track when the input stream has been finished (for number parsing)
+    finished: bool,
 }
 
 impl<'b> StreamContentBuilder<'b> {
@@ -32,6 +36,8 @@ impl<'b> StreamContentBuilder<'b> {
             unicode_escape_collector: UnicodeEscapeCollector::new(),
             unescaped_reset_queued: false,
             in_unicode_escape: false,
+            in_escape_sequence: false,
+            finished: false,
         }
     }
 
@@ -43,6 +49,11 @@ impl<'b> StreamContentBuilder<'b> {
     /// Get mutable access to the stream buffer for byte operations
     pub fn stream_buffer_mut(&mut self) -> &mut StreamBuffer<'b> {
         &mut self.stream_buffer
+    }
+
+    /// Set the finished state (called by StreamParser when input is exhausted)
+    pub fn set_finished(&mut self, finished: bool) {
+        self.finished = finished;
     }
 
     /// Apply queued unescaped content reset if flag is set
@@ -90,9 +101,7 @@ impl<'b> StreamContentBuilder<'b> {
                 let current_pos = self.stream_buffer.current_position();
 
                 log::debug!(
-                    "[NEW] start_escape_processing: start_pos={}, current_pos={}",
-                    start_pos,
-                    current_pos
+                    "[NEW] start_escape_processing: start_pos={start_pos}, current_pos={current_pos}"
                 );
 
                 // start_pos already points to content start position (not quote position)
@@ -129,13 +138,16 @@ impl<'b> StreamContentBuilder<'b> {
     }
 }
 
-impl<'b> ContentBuilder for StreamContentBuilder<'b> {
+impl ContentBuilder for StreamContentBuilder<'_> {
     fn begin_content(&mut self, _pos: usize, _is_key: bool) {
         // StreamParser doesn't need explicit content begin processing
         // as it handles content accumulation automatically
     }
 
     fn handle_simple_escape(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.in_escape_sequence = false;
+
         self.stream_buffer
             .append_unescaped_byte(escape_char)
             .map_err(ParseError::from)
@@ -156,46 +168,11 @@ impl<'b> ContentBuilder for StreamContentBuilder<'b> {
         let in_string_mode = matches!(self.parser_state, State::String(_) | State::Key(_));
 
         if in_string_mode {
-            // CRITICAL FIX: If we're inside a Unicode escape sequence, route hex digits to the collector
-            if self.in_unicode_escape {
-                log::debug!(
-                    "[NEW] Unicode escape hex digit: {:02x} ('{}')",
-                    byte,
-                    byte as char
-                );
-
-                // Try to add the hex digit to the collector
-                let is_complete = self.unicode_escape_collector.add_hex_digit(byte)?;
-
-                if is_complete {
-                    log::debug!("[NEW] Unicode escape sequence complete, processing to UTF-8");
-
-                    // Process the complete sequence to UTF-8
-                    let mut utf8_buf = [0u8; 4];
-                    let (utf8_bytes_opt, _) = self
-                        .unicode_escape_collector
-                        .process_to_utf8(&mut utf8_buf)?;
-
-                    // Write UTF-8 bytes to escape buffer if we have them
-                    if let Some(utf8_bytes) = utf8_bytes_opt {
-                        for &utf8_byte in utf8_bytes {
-                            self.stream_buffer
-                                .append_unescaped_byte(utf8_byte)
-                                .map_err(ParseError::from)?;
-                        }
-                    }
-
-                    // Clear the Unicode escape state - we'll get End(UnicodeEscape) event next
-                    self.in_unicode_escape = false;
-                }
-
-                return Ok(());
-            }
-
-            // Normal literal byte processing (not inside Unicode escape)
-            // Skip writing bytes to escape buffer when we have a pending high surrogate
-            // (prevents literal \uD801 text from being included in final string)
-            if self.stream_buffer.has_unescaped_content()
+            // CRITICAL FIX: Follow old implementation pattern - do NOT write to escape buffer
+            // when inside ANY escape sequence (in_escape_sequence == true)
+            // This prevents hex digits from being accumulated as literal text
+            if !self.in_escape_sequence
+                && self.stream_buffer.has_unescaped_content()
                 && !self.unicode_escape_collector.has_pending_high_surrogate()
             {
                 self.stream_buffer
@@ -209,6 +186,7 @@ impl<'b> ContentBuilder for StreamContentBuilder<'b> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         log::debug!("[NEW] begin_escape_sequence() called");
+        self.in_escape_sequence = true;
         self.start_escape_processing()
     }
 
@@ -240,8 +218,7 @@ impl<'b> ContentBuilder for StreamContentBuilder<'b> {
         // Use shared number parsing with StreamParser-specific document end detection
         // StreamParser uses state-based detection: finished flag indicates true document end
         let at_document_end = finished;
-        log::debug!("[NEW] extract_number: start_pos={}, from_container_end={}, finished={}, at_document_end={}",
-            start_pos, from_container_end, finished, at_document_end);
+        log::debug!("[NEW] extract_number: start_pos={start_pos}, from_container_end={from_container_end}, finished={finished}, at_document_end={at_document_end}");
         crate::number_parser::parse_number_with_delimiter_logic(
             &self.stream_buffer,
             start_pos,
@@ -259,7 +236,7 @@ impl<'b> ContentBuilder for StreamContentBuilder<'b> {
     }
 }
 
-impl<'b> ContentExtractor for StreamContentBuilder<'b> {
+impl ContentExtractor for StreamContentBuilder<'_> {
     fn parser_state_mut(&mut self) -> &mut State {
         &mut self.parser_state
     }
@@ -303,12 +280,11 @@ impl<'b> ContentExtractor for StreamContentBuilder<'b> {
         start_pos: usize,
         from_container_end: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // LEGACY METHOD: This should be updated to use the new ContentBuilder::extract_number
-        // For now, use conservative approach - assume not finished for ContentExtractor calls
-        let finished = false; // Conservative: assume not at document end for legacy calls
-        let at_document_end = finished;
-        log::debug!("[NEW] extract_number_content LEGACY: start_pos={}, from_container_end={}, assuming finished={}, at_document_end={}",
-            start_pos, from_container_end, finished, at_document_end);
+        // Use shared number parsing with StreamParser-specific document end detection
+        // StreamParser uses state-based detection: finished flag indicates true document end
+        let at_document_end = self.finished;
+        log::debug!("[NEW] extract_number_content: start_pos={}, from_container_end={}, finished={}, at_document_end={}",
+            start_pos, from_container_end, self.finished, at_document_end);
         crate::number_parser::parse_number_with_delimiter_logic(
             &self.stream_buffer,
             start_pos,
@@ -318,12 +294,36 @@ impl<'b> ContentExtractor for StreamContentBuilder<'b> {
     }
 }
 
-impl<'b> EscapeHandler for StreamContentBuilder<'b> {
+impl crate::shared::ByteProvider for StreamContentBuilder<'_> {
+    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
+        // If buffer is empty, cannot provide bytes (let StreamParser handle filling)
+        if self.stream_buffer.is_empty() {
+            return Ok(None);
+        }
+
+        // Get byte and advance
+        let byte = self.stream_buffer.current_byte()?;
+        self.stream_buffer.advance()?;
+        Ok(Some(byte))
+    }
+}
+
+impl EscapeHandler for StreamContentBuilder<'_> {
     fn parser_state(&self) -> &State {
         &self.parser_state
     }
 
+    fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
+        // Called when Begin(UnicodeEscape) is received
+        self.in_unicode_escape = true;
+        self.in_escape_sequence = true;
+        Ok(())
+    }
+
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
+        // Reset the escape flags
+        self.in_unicode_escape = false;
+        self.in_escape_sequence = false;
         // Shared Unicode escape processing pattern - collect UTF-8 bytes first to avoid borrow conflicts
         let utf8_bytes_result = {
             let current_pos = self.stream_buffer.current_position();
@@ -341,7 +341,6 @@ impl<'b> EscapeHandler for StreamContentBuilder<'b> {
                     hex_slice_provider,
                     &mut utf8_buf,
                 )?;
-
             // Copy UTF-8 bytes to avoid borrow conflicts
             utf8_bytes_opt.map(|bytes| {
                 let mut copy = [0u8; 4];
@@ -370,6 +369,8 @@ impl<'b> EscapeHandler for StreamContentBuilder<'b> {
     }
 
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.in_escape_sequence = false;
         self.stream_buffer
             .append_unescaped_byte(escape_char)
             .map_err(ParseError::from)
@@ -380,9 +381,11 @@ impl<'b> EscapeHandler for StreamContentBuilder<'b> {
         let in_string_mode = matches!(self.parser_state, State::String(_) | State::Key(_));
 
         if in_string_mode {
-            // Skip writing bytes to escape buffer when we have a pending high surrogate
-            // (prevents literal \uD801 text from being included in final string)
-            if self.stream_buffer.has_unescaped_content()
+            // CRITICAL FIX: Follow old implementation pattern - do NOT write to escape buffer
+            // when inside ANY escape sequence (in_escape_sequence == true)
+            // This prevents hex digits from being accumulated as literal text
+            if !self.in_escape_sequence
+                && self.stream_buffer.has_unescaped_content()
                 && !self.unicode_escape_collector.has_pending_high_surrogate()
             {
                 self.stream_buffer
@@ -396,6 +399,7 @@ impl<'b> EscapeHandler for StreamContentBuilder<'b> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         log::debug!("[NEW] EscapeHandler::begin_escape_sequence() called");
+        self.in_escape_sequence = true;
         // Delegate to ContentBuilder implementation
         ContentBuilder::begin_escape_sequence(self)
     }

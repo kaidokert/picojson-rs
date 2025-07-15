@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::event_processor::{ContentExtractor, EscapeHandler};
 use crate::parse_error::ParseError;
 use crate::parser_core::ParserCore;
-use crate::shared::{ByteProvider, Event, PullParser};
+use crate::shared::{Event, PullParser};
 use crate::slice_content_builder::SliceContentBuilder;
 use crate::slice_input_buffer::InputBuffer;
 use crate::ujson;
@@ -146,115 +145,15 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
     /// Returns the next JSON event or an error if parsing fails.
     /// Parsing continues until `EndDocument` is returned or an error occurs.
     fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
-        // We need to implement the unified loop locally to avoid borrowing conflicts
-        // This is essentially a copy of ParserCore::next_event_impl but accessing fields directly
-        loop {
-            while !crate::event_processor::have_events(&self.parser_core.parser_state.evts) {
-                if let Some(byte) = self.next_byte()? {
-                    crate::event_processor::process_byte_through_tokenizer(
-                        byte,
-                        &mut self.parser_core.tokenizer,
-                        &mut self.parser_core.parser_state.evts,
-                    )?;
-                } else {
-                    crate::event_processor::finish_tokenizer(
-                        &mut self.parser_core.tokenizer,
-                        &mut self.parser_core.parser_state.evts,
-                    )?;
-
-                    if !crate::event_processor::have_events(&self.parser_core.parser_state.evts) {
-                        return Ok(Event::EndDocument);
-                    }
-                }
-            }
-
-            let taken_event =
-                crate::event_processor::take_first_event(&mut self.parser_core.parser_state.evts);
-            let Some(taken) = taken_event else {
-                return Err(crate::shared::UnexpectedState::StateMismatch.into());
-            };
-
-            // Try shared event processors first
-            if let Some(result) =
-                crate::event_processor::process_simple_events(&taken).or_else(|| {
-                    crate::event_processor::process_begin_events(&taken, &mut self.content_builder)
-                })
-            {
-                match result {
-                    crate::event_processor::EventResult::Complete(event) => return Ok(event),
-                    crate::event_processor::EventResult::ExtractString => {
-                        return self.content_builder.validate_and_extract_string()
-                    }
-                    crate::event_processor::EventResult::ExtractKey => {
-                        return self.content_builder.validate_and_extract_key()
-                    }
-                    crate::event_processor::EventResult::ExtractNumber(from_container_end) => {
-                        return self.extract_number_with_finished_state(from_container_end)
-                    }
-                    crate::event_processor::EventResult::Continue => continue,
-                }
-            }
-
-            // Handle parser-specific events (SliceParser uses OnBegin timing)
-            match taken {
-                ujson::Event::Begin(crate::ujson::EventToken::EscapeSequence) => {
-                    crate::event_processor::process_begin_escape_sequence_event(
-                        &mut self.content_builder,
-                    )?;
-                }
-                _ if crate::event_processor::process_unicode_escape_events(
-                    &taken,
-                    &mut self.content_builder,
-                )? =>
-                {
-                    // Unicode escape events handled by shared function
-                }
-                ujson::Event::Begin(
-                    escape_token @ (crate::ujson::EventToken::EscapeQuote
-                    | crate::ujson::EventToken::EscapeBackslash
-                    | crate::ujson::EventToken::EscapeSlash
-                    | crate::ujson::EventToken::EscapeBackspace
-                    | crate::ujson::EventToken::EscapeFormFeed
-                    | crate::ujson::EventToken::EscapeNewline
-                    | crate::ujson::EventToken::EscapeCarriageReturn
-                    | crate::ujson::EventToken::EscapeTab),
-                ) => {
-                    // SliceParser-specific: Handle simple escape sequences on Begin events
-                    // because CopyOnEscape requires starting unescaping immediately when
-                    // the escape token begins to maintain zero-copy optimization
-                    crate::event_processor::process_simple_escape_event(
-                        &escape_token,
-                        &mut self.content_builder,
-                    )?;
-                }
-                _ => {
-                    // All other events continue to next iteration
-                }
-            }
-        }
-    }
-
-    /// Extract number with proper SliceParser document end detection
-    fn extract_number_with_finished_state(
-        &mut self,
-        from_container_end: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        let start_pos = match *self.content_builder.parser_state() {
-            crate::shared::State::Number(pos) => pos,
-            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
-        };
-
-        *self.content_builder.parser_state_mut() = crate::shared::State::None;
-
-        // SliceParser doesn't use the finished parameter - it uses buffer emptiness
-        // Pass finished=false since SliceParser handles document end differently
-        use crate::content_builder::ContentBuilder;
-        self.content_builder
-            .extract_number(start_pos, from_container_end, false)
+        // Use the unified ParserCore implementation with SliceParser-specific timing
+        self.parser_core.next_event_impl_unified(
+            &mut self.content_builder,
+            crate::parser_core::EscapeTiming::OnBegin,
+        )
     }
 }
 
-impl<'a, 'b, C: BitStackConfig> PullParser for SliceParser<'a, 'b, C> {
+impl<C: BitStackConfig> PullParser for SliceParser<'_, '_, C> {
     fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         if self.content_builder.buffer().is_past_end() {
             return Ok(Event::EndDocument);
@@ -263,7 +162,7 @@ impl<'a, 'b, C: BitStackConfig> PullParser for SliceParser<'a, 'b, C> {
     }
 }
 
-impl<'a, 'b, C: BitStackConfig> crate::shared::ByteProvider for SliceParser<'a, 'b, C> {
+impl<C: BitStackConfig> crate::shared::ByteProvider for SliceParser<'_, '_, C> {
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
         use crate::slice_input_buffer::InputBuffer;
         match self.content_builder.buffer_mut().consume_byte() {
