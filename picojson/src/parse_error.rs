@@ -76,9 +76,9 @@ impl From<UnexpectedState> for ParseError {
 impl core::fmt::Display for ParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ParseError::TokenizerError(e) => write!(f, "{}", e),
-            ParseError::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {}", e),
-            _ => write!(f, "{:?}", self),
+            ParseError::TokenizerError(e) => write!(f, "{e}"),
+            ParseError::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {e}"),
+            _ => write!(f, "{self:?}"),
         }
     }
 }
