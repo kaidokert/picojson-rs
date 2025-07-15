@@ -154,6 +154,10 @@ impl ContentBuilder for StreamContentBuilder<'_> {
     }
 
     fn handle_unicode_escape(&mut self, utf8_bytes: &[u8]) -> Result<(), ParseError> {
+        log::debug!(
+            "STREAM CONTENT BUILDER handle_unicode_escape called with utf8_bytes={:?}",
+            utf8_bytes
+        );
         // StreamParser handles all escape sequences the same way - append bytes to escape buffer
         for &byte in utf8_bytes {
             self.stream_buffer
@@ -175,9 +179,15 @@ impl ContentBuilder for StreamContentBuilder<'_> {
                 && self.stream_buffer.has_unescaped_content()
                 && !self.unicode_escape_collector.has_pending_high_surrogate()
             {
+                log::debug!("[NEW] Writing literal byte to escape buffer: {:02x}", byte);
                 self.stream_buffer
                     .append_unescaped_byte(byte)
                     .map_err(ParseError::from)?;
+            } else {
+                log::debug!("[NEW] Skipping literal byte (in_escape_sequence={}, in_unicode_escape={}, has_unescaped={}, pending_surrogate={})",
+                           self.in_escape_sequence, self.in_unicode_escape,
+                           self.stream_buffer.has_unescaped_content(),
+                           self.unicode_escape_collector.has_pending_high_surrogate());
             }
         }
 
@@ -334,7 +344,7 @@ impl EscapeHandler for StreamContentBuilder<'_> {
             };
 
             let mut utf8_buf = [0u8; 4];
-            let (utf8_bytes_opt, _escape_start_pos) =
+            let (utf8_bytes_opt, escape_start_pos) =
                 crate::escape_processor::process_unicode_escape_sequence(
                     current_pos,
                     &mut self.unicode_escape_collector,

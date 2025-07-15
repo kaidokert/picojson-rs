@@ -274,24 +274,34 @@ pub fn process_unicode_escape_events<C: ContentExtractor>(
 ) -> Result<bool, crate::ParseError> {
     match event {
         crate::ujson::Event::Begin(EventToken::UnicodeEscape) => {
+            log::debug!("NEW event_processor: Begin(UnicodeEscape) event received");
             // Start Unicode escape collection - reset collector for new sequence
             // Only handle if we're inside a string or key
             match content_extractor.parser_state() {
                 crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                    log::debug!("NEW event_processor: Resetting unicode escape collector");
                     content_extractor.unicode_escape_collector_mut().reset();
                     content_extractor.begin_unicode_escape()?;
                 }
-                _ => {} // Ignore if not in string/key context
+                _ => {
+                    log::debug!(
+                        "NEW event_processor: Ignoring unicode escape outside string/key context"
+                    );
+                } // Ignore if not in string/key context
             }
             Ok(true) // Event was handled
         }
         crate::ujson::Event::End(EventToken::UnicodeEscape) => {
+            log::debug!("NEW event_processor: End(UnicodeEscape) event received");
             // Handle end of Unicode escape sequence (\uXXXX)
             match content_extractor.parser_state() {
                 crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                    log::debug!("NEW event_processor: Processing unicode escape with collector");
                     content_extractor.process_unicode_escape_with_collector()?;
                 }
-                _ => {} // Ignore if not in string/key context
+                _ => {
+                    log::debug!("NEW event_processor: Ignoring unicode escape end outside string/key context");
+                } // Ignore if not in string/key context
             }
             Ok(true) // Event was handled
         }
