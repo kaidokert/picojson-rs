@@ -170,15 +170,6 @@ impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
         self.content_builder.extract_key_content(start_pos)
     }
 
-    fn extract_number_content(
-        &mut self,
-        start_pos: usize,
-        from_container_end: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        self.content_builder
-            .extract_number_content(start_pos, from_container_end)
-    }
-
     fn extract_number(
         &mut self,
         start_pos: usize,
@@ -200,7 +191,7 @@ impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
         };
 
         *self.parser_state_mut() = crate::shared::State::None;
-        // Use the finished-aware extract_number method instead of extract_number_content
+        // Use the finished-aware extract_number method
         self.extract_number(start_pos, from_container_end, self.finished)
     }
 }
@@ -210,10 +201,8 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Get the next JSON event from the stream
     fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
         // Use the unified ParserCore implementation with StreamParser-specific timing
-        // This achieves the same pattern as SliceParser: self.parser_core.next_event_impl_unified()
-
-        // StreamParser needs byte accumulation for string parsing, so use the accumulator version
-        self.parser_core.next_event_impl_unified_with_accumulator(
+        // StreamParser needs byte accumulation for string parsing
+        self.parser_core.next_event_impl(
             &mut self.provider,
             crate::parser_core::EscapeTiming::OnEnd,
             |provider, byte| {

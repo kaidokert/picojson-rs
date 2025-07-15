@@ -119,13 +119,6 @@ pub trait ContentExtractor: EscapeHandler {
         start_pos: usize,
     ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
 
-    /// Extract number content using parser-specific logic
-    fn extract_number_content(
-        &mut self,
-        start_pos: usize,
-        from_container_end: bool,
-    ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
-
     /// Extract a completed number using shared number parsing logic
     ///
     /// # Arguments
@@ -188,7 +181,7 @@ pub trait ContentExtractor: EscapeHandler {
         };
 
         *self.parser_state_mut() = crate::shared::State::None;
-        self.extract_number_content(start_pos, from_container_end)
+        self.extract_number(start_pos, from_container_end, true)
     }
 }
 
@@ -476,14 +469,6 @@ mod tests {
         fn extract_key_content(
             &mut self,
             _start_pos: usize,
-        ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
-            unimplemented!("Mock doesn't need extraction")
-        }
-
-        fn extract_number_content(
-            &mut self,
-            _start_pos: usize,
-            _from_container_end: bool,
         ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
             unimplemented!("Mock doesn't need extraction")
         }

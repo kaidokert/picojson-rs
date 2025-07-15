@@ -146,9 +146,11 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
     /// Parsing continues until `EndDocument` is returned or an error occurs.
     fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
         // Use the unified ParserCore implementation with SliceParser-specific timing
-        self.parser_core.next_event_impl_unified(
+        // No byte accumulation needed for SliceParser (pass no-op closure)
+        self.parser_core.next_event_impl(
             &mut self.content_builder,
             crate::parser_core::EscapeTiming::OnBegin,
+            |_, _| Ok(()),
         )
     }
 }

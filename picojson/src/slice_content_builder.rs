@@ -82,27 +82,6 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         Ok(crate::Event::Key(key_result))
     }
 
-    fn extract_number_content(
-        &mut self,
-        start_pos: usize,
-        from_container_end: bool,
-    ) -> Result<crate::Event<'_, '_>, ParseError> {
-        // For standalone numbers at document end, clamp end position to buffer bounds
-        let at_document_end = self.buffer.is_empty();
-        let current_pos = self.buffer.current_pos();
-        let use_full_span = !from_container_end && at_document_end;
-
-        let end_pos = if use_full_span {
-            // Standalone number: clamp to buffer length to prevent slice bounds errors
-            core::cmp::min(current_pos, self.buffer.data_len())
-        } else {
-            // Container number: exclude delimiter
-            current_pos.saturating_sub(1)
-        };
-
-        crate::number_parser::parse_number_event(&self.buffer, start_pos, end_pos)
-    }
-
     fn extract_number(
         &mut self,
         start_pos: usize,

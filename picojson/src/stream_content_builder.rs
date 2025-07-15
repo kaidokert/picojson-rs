@@ -248,22 +248,6 @@ impl ContentExtractor for StreamContentBuilder<'_> {
         Ok(Event::Key(key))
     }
 
-    fn extract_number_content(
-        &mut self,
-        start_pos: usize,
-        from_container_end: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        // Use shared number parsing with StreamParser-specific document end detection
-        // StreamParser uses state-based detection: finished flag indicates true document end
-        let at_document_end = self.finished;
-        crate::number_parser::parse_number_with_delimiter_logic(
-            &self.stream_buffer,
-            start_pos,
-            from_container_end,
-            at_document_end,
-        )
-    }
-
     fn extract_number(
         &mut self,
         start_pos: usize,

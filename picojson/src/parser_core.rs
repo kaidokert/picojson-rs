@@ -40,22 +40,10 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         }
     }
 
-    /// Unified implementation that works with a single combined provider.
-    /// This avoids borrowing conflicts by using a single object that implements both traits.
-    pub fn next_event_impl_unified<'a, P>(
-        &mut self,
-        provider: &'a mut P,
-        escape_timing: EscapeTiming,
-    ) -> Result<Event<'a, 'a>, ParseError>
-    where
-        P: ParserProvider,
-    {
-        self.next_event_impl_unified_with_accumulator(provider, escape_timing, |_, _| Ok(()))
-    }
-
     /// Unified implementation with optional byte accumulation callback.
     /// This supports StreamParser-specific byte accumulation when no events are generated.
-    pub fn next_event_impl_unified_with_accumulator<'a, P, F>(
+    /// SliceParser passes a no-op closure for byte_accumulator.
+    pub fn next_event_impl<'a, P, F>(
         &mut self,
         provider: &'a mut P,
         escape_timing: EscapeTiming,
