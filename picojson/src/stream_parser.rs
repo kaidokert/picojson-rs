@@ -1197,52 +1197,31 @@ mod tests {
         // JSON: ["hello\\"] = 10 bytes total, should work with ~7 byte buffer
         let json_stream = br#"["hello\\"]"#;
 
-        println!("Testing escape sequence with buffer size: {}", buffer_size);
-        println!(
-            "JSON input: {:?}",
-            core::str::from_utf8(json_stream).unwrap()
-        );
         let mut buffer = vec![0u8; buffer_size];
         let mut parser = StreamParser::new(SliceReader::new(json_stream), &mut buffer);
 
         // Array start
-        match parser.next_event()? {
-            Event::StartArray => println!("  ✅ StartArray OK"),
-            other => panic!("Expected StartArray, got: {:?}", other),
-        }
+        assert!(matches!(parser.next_event()?, Event::StartArray));
 
         // String with escape
-        match parser.next_event()? {
-            Event::String(s) => {
-                println!("  ✅ String OK: '{}'", s.as_str());
-                assert_eq!(s.as_str(), "hello\\");
-            }
-            other => panic!("Expected String, got: {:?}", other),
-        }
+        assert!(matches!(parser.next_event()?, Event::String(s) if s.as_str() == "hello\\"));
 
         // Array end
-        match parser.next_event()? {
-            Event::EndArray => println!("  ✅ EndArray OK"),
-            other => panic!("Expected EndArray, got: {:?}", other),
-        }
+        assert!(matches!(parser.next_event()?, Event::EndArray));
 
         // End document
-        match parser.next_event()? {
-            Event::EndDocument => println!("  ✅ EndDocument OK"),
-            other => panic!("Expected EndDocument, got: {:?}", other),
-        }
+        assert!(matches!(parser.next_event()?, Event::EndDocument));
 
-        println!("  🎉 SUCCESS with buffer size: {}", buffer_size);
         Ok(())
     }
 
     #[test]
     fn test_minimal_buffer_simple_escape_1() {
         // Buffer size 4 - clearly not enough
-        match test_simple_escape_with_buffer_size(4) {
-            Ok(()) => panic!("Expected failure with 4-byte buffer, but succeeded!"),
-            Err(e) => println!("Expected failure with 4-byte buffer: {:?}", e),
-        }
+        assert!(matches!(
+            test_simple_escape_with_buffer_size(4),
+            Err(crate::ParseError::ScratchBufferFull)
+        ));
     }
 
     #[test]

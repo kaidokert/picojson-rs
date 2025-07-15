@@ -488,22 +488,6 @@ mod tests {
     #[test]
     fn test_unicode_escape_integration() {
         let input = r#"{"key": "Hello\u0041World"}"#; // \u0041 = 'A'
-        println!("=== SLICE PARSER DEBUG ===");
-        println!("Input: {}", input);
-        println!("Expected in string: 'HelloAWorld'");
-
-        // Print byte positions for the string part
-        let string_start = input.find("Hello").unwrap();
-        let string_part = &input[string_start..];
-        println!("String part: '{}'", string_part);
-        for (i, &byte) in string_part.as_bytes().iter().enumerate() {
-            println!(
-                "  pos {}: '{}' ({:02x})",
-                string_start + i,
-                byte as char,
-                byte
-            );
-        }
 
         let mut scratch = [0u8; 1024];
         let mut parser = SliceParser::with_buffer(input, &mut scratch);
@@ -514,13 +498,6 @@ mod tests {
         // The string with Unicode escape should be unescaped
         match parser.next_event().unwrap() {
             Event::String(String::Unescaped(s)) => {
-                println!("=== RESULT ANALYSIS ===");
-                println!("Expected: 'HelloAWorld'");
-                println!("Got:      '{}'", s);
-                println!("Character breakdown:");
-                for (i, ch) in s.char_indices() {
-                    println!("  [{}] '{}' = U+{:04X}", i, ch, ch as u32);
-                }
                 assert_eq!(s, "HelloAWorld");
             }
             other => panic!("Expected unescaped string value, got: {:?}", other),

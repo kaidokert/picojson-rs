@@ -723,7 +723,6 @@ mod tests {
         if _string_start_pos < offset {
             // Original string start was discarded - must use escape/copy mode
             // In real implementation, parser would copy what it had processed to unescaped buffer
-            println!("String start was discarded, switching to escape mode");
             _string_start_pos = 0; // Reset for escape mode
         } else {
             _string_start_pos = _string_start_pos.saturating_sub(offset); // Normal position update
