@@ -487,7 +487,6 @@ mod tests {
     #[test]
     fn test_unicode_escape_integration() {
         let input = r#"{"key": "Hello\u0041World"}"#; // \u0041 = 'A'
-
         let mut scratch = [0u8; 1024];
         let mut parser = SliceParser::with_buffer(input, &mut scratch);
 
