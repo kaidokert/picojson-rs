@@ -143,9 +143,9 @@ impl core::fmt::Display for JsonNumber<'_, '_> {
             JsonNumber::Copied { raw, parsed } => (raw, parsed),
         };
         match parsed {
-            NumberResult::Integer(val) => write!(f, "{}", val),
+            NumberResult::Integer(val) => write!(f, "{val}"),
             #[cfg(feature = "float")]
-            NumberResult::Float(val) => write!(f, "{}", val),
+            NumberResult::Float(val) => write!(f, "{val}"),
             #[cfg(all(not(feature = "float"), feature = "float-truncate"))]
             NumberResult::FloatTruncated(val) => write!(f, "{}", val),
             // For overflow, disabled, or skipped cases, show the exact raw string

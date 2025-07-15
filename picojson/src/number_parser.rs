@@ -61,6 +61,7 @@ pub fn parse_number_with_delimiter_logic<T: NumberExtractor>(
 /// 2. Convert to UTF-8 string
 /// 3. Parse using shared number parsing logic
 /// 4. Create JsonNumber::Borrowed event
+///
 /// All position logic is handled by the calling parser.
 pub fn parse_number_event<T: NumberExtractor>(
     extractor: &T,
