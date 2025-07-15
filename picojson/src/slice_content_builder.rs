@@ -107,7 +107,7 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         &mut self,
         start_pos: usize,
         from_container_end: bool,
-        finished: bool,
+        _finished: bool,
     ) -> Result<crate::Event<'_, '_>, ParseError> {
         // For SliceParser, use buffer-based document end detection
         // The finished parameter should always be true for complete slices, but we don't rely on it
@@ -138,6 +138,10 @@ impl crate::shared::ByteProvider for SliceContentBuilder<'_, '_> {
 }
 
 impl EscapeHandler for SliceContentBuilder<'_, '_> {
+    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
+        Ok(())
+    }
+
     fn parser_state(&self) -> &crate::shared::State {
         &self.parser_state
     }

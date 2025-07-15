@@ -22,15 +22,10 @@ pub trait EscapeHandler {
 
     /// Begin escape sequence processing (lifecycle method with default no-op implementation)
     /// Called when escape sequence processing begins (e.g., on Begin(EscapeSequence))
-    fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
-        Ok(())
-    }
+    fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError>;
 
     /// Begin unicode escape sequence processing
-    /// Default implementation is no-op - suitable for parsers that don't need special handling
-    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
-        Ok(())
-    }
+    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError>;
 }
 
 /// Result of processing a tokenizer event
@@ -440,6 +435,14 @@ mod tests {
         }
 
         fn handle_simple_escape_char(&mut self, _escape_char: u8) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
+
+        fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
+
+        fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
             Ok(())
         }
     }

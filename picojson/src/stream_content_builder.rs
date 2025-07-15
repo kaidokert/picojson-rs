@@ -272,12 +272,11 @@ impl ContentExtractor for StreamContentBuilder<'_> {
     ) -> Result<Event<'_, '_>, ParseError> {
         // Use shared number parsing with StreamParser-specific document end detection
         // StreamParser uses state-based detection: finished flag indicates true document end
-        let at_document_end = finished;
         crate::number_parser::parse_number_with_delimiter_logic(
             &self.stream_buffer,
             start_pos,
             from_container_end,
-            at_document_end,
+            finished,
         )
     }
 }
