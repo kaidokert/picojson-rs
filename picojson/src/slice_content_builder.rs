@@ -123,8 +123,6 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
             current_pos.saturating_sub(1)
         };
 
-        // Note: finished parameter is ignored for SliceParser as slices are always complete
-        let _ = finished; // Explicitly acknowledge parameter while explaining why it's unused
         crate::number_parser::parse_number_event(&self.buffer, start_pos, end_pos)
     }
 }

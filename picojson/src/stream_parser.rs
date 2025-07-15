@@ -116,7 +116,6 @@ impl<R: Reader> ByteProvider for StreamParserProvider<'_, R> {
 
         // Get byte and advance
         let byte = self.content_builder.stream_buffer().current_byte()?;
-        let _current_pos = self.content_builder.stream_buffer().current_position();
         self.content_builder.stream_buffer_mut().advance()?;
         Ok(Some(byte))
     }
