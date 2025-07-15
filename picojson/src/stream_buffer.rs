@@ -161,7 +161,6 @@ impl<'a> StreamBuffer<'a> {
         }
 
         // Update positions
-        let _old_tokenize_pos = self.tokenize_pos;
         self.tokenize_pos = self.tokenize_pos.saturating_sub(offset);
         self.data_end = remaining_data;
 
