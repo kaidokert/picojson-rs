@@ -119,7 +119,7 @@ impl<'a> ChunkReader<'a> {
     }
 }
 
-impl<'a> Reader for ChunkReader<'a> {
+impl Reader for ChunkReader<'_> {
     type Error = ();
 
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {

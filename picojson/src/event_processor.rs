@@ -9,6 +9,7 @@ use crate::ujson::EventToken;
 use crate::{Event, ParseError};
 
 /// Escape handling trait for abstracting escape sequence processing between parsers
+#[allow(dead_code)] // Methods are part of trait interface design
 pub trait EscapeHandler {
     /// Get the current parser state for escape context checking
     fn parser_state(&self) -> &crate::shared::State;
@@ -28,6 +29,12 @@ pub trait EscapeHandler {
     /// Append a single literal byte (for per-byte accumulation patterns)
     /// Default implementation is no-op - suitable for parsers that don't need per-byte processing
     fn append_literal_byte(&mut self, _byte: u8) -> Result<(), crate::ParseError> {
+        Ok(())
+    }
+
+    /// Begin unicode escape sequence processing
+    /// Default implementation is no-op - suitable for parsers that don't need special handling
+    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
         Ok(())
     }
 }
@@ -65,7 +72,7 @@ pub fn process_begin_events<C: ContentExtractor>(
         }
         crate::ujson::Event::Begin(EventToken::String) => {
             let pos = content_extractor.current_position();
-            log::debug!("[NEW] Begin(String): storing pos={} in State::String", pos);
+            log::debug!("[NEW] Begin(String): storing pos={pos} in State::String");
             *content_extractor.parser_state_mut() = State::String(pos);
             content_extractor.begin_string_content(pos);
             Some(EventResult::Continue)
@@ -190,9 +197,9 @@ pub trait ContentExtractor: EscapeHandler {
 ///
 /// This callback stores tokenizer events in the parser's event array, filling the first
 /// available slot. This pattern is identical across both SliceParser and StreamParser.
-pub fn create_tokenizer_callback<'a>(
-    event_storage: &'a mut [Option<crate::ujson::Event>; 2],
-) -> impl FnMut(crate::ujson::Event, usize) + 'a {
+pub fn create_tokenizer_callback(
+    event_storage: &mut [Option<crate::ujson::Event>; 2],
+) -> impl FnMut(crate::ujson::Event, usize) + '_ {
     |event, _len| {
         for evt in event_storage.iter_mut() {
             if evt.is_none() {
@@ -272,6 +279,7 @@ pub fn process_unicode_escape_events<C: ContentExtractor>(
             match content_extractor.parser_state() {
                 crate::shared::State::String(_) | crate::shared::State::Key(_) => {
                     content_extractor.unicode_escape_collector_mut().reset();
+                    content_extractor.begin_unicode_escape()?;
                 }
                 _ => {} // Ignore if not in string/key context
             }

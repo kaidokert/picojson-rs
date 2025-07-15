@@ -21,6 +21,8 @@ pub struct SliceContentBuilder<'a, 'b> {
     parser_state: State,
     /// Unicode escape collector for \uXXXX sequences
     unicode_escape_collector: UnicodeEscapeCollector,
+    /// Flag to track when we're inside ANY escape sequence (like stream implementation)
+    in_escape_sequence: bool,
 }
 
 impl<'a, 'b> SliceContentBuilder<'a, 'b> {
@@ -31,6 +33,7 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
             copy_on_escape: CopyOnEscape::new(input, scratch_buffer),
             parser_state: State::None,
             unicode_escape_collector: UnicodeEscapeCollector::new(),
+            in_escape_sequence: false,
         }
     }
 
@@ -45,13 +48,15 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
     }
 }
 
-impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
+impl ContentBuilder for SliceContentBuilder<'_, '_> {
     fn begin_content(&mut self, pos: usize, _is_key: bool) {
         // SliceParser uses CopyOnEscape for content management
         self.copy_on_escape.begin_string(pos);
     }
 
     fn handle_simple_escape(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.in_escape_sequence = false;
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())
@@ -62,6 +67,8 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
         // The position calculation matches the existing SliceParser logic
         let current_pos = self.buffer.current_pos();
         let (_, _, escape_start_pos) = ContentRange::unicode_escape_bounds(current_pos);
+        // Fix: escape_start_pos should point to the backslash, not the 'u'
+        let actual_escape_start_pos = escape_start_pos.saturating_sub(1);
 
         // Check if this is completing a surrogate pair
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
@@ -70,14 +77,14 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
             // This is completing a surrogate pair - need to consume both escapes
             // First call: consume the high surrogate (6 bytes earlier)
             self.copy_on_escape
-                .handle_unicode_escape(escape_start_pos, &[])?;
+                .handle_unicode_escape(actual_escape_start_pos, &[])?;
             // Second call: consume the low surrogate and write UTF-8
             self.copy_on_escape
-                .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+                .handle_unicode_escape(actual_escape_start_pos + 6, utf8_bytes)?;
         } else {
             // Single Unicode escape - normal processing
             self.copy_on_escape
-                .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+                .handle_unicode_escape(actual_escape_start_pos, utf8_bytes)?;
         }
 
         Ok(())
@@ -90,7 +97,8 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
     }
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
-        // SliceParser doesn't need special escape sequence setup
+        // Set escape flag to prevent literal byte accumulation during escape processing
+        self.in_escape_sequence = true;
         Ok(())
     }
 
@@ -119,12 +127,11 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
         let at_document_end = self.buffer.is_empty();
         log::debug!("[NEW] SliceContentBuilder extract_number: start_pos={}, from_container_end={}, finished={} (ignored), buffer_empty={}, at_document_end={}",
             start_pos, from_container_end, finished, self.buffer.is_empty(), at_document_end);
-        crate::number_parser::parse_number_with_delimiter_logic(
-            &self.buffer,
-            start_pos,
-            from_container_end,
-            at_document_end,
-        )
+        // SliceParser-specific fix: at document end, current_pos points past the input,
+        // so we need to adjust the logic to always exclude the delimiter position
+        let current_pos = self.buffer.current_position();
+        let end_pos = current_pos.saturating_sub(1);
+        crate::number_parser::parse_number_event(&self.buffer, start_pos, end_pos)
     }
 
     fn current_position(&self) -> usize {
@@ -136,7 +143,7 @@ impl<'a, 'b> ContentBuilder for SliceContentBuilder<'a, 'b> {
     }
 }
 
-impl<'a, 'b> ContentExtractor for SliceContentBuilder<'a, 'b> {
+impl ContentExtractor for SliceContentBuilder<'_, '_> {
     fn parser_state_mut(&mut self) -> &mut crate::shared::State {
         &mut self.parser_state
     }
@@ -176,22 +183,38 @@ impl<'a, 'b> ContentExtractor for SliceContentBuilder<'a, 'b> {
         start_pos: usize,
         from_container_end: bool,
     ) -> Result<crate::Event<'_, '_>, ParseError> {
+        // Use shared number parsing with SliceParser-specific document end detection
+        // SliceParser uses buffer-based detection: buffer empty indicates document end
         let at_document_end = self.buffer.is_empty();
-        crate::number_parser::parse_number_with_delimiter_logic(
-            &self.buffer,
-            start_pos,
-            from_container_end,
-            at_document_end,
-        )
+        log::debug!("[NEW] SliceContentBuilder extract_number_content: start_pos={}, from_container_end={}, buffer_empty={}, at_document_end={}",
+            start_pos, from_container_end, self.buffer.is_empty(), at_document_end);
+        // SliceParser-specific fix: at document end, current_pos points past the input,
+        // so we need to adjust the logic to always exclude the delimiter position
+        let current_pos = self.buffer.current_position();
+        let end_pos = current_pos.saturating_sub(1);
+        crate::number_parser::parse_number_event(&self.buffer, start_pos, end_pos)
     }
 }
 
-impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
+impl crate::shared::ByteProvider for SliceContentBuilder<'_, '_> {
+    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
+        use crate::slice_input_buffer::InputBuffer;
+        match self.buffer_mut().consume_byte() {
+            Ok(byte) => Ok(Some(byte)),
+            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+}
+
+impl EscapeHandler for SliceContentBuilder<'_, '_> {
     fn parser_state(&self) -> &crate::shared::State {
         &self.parser_state
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when unicode escape completes
+        self.in_escape_sequence = false;
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
@@ -206,6 +229,9 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
                 hex_slice_provider,
                 &mut utf8_buf,
             )?;
+        // Fix: escape_start_pos should point to the backslash, not the 'u'
+        // But don't subtract if it's already pointing to the backslash
+        let actual_escape_start_pos = escape_start_pos;
 
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some(utf8_bytes) = utf8_bytes_opt {
@@ -213,14 +239,14 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
                 // This is completing a surrogate pair - need to consume both escapes
                 // First call: consume the high surrogate (6 bytes earlier)
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos, &[])?;
+                    .handle_unicode_escape(actual_escape_start_pos, &[])?;
                 // Second call: consume the low surrogate and write UTF-8
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+                    .handle_unicode_escape(actual_escape_start_pos + 6, utf8_bytes)?;
             } else {
                 // Single Unicode escape - normal processing
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+                    .handle_unicode_escape(actual_escape_start_pos, utf8_bytes)?;
             }
         }
 
@@ -228,6 +254,8 @@ impl<'a, 'b> EscapeHandler for SliceContentBuilder<'a, 'b> {
     }
 
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.in_escape_sequence = false;
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())

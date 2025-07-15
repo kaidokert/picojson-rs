@@ -84,8 +84,11 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
 impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     /// Get the next JSON event from the stream
     fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
-        // We need to implement the unified loop locally to avoid borrowing conflicts
-        // This is essentially a copy of ParserCore::next_event_impl but accessing fields directly
+        // StreamParser has special requirements that prevent using ParserCore directly:
+        // 1. Byte accumulation logic when no events are generated
+        // 2. Buffer filling and compaction logic
+        // 3. Complex state management across buffer boundaries
+        // For now, use a custom loop that handles these StreamParser-specific needs
         loop {
             while !crate::event_processor::have_events(&self.parser_core.parser_state.evts) {
                 if let Some(byte) = self.next_byte()? {
@@ -105,7 +108,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
                     let has_events =
                         crate::event_processor::have_events(&self.parser_core.parser_state.evts);
-                    log::trace!("[NEW] After tokenizer: has_events={}", has_events);
+                    log::trace!("[NEW] After tokenizer: has_events={has_events}");
 
                     // Handle byte accumulation if no event was generated (StreamParser-specific)
                     if !has_events {
@@ -116,6 +119,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
                     // Handle end of data with tokenizer finish
                     if !self.finished {
                         self.finished = true;
+                        self.content_builder.set_finished(true);
                         crate::event_processor::finish_tokenizer(
                             &mut self.parser_core.tokenizer,
                             &mut self.parser_core.parser_state.evts,
@@ -375,7 +379,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
     }
 }
 
-impl<'b, R: Reader, C: BitStackConfig> PullParser for StreamParser<'b, R, C> {
+impl<R: Reader, C: BitStackConfig> PullParser for StreamParser<'_, R, C> {
     fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         self.content_builder.apply_unescaped_reset_if_queued();
 
@@ -383,7 +387,7 @@ impl<'b, R: Reader, C: BitStackConfig> PullParser for StreamParser<'b, R, C> {
     }
 }
 
-impl<'b, R: Reader, C: BitStackConfig> crate::shared::ByteProvider for StreamParser<'b, R, C> {
+impl<R: Reader, C: BitStackConfig> crate::shared::ByteProvider for StreamParser<'_, R, C> {
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
         // If buffer is empty, try to fill it first
         if self.content_builder.stream_buffer().is_empty() {

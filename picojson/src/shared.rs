@@ -55,14 +55,12 @@ pub enum State {
 
 /// Parser state and event storage
 pub(super) struct ParserState {
-    pub state: State,
     pub evts: [Option<crate::ujson::Event>; 2],
 }
 
 impl ParserState {
     pub fn new() -> Self {
         Self {
-            state: State::None,
             evts: core::array::from_fn(|_| None),
         }
     }

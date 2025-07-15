@@ -16,6 +16,10 @@ use crate::shared::{ByteProvider, Event, ParserState, UnexpectedState};
 use crate::ujson::{EventToken, Tokenizer};
 use crate::{ujson, ParseError};
 
+/// Combined trait for parsers that provide both byte access and content building
+pub trait ParserProvider: ByteProvider + ContentBuilder {}
+impl<T: ByteProvider + ContentBuilder> ParserProvider for T {}
+
 /// The core parser logic that handles the unified event processing loop.
 ///
 /// This struct contains all the shared state and logic that was previously
@@ -37,25 +41,30 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         }
     }
 
-    /// The unified event processing loop that was previously duplicated
-    /// between SliceParser and StreamParser.
-    ///
-    /// This method implements the common logic while delegating to traits
-    /// for the parser-specific differences.
-    pub fn next_event_impl<'a, B, CB>(
+    /// Unified implementation that works with a single combined provider.
+    /// This avoids borrowing conflicts by using a single object that implements both traits.
+    pub fn next_event_impl_unified<'a, P>(
         &mut self,
-        byte_provider: &mut B,
-        content_builder: &'a mut CB,
+        provider: &'a mut P,
         escape_timing: EscapeTiming,
     ) -> Result<Event<'a, 'a>, ParseError>
     where
-        B: ByteProvider,
-        CB: ContentBuilder,
+        P: ParserProvider,
     {
         loop {
             while !have_events(&self.parser_state.evts) {
-                if !self.pull_tokenizer_events(byte_provider)? {
-                    return Ok(Event::EndDocument);
+                if let Some(byte) = provider.next_byte()? {
+                    process_byte_through_tokenizer(
+                        byte,
+                        &mut self.tokenizer,
+                        &mut self.parser_state.evts,
+                    )?;
+                } else {
+                    finish_tokenizer(&mut self.tokenizer, &mut self.parser_state.evts)?;
+
+                    if !have_events(&self.parser_state.evts) {
+                        return Ok(Event::EndDocument);
+                    }
                 }
             }
 
@@ -65,17 +74,15 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
             };
 
             // Try shared event processors first
-            if let Some(result) = process_simple_events(&taken)
-                .or_else(|| process_begin_events(&taken, content_builder))
+            if let Some(result) =
+                process_simple_events(&taken).or_else(|| process_begin_events(&taken, provider))
             {
                 match result {
                     EventResult::Complete(event) => return Ok(event),
-                    EventResult::ExtractString => {
-                        return content_builder.validate_and_extract_string()
-                    }
-                    EventResult::ExtractKey => return content_builder.validate_and_extract_key(),
+                    EventResult::ExtractString => return provider.validate_and_extract_string(),
+                    EventResult::ExtractKey => return provider.validate_and_extract_key(),
                     EventResult::ExtractNumber(from_container_end) => {
-                        return content_builder.validate_and_extract_number(from_container_end)
+                        return provider.validate_and_extract_number(from_container_end)
                     }
                     EventResult::Continue => continue,
                 }
@@ -84,9 +91,9 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
             // Handle parser-specific events based on escape timing
             match taken {
                 ujson::Event::Begin(EventToken::EscapeSequence) => {
-                    process_begin_escape_sequence_event(content_builder)?;
+                    process_begin_escape_sequence_event(provider)?;
                 }
-                _ if process_unicode_escape_events(&taken, content_builder)? => {
+                _ if process_unicode_escape_events(&taken, provider)? => {
                     // Unicode escape events handled by shared function
                 }
                 ujson::Event::Begin(
@@ -102,7 +109,7 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     // SliceParser-specific: Handle simple escape sequences on Begin events
                     // because CopyOnEscape requires starting unescaping immediately when
                     // the escape token begins to maintain zero-copy optimization
-                    process_simple_escape_event(&escape_token, content_builder)?;
+                    process_simple_escape_event(&escape_token, provider)?;
                 }
                 ujson::Event::End(
                     escape_token @ (EventToken::EscapeQuote
@@ -117,31 +124,13 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     // StreamParser-specific: Handle simple escape sequences on End events
                     // because StreamBuffer must wait until the token ends to accumulate
                     // all bytes before processing the complete escape sequence
-                    process_simple_escape_event(&escape_token, content_builder)?;
+                    process_simple_escape_event(&escape_token, provider)?;
                 }
                 _ => {
                     // All other events continue to next iteration
                 }
             }
         }
-    }
-
-    /// Pull events from tokenizer and return whether parsing should continue.
-    /// This implements the common tokenizer event pulling logic.
-    fn pull_tokenizer_events<B: ByteProvider>(
-        &mut self,
-        byte_provider: &mut B,
-    ) -> Result<bool, ParseError> {
-        if let Some(byte) = byte_provider.next_byte()? {
-            process_byte_through_tokenizer(byte, &mut self.tokenizer, &mut self.parser_state.evts)?;
-        } else {
-            finish_tokenizer(&mut self.tokenizer, &mut self.parser_state.evts)?;
-
-            if !have_events(&self.parser_state.evts) {
-                return Ok(false); // Signal end of parsing
-            }
-        }
-        Ok(true) // Continue parsing
     }
 }
 

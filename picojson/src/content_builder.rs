@@ -14,6 +14,7 @@ use crate::{Event, ParseError, String};
 /// This trait combines the functionality of `ContentExtractor` and `EscapeHandler` into a
 /// unified interface that can be implemented by different parser backends while sharing
 /// the core event processing logic.
+#[allow(dead_code)] // Methods are part of trait interface design
 pub trait ContentBuilder: ContentExtractor + EscapeHandler {
     /// Begin processing a new string or key at the given position
     ///
