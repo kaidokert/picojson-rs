@@ -130,7 +130,7 @@ mod conformance_generated {{
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "remote-tests")]
 fn sanitize_test_name(
     filename: &str,
     test_name_counts: &mut std::collections::HashMap<String, u32>,
@@ -165,19 +165,19 @@ fn sanitize_test_name(
 }
 
 // Configuration from Cargo.toml metadata
-#[allow(dead_code)]
+#[cfg(feature = "remote-tests")]
 fn get_jsontest_suite_url() -> String {
     std::env::var("CARGO_PKG_METADATA_CONFORMANCE_TESTS_JSONTEST_SUITE_URL")
         .unwrap_or_else(|_| "https://github.com/nst/JSONTestSuite/archive/{commit}.zip".to_string())
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "remote-tests")]
 fn get_jsontest_suite_commit() -> String {
     std::env::var("CARGO_PKG_METADATA_CONFORMANCE_TESTS_JSONTEST_SUITE_COMMIT")
         .unwrap_or_else(|_| "1ef36fa01286573e846ac449e8683f8833c5b26a".to_string())
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "json-checker-tests")]
 fn get_json_checker_url() -> String {
     std::env::var("CARGO_PKG_METADATA_CONFORMANCE_TESTS_JSON_CHECKER_URL")
         .unwrap_or_else(|_| "https://www.json.org/JSON_checker/test.zip".to_string())
