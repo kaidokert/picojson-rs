@@ -330,7 +330,7 @@ fn test_stress_matrix_critical_sizes() {
     }
 }
 
-#[test_log::test]
+#[test]
 fn test_stress_variable_read_sizes() {
     let scenarios = get_test_scenarios();
     let patterns: &[&[usize]] = &[&[1, 5, 2], &[7, 1, 1, 10], &[1]];

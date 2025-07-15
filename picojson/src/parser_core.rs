@@ -6,19 +6,18 @@
 //! event processing logic between SliceParser and StreamParser, eliminating
 //! the duplication in their `next_event_impl` methods.
 
-use crate::content_builder::ContentBuilder;
 use crate::event_processor::{
     finish_tokenizer, have_events, process_begin_escape_sequence_event, process_begin_events,
     process_byte_through_tokenizer, process_simple_escape_event, process_simple_events,
-    process_unicode_escape_events, take_first_event, EventResult,
+    process_unicode_escape_events, take_first_event, ContentExtractor, EventResult,
 };
 use crate::shared::{ByteProvider, Event, ParserState, UnexpectedState};
 use crate::ujson::{EventToken, Tokenizer};
 use crate::{ujson, ParseError};
 
-/// Combined trait for parsers that provide both byte access and content building
-pub trait ParserProvider: ByteProvider + ContentBuilder {}
-impl<T: ByteProvider + ContentBuilder> ParserProvider for T {}
+/// Combined trait for parsers that provide both byte access and content extraction
+pub trait ParserProvider: ByteProvider + ContentExtractor {}
+impl<T: ByteProvider + ContentExtractor> ParserProvider for T {}
 
 /// The core parser logic that handles the unified event processing loop.
 ///

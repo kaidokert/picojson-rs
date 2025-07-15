@@ -63,8 +63,6 @@ mod copy_on_escape;
 
 mod escape_processor;
 
-mod content_builder;
-
 mod parser_core;
 
 mod stream_buffer;
@@ -72,12 +70,6 @@ mod stream_buffer;
 mod stream_content_builder;
 
 mod stream_parser;
-
-#[cfg(test)]
-mod debug_test;
-
-#[cfg(test)]
-mod simple_debug;
 
 mod slice_content_builder;
 

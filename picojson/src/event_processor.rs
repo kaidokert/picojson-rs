@@ -9,7 +9,6 @@ use crate::ujson::EventToken;
 use crate::{Event, ParseError};
 
 /// Escape handling trait for abstracting escape sequence processing between parsers
-#[allow(dead_code)] // Methods are part of trait interface design
 pub trait EscapeHandler {
     /// Get the current parser state for escape context checking
     fn parser_state(&self) -> &crate::shared::State;
@@ -23,12 +22,6 @@ pub trait EscapeHandler {
     /// Begin escape sequence processing (lifecycle method with default no-op implementation)
     /// Called when escape sequence processing begins (e.g., on Begin(EscapeSequence))
     fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
-        Ok(())
-    }
-
-    /// Append a single literal byte (for per-byte accumulation patterns)
-    /// Default implementation is no-op - suitable for parsers that don't need per-byte processing
-    fn append_literal_byte(&mut self, _byte: u8) -> Result<(), crate::ParseError> {
         Ok(())
     }
 
@@ -72,7 +65,6 @@ pub fn process_begin_events<C: ContentExtractor>(
         }
         crate::ujson::Event::Begin(EventToken::String) => {
             let pos = content_extractor.current_position();
-            log::debug!("[NEW] Begin(String): storing pos={pos} in State::String");
             *content_extractor.parser_state_mut() = State::String(pos);
             content_extractor.begin_string_content(pos);
             Some(EventResult::Continue)
@@ -138,6 +130,19 @@ pub trait ContentExtractor: EscapeHandler {
         &mut self,
         start_pos: usize,
         from_container_end: bool,
+    ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
+
+    /// Extract a completed number using shared number parsing logic
+    ///
+    /// # Arguments
+    /// * `start_pos` - Position where the number started
+    /// * `from_container_end` - True if number was terminated by container delimiter
+    /// * `finished` - True if the parser has finished processing input (StreamParser-specific)
+    fn extract_number(
+        &mut self,
+        start_pos: usize,
+        from_container_end: bool,
+        finished: bool,
     ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
 
     /// Shared validation and extraction for string content
@@ -227,18 +232,11 @@ pub fn process_begin_escape_sequence_event<H: EscapeHandler>(
     handler: &mut H,
 ) -> Result<(), crate::ParseError> {
     // Only process if we're inside a string or key
-    log::debug!(
-        "[NEW] process_begin_escape_sequence_event called, state: {:?}",
-        handler.parser_state()
-    );
     match handler.parser_state() {
         crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-            log::debug!("[NEW] calling begin_escape_sequence()");
             handler.begin_escape_sequence()?;
         }
-        _ => {
-            log::debug!("[NEW] ignoring escape sequence - not in string/key context");
-        } // Ignore if not in string/key context
+        _ => {} // Ignore if not in string/key context
     }
     Ok(())
 }
@@ -274,34 +272,24 @@ pub fn process_unicode_escape_events<C: ContentExtractor>(
 ) -> Result<bool, crate::ParseError> {
     match event {
         crate::ujson::Event::Begin(EventToken::UnicodeEscape) => {
-            log::debug!("NEW event_processor: Begin(UnicodeEscape) event received");
             // Start Unicode escape collection - reset collector for new sequence
             // Only handle if we're inside a string or key
             match content_extractor.parser_state() {
                 crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                    log::debug!("NEW event_processor: Resetting unicode escape collector");
                     content_extractor.unicode_escape_collector_mut().reset();
                     content_extractor.begin_unicode_escape()?;
                 }
-                _ => {
-                    log::debug!(
-                        "NEW event_processor: Ignoring unicode escape outside string/key context"
-                    );
-                } // Ignore if not in string/key context
+                _ => {} // Ignore if not in string/key context
             }
             Ok(true) // Event was handled
         }
         crate::ujson::Event::End(EventToken::UnicodeEscape) => {
-            log::debug!("NEW event_processor: End(UnicodeEscape) event received");
             // Handle end of Unicode escape sequence (\uXXXX)
             match content_extractor.parser_state() {
                 crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                    log::debug!("NEW event_processor: Processing unicode escape with collector");
                     content_extractor.process_unicode_escape_with_collector()?;
                 }
-                _ => {
-                    log::debug!("NEW event_processor: Ignoring unicode escape end outside string/key context");
-                } // Ignore if not in string/key context
+                _ => {} // Ignore if not in string/key context
             }
             Ok(true) // Event was handled
         }
@@ -494,6 +482,15 @@ mod tests {
             &mut self,
             _start_pos: usize,
             _from_container_end: bool,
+        ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
+            unimplemented!("Mock doesn't need extraction")
+        }
+
+        fn extract_number(
+            &mut self,
+            _start_pos: usize,
+            _from_container_end: bool,
+            _finished: bool,
         ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
             unimplemented!("Mock doesn't need extraction")
         }

@@ -51,8 +51,6 @@ pub fn parse_number_with_delimiter_logic<T: NumberExtractor>(
     let use_full_span = !from_container_end && at_document_end;
     let end_pos = crate::shared::ContentRange::number_end_position(current_pos, use_full_span);
 
-    log::debug!("[NEW] parse_number_with_delimiter_logic: start_pos={start_pos}, current_pos={current_pos}, from_container_end={from_container_end}, at_document_end={at_document_end}, use_full_span={use_full_span}, end_pos={end_pos}");
-
     parse_number_event(extractor, start_pos, end_pos)
 }
 

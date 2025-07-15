@@ -1005,13 +1005,6 @@ impl crate::number_parser::NumberExtractor for StreamBuffer<'_> {
     }
 
     fn is_empty(&self) -> bool {
-        let result = self.tokenize_pos >= self.data_end;
-        log::debug!(
-            "[NEW] StreamBuffer::is_empty(): tokenize_pos={}, data_end={}, result={}",
-            self.tokenize_pos,
-            self.data_end,
-            result
-        );
-        result
+        self.tokenize_pos >= self.data_end
     }
 }

@@ -3,7 +3,7 @@
 use crate::event_processor::{ContentExtractor, EscapeHandler};
 use crate::parse_error::ParseError;
 use crate::parser_core::ParserCore;
-use crate::shared::{ByteProvider, Event};
+use crate::shared::{ByteProvider, Event, State};
 use crate::stream_content_builder::StreamContentBuilder;
 use crate::{ujson, PullParser};
 
@@ -92,14 +92,6 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         loop {
             while !crate::event_processor::have_events(&self.parser_core.parser_state.evts) {
                 if let Some(byte) = self.next_byte()? {
-                    let pos_before = self.content_builder.current_position();
-                    log::trace!(
-                        "[NEW] Processing byte '{}' ({}) at pos {}",
-                        byte as char,
-                        byte,
-                        pos_before
-                    );
-
                     crate::event_processor::process_byte_through_tokenizer(
                         byte,
                         &mut self.parser_core.tokenizer,
@@ -108,11 +100,9 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
                     let has_events =
                         crate::event_processor::have_events(&self.parser_core.parser_state.evts);
-                    log::trace!("[NEW] After tokenizer: has_events={has_events}");
 
                     // Handle byte accumulation if no event was generated (StreamParser-specific)
                     if !has_events {
-                        log::trace!("[NEW] No events generated, calling handle_byte_accumulation");
                         self.handle_byte_accumulation(byte)?;
                     }
                 } else {
@@ -210,8 +200,8 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
         *self.content_builder.parser_state_mut() = crate::shared::State::None;
 
-        // Use the new ContentBuilder::extract_number method with finished state
-        use crate::content_builder::ContentBuilder;
+        // Use the ContentExtractor::extract_number method with finished state
+        use crate::event_processor::ContentExtractor;
         self.content_builder
             .extract_number(start_pos, from_container_end, self.finished)
     }
@@ -373,9 +363,30 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
 
     /// Handle byte accumulation for strings/keys and Unicode escape sequences
     fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
-        // Use ContentBuilder's literal byte append logic
-        use crate::content_builder::ContentBuilder;
-        ContentBuilder::append_literal_byte(&mut self.content_builder, byte)
+        // Check if we're in a string or key state and should accumulate bytes
+        let in_string_mode = matches!(
+            *self.content_builder.parser_state(),
+            State::String(_) | State::Key(_)
+        );
+
+        if in_string_mode {
+            // Follow old implementation pattern - do NOT write to escape buffer
+            // when inside ANY escape sequence (in_escape_sequence == true)
+            // This prevents hex digits from being accumulated as literal text
+            if !self.content_builder.in_escape_sequence()
+                && self.content_builder.stream_buffer().has_unescaped_content()
+                && !self
+                    .content_builder
+                    .unicode_escape_collector()
+                    .has_pending_high_surrogate()
+            {
+                self.content_builder
+                    .stream_buffer_mut()
+                    .append_unescaped_byte(byte)
+                    .map_err(ParseError::from)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -488,7 +499,7 @@ mod tests {
         assert!(matches!(event, Event::EndDocument));
     }
 
-    #[test_log::test]
+    #[test]
     fn test_direct_parser_simple_escape() {
         let json = b"\"hello\\nworld\"";
         let reader = SliceReader::new(json);
