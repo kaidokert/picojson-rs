@@ -50,6 +50,21 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
     where
         P: ParserProvider,
     {
+        self.next_event_impl_unified_with_accumulator(provider, escape_timing, |_, _| Ok(()))
+    }
+
+    /// Unified implementation with optional byte accumulation callback.
+    /// This supports StreamParser-specific byte accumulation when no events are generated.
+    pub fn next_event_impl_unified_with_accumulator<'a, P, F>(
+        &mut self,
+        provider: &'a mut P,
+        escape_timing: EscapeTiming,
+        mut byte_accumulator: F,
+    ) -> Result<Event<'a, 'a>, ParseError>
+    where
+        P: ParserProvider,
+        F: FnMut(&mut P, u8) -> Result<(), ParseError>,
+    {
         loop {
             while !have_events(&self.parser_state.evts) {
                 if let Some(byte) = provider.next_byte()? {
@@ -58,7 +73,14 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                         &mut self.tokenizer,
                         &mut self.parser_state.evts,
                     )?;
+
+                    // Call byte accumulator if no events were generated (StreamParser-specific)
+                    if !have_events(&self.parser_state.evts) {
+                        byte_accumulator(provider, byte)?;
+                    }
                 } else {
+                    // Handle end of stream - let the provider handle any cleanup
+                    // For StreamParser, this is where finished flag gets set
                     finish_tokenizer(&mut self.tokenizer, &mut self.parser_state.evts)?;
 
                     if !have_events(&self.parser_state.evts) {
@@ -130,6 +152,12 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                 }
             }
         }
+    }
+}
+
+impl<T: ujson::BitBucket, C: ujson::DepthCounter> Default for ParserCore<T, C> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -32,12 +32,9 @@ pub trait Reader {
 pub struct StreamParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     /// The shared parser core that handles the unified event processing loop
     parser_core: ParserCore<C::Bucket, C::Counter>,
-    /// The content builder that handles StreamParser-specific content extraction
-    content_builder: StreamContentBuilder<'b>,
-    /// Reader for streaming input
-    reader: R,
-    /// Flag to track if input is finished
-    finished: bool,
+    /// The unified provider that handles both content building and reader access
+    /// This allows us to use the same unified pattern as SliceParser
+    provider: StreamParserProvider<'b, R>,
 }
 
 /// Methods for StreamParser using DefaultConfig
@@ -73,6 +70,26 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
     pub fn with_config(reader: R, buffer: &'b mut [u8]) -> Self {
         Self {
             parser_core: ParserCore::new(),
+            provider: StreamParserProvider::new(reader, buffer),
+        }
+    }
+}
+
+/// Implement the required traits for StreamParser to work with unified ParserCore
+/// This provider handles the StreamParser-specific operations needed by the unified parser core
+/// It bridges the gap between the generic ParserCore and the StreamParser's specific requirements
+/// for streaming input and buffer management
+/// The provider contains mutable references to the StreamParser's internal state
+/// which allows the unified parser core to control the parsing process
+pub struct StreamParserProvider<'b, R: Reader> {
+    content_builder: StreamContentBuilder<'b>,
+    reader: R,
+    finished: bool,
+}
+
+impl<'b, R: Reader> StreamParserProvider<'b, R> {
+    pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
+        Self {
             content_builder: StreamContentBuilder::new(buffer),
             reader,
             finished: false,
@@ -80,340 +97,150 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
     }
 }
 
-/// Shared methods for StreamParser with any BitStackConfig
-impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
-    /// Get the next JSON event from the stream
-    fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
-        // StreamParser has special requirements that prevent using ParserCore directly:
-        // 1. Byte accumulation logic when no events are generated
-        // 2. Buffer filling and compaction logic
-        // 3. Complex state management across buffer boundaries
-        // For now, use a custom loop that handles these StreamParser-specific needs
-        loop {
-            while !crate::event_processor::have_events(&self.parser_core.parser_state.evts) {
-                if let Some(byte) = self.next_byte()? {
-                    crate::event_processor::process_byte_through_tokenizer(
-                        byte,
-                        &mut self.parser_core.tokenizer,
-                        &mut self.parser_core.parser_state.evts,
-                    )?;
-
-                    let has_events =
-                        crate::event_processor::have_events(&self.parser_core.parser_state.evts);
-
-                    // Handle byte accumulation if no event was generated (StreamParser-specific)
-                    if !has_events {
-                        self.handle_byte_accumulation(byte)?;
-                    }
-                } else {
-                    // Handle end of data with tokenizer finish
-                    if !self.finished {
-                        self.finished = true;
-                        self.content_builder.set_finished(true);
-                        crate::event_processor::finish_tokenizer(
-                            &mut self.parser_core.tokenizer,
-                            &mut self.parser_core.parser_state.evts,
-                        )?;
-                    }
-
-                    if !crate::event_processor::have_events(&self.parser_core.parser_state.evts) {
-                        return Ok(Event::EndDocument);
-                    }
-                }
-            }
-
-            let taken_event =
-                crate::event_processor::take_first_event(&mut self.parser_core.parser_state.evts);
-            let Some(taken) = taken_event else {
-                return Err(crate::shared::UnexpectedState::StateMismatch.into());
-            };
-
-            // Try shared event processors first
-            if let Some(result) =
-                crate::event_processor::process_simple_events(&taken).or_else(|| {
-                    crate::event_processor::process_begin_events(&taken, &mut self.content_builder)
-                })
-            {
-                match result {
-                    crate::event_processor::EventResult::Complete(event) => return Ok(event),
-                    crate::event_processor::EventResult::ExtractString => {
-                        return self.content_builder.validate_and_extract_string()
-                    }
-                    crate::event_processor::EventResult::ExtractKey => {
-                        return self.content_builder.validate_and_extract_key()
-                    }
-                    crate::event_processor::EventResult::ExtractNumber(from_container_end) => {
-                        return self.extract_number_with_finished_state(from_container_end)
-                    }
-                    crate::event_processor::EventResult::Continue => continue,
-                }
-            }
-
-            // Handle parser-specific events (StreamParser uses OnEnd timing)
-            match taken {
-                ujson::Event::Begin(crate::ujson::EventToken::EscapeSequence) => {
-                    crate::event_processor::process_begin_escape_sequence_event(
-                        &mut self.content_builder,
-                    )?;
-                }
-                _ if crate::event_processor::process_unicode_escape_events(
-                    &taken,
-                    &mut self.content_builder,
-                )? =>
-                {
-                    // Unicode escape events handled by shared function
-                }
-                ujson::Event::End(
-                    escape_token @ (crate::ujson::EventToken::EscapeQuote
-                    | crate::ujson::EventToken::EscapeBackslash
-                    | crate::ujson::EventToken::EscapeSlash
-                    | crate::ujson::EventToken::EscapeBackspace
-                    | crate::ujson::EventToken::EscapeFormFeed
-                    | crate::ujson::EventToken::EscapeNewline
-                    | crate::ujson::EventToken::EscapeCarriageReturn
-                    | crate::ujson::EventToken::EscapeTab),
-                ) => {
-                    // StreamParser-specific: Handle simple escape sequences on End events
-                    // because StreamBuffer must wait until the token ends to accumulate
-                    // all bytes before processing the complete escape sequence
-                    crate::event_processor::process_simple_escape_event(
-                        &escape_token,
-                        &mut self.content_builder,
-                    )?;
-                }
-                _ => {
-                    // All other events continue to next iteration
-                }
-            }
-        }
-    }
-
-    /// Extract number with proper StreamParser document end detection
-    fn extract_number_with_finished_state(
-        &mut self,
-        from_container_end: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        let start_pos = match *self.content_builder.parser_state() {
-            crate::shared::State::Number(pos) => pos,
-            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
-        };
-
-        *self.content_builder.parser_state_mut() = crate::shared::State::None;
-
-        // Use the ContentExtractor::extract_number method with finished state
-        use crate::event_processor::ContentExtractor;
-        self.content_builder
-            .extract_number(start_pos, from_container_end, self.finished)
-    }
-
-    /// Fill buffer from reader
-    fn fill_buffer_from_reader(&mut self) -> Result<(), ParseError> {
-        if let Some(fill_slice) = self.content_builder.stream_buffer_mut().get_fill_slice() {
-            let bytes_read = self
-                .reader
-                .read(fill_slice)
-                .map_err(|_| ParseError::ReaderError)?;
-
-            self.content_builder
-                .stream_buffer_mut()
-                .mark_filled(bytes_read)?;
-        } else {
-            // Buffer is full - ALWAYS attempt compaction
-            let compact_start_pos = match *self.content_builder.parser_state_mut() {
-                crate::shared::State::Number(start_pos) => start_pos,
-                crate::shared::State::Key(start_pos) => start_pos,
-                crate::shared::State::String(start_pos) => start_pos,
-                _ => self.content_builder.stream_buffer().current_position(),
-            };
-
-            let offset = self
-                .content_builder
-                .stream_buffer_mut()
-                .compact_from(compact_start_pos)?;
-
-            if offset == 0 {
-                // SOL: Buffer too small for current token
-                return Err(ParseError::ScratchBufferFull);
-            }
-
-            // Update parser state positions
-            self.update_positions_after_compaction(offset)?;
-
-            // Try to fill again after compaction
-            if let Some(fill_slice) = self.content_builder.stream_buffer_mut().get_fill_slice() {
-                let bytes_read = self
-                    .reader
-                    .read(fill_slice)
-                    .map_err(|_| ParseError::ReaderError)?;
-
-                self.content_builder
-                    .stream_buffer_mut()
-                    .mark_filled(bytes_read)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Update parser state positions after buffer compaction
-    fn update_positions_after_compaction(&mut self, offset: usize) -> Result<(), ParseError> {
-        // Check for positions that would be discarded and need escape mode
-        // CRITICAL: Position 0 is never discarded, regardless of offset
-        let needs_escape_mode = match self.content_builder.parser_state_mut() {
-            crate::shared::State::Key(pos) if *pos > 0 && *pos < offset => Some((*pos, true)), // true = is_key
-            crate::shared::State::String(pos) if *pos > 0 && *pos < offset => Some((*pos, false)), // false = is_string
-            crate::shared::State::Number(pos) if *pos > 0 && *pos < offset => {
-                return Err(ParseError::ScratchBufferFull);
-            }
-            _ => None,
-        };
-
-        // Handle escape mode transition if needed
-        if let Some((original_pos, is_key)) = needs_escape_mode {
-            if is_key {
-                self.switch_key_to_escape_mode(original_pos, offset)?;
-            } else {
-                self.switch_string_to_escape_mode(original_pos, offset)?;
-            }
-        }
-
-        // Update positions
-        match self.content_builder.parser_state_mut() {
-            crate::shared::State::None => {
-                // No position-based state to update
-            }
-            crate::shared::State::Key(pos) => {
-                if *pos > 0 && *pos < offset {
-                    *pos = 0; // Reset for escape mode
-                } else if *pos >= offset {
-                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
-                }
-                // else: *pos == 0 or *pos < offset with pos == 0, keep as-is
-            }
-            crate::shared::State::String(pos) => {
-                if *pos > 0 && *pos < offset {
-                    *pos = 0; // Reset for escape mode
-                } else if *pos >= offset {
-                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
-                }
-                // else: *pos == 0 or *pos < offset with pos == 0, keep as-is
-            }
-            crate::shared::State::Number(pos) => {
-                if *pos >= offset {
-                    *pos = pos.checked_sub(offset).unwrap_or(0); // Safe position adjustment
-                } else {
-                    *pos = 0; // Reset for discarded number start
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Switch key processing to escape/copy mode when original position was discarded
-    fn switch_key_to_escape_mode(
-        &mut self,
-        original_pos: usize,
-        offset: usize,
-    ) -> Result<(), ParseError> {
-        // The key start position was in the discarded portion of the buffer
-
-        // For keys, the original_pos now points to the content start (after opening quote)
-        // If offset > original_pos, it means some actual content was discarded
-
-        // Calculate how much actual key content was discarded
-        let content_start = original_pos; // Key content starts at original_pos (now tracks content directly)
-        let discarded_content = offset.saturating_sub(content_start);
-
-        if discarded_content > 0 {
-            // We lost some actual key content - this would require content recovery
-            // For now, this is unsupported
-            return Err(ParseError::ScratchBufferFull);
-        }
-
-        // No actual content was discarded, we can continue parsing
-        // We can continue parsing the key from the current position
-        Ok(())
-    }
-
-    /// Switch string processing to escape/copy mode when original position was discarded
-    fn switch_string_to_escape_mode(
-        &mut self,
-        original_pos: usize,
-        offset: usize,
-    ) -> Result<(), ParseError> {
-        // The string start position was in the discarded portion of the buffer
-
-        // For strings, the original_pos now points to the content start (after opening quote)
-        // If offset > original_pos, it means some actual content was discarded
-
-        // Calculate how much actual string content was discarded
-        let content_start = original_pos; // String content starts at original_pos (now tracks content directly)
-        let discarded_content = offset.saturating_sub(content_start);
-
-        if discarded_content > 0 {
-            // We lost some actual string content - this would require content recovery
-            // For now, this is unsupported
-            return Err(ParseError::ScratchBufferFull);
-        }
-
-        // No actual content was discarded, we can continue parsing
-        // We can continue parsing the string from the current position
-        Ok(())
-    }
-
-    /// Handle byte accumulation for strings/keys and Unicode escape sequences
-    fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
-        // Check if we're in a string or key state and should accumulate bytes
-        let in_string_mode = matches!(
-            *self.content_builder.parser_state(),
-            State::String(_) | State::Key(_)
-        );
-
-        if in_string_mode {
-            // Follow old implementation pattern - do NOT write to escape buffer
-            // when inside ANY escape sequence (in_escape_sequence == true)
-            // This prevents hex digits from being accumulated as literal text
-            if !self.content_builder.in_escape_sequence()
-                && self.content_builder.stream_buffer().has_unescaped_content()
-                && !self
-                    .content_builder
-                    .unicode_escape_collector()
-                    .has_pending_high_surrogate()
-            {
-                self.content_builder
-                    .stream_buffer_mut()
-                    .append_unescaped_byte(byte)
-                    .map_err(ParseError::from)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<R: Reader, C: BitStackConfig> PullParser for StreamParser<'_, R, C> {
-    fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
-        self.content_builder.apply_unescaped_reset_if_queued();
-
-        self.next_event_impl()
-    }
-}
-
-impl<R: Reader, C: BitStackConfig> crate::shared::ByteProvider for StreamParser<'_, R, C> {
+impl<R: Reader> ByteProvider for StreamParserProvider<'_, R> {
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
         // If buffer is empty, try to fill it first
         if self.content_builder.stream_buffer().is_empty() {
-            self.fill_buffer_from_reader()?;
+            self.content_builder
+                .fill_buffer_from_reader(&mut self.reader)?;
         }
 
         // If still empty after fill attempt, we're at EOF
         if self.content_builder.stream_buffer().is_empty() {
+            if !self.finished {
+                self.finished = true;
+                self.content_builder.set_finished(true);
+            }
             return Ok(None);
         }
 
         // Get byte and advance
         let byte = self.content_builder.stream_buffer().current_byte()?;
+        let _current_pos = self.content_builder.stream_buffer().current_position();
         self.content_builder.stream_buffer_mut().advance()?;
         Ok(Some(byte))
+    }
+}
+
+impl<R: Reader> EscapeHandler for StreamParserProvider<'_, R> {
+    fn parser_state(&self) -> &State {
+        self.content_builder.parser_state()
+    }
+
+    fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
+        self.content_builder.process_unicode_escape_with_collector()
+    }
+
+    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        self.content_builder.handle_simple_escape_char(escape_char)
+    }
+
+    fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
+        self.content_builder.begin_escape_sequence()
+    }
+
+    fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
+        self.content_builder.begin_unicode_escape()
+    }
+}
+
+impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
+    fn parser_state_mut(&mut self) -> &mut State {
+        self.content_builder.parser_state_mut()
+    }
+
+    fn current_position(&self) -> usize {
+        self.content_builder.current_position()
+    }
+
+    fn begin_string_content(&mut self, pos: usize) {
+        self.content_builder.begin_string_content(pos);
+    }
+
+    fn unicode_escape_collector_mut(
+        &mut self,
+    ) -> &mut crate::escape_processor::UnicodeEscapeCollector {
+        self.content_builder.unicode_escape_collector_mut()
+    }
+
+    fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        self.content_builder.extract_string_content(start_pos)
+    }
+
+    fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        self.content_builder.extract_key_content(start_pos)
+    }
+
+    fn extract_number_content(
+        &mut self,
+        start_pos: usize,
+        from_container_end: bool,
+    ) -> Result<Event<'_, '_>, ParseError> {
+        self.content_builder
+            .extract_number_content(start_pos, from_container_end)
+    }
+
+    fn extract_number(
+        &mut self,
+        start_pos: usize,
+        from_container_end: bool,
+        finished: bool,
+    ) -> Result<Event<'_, '_>, ParseError> {
+        self.content_builder
+            .extract_number(start_pos, from_container_end, finished)
+    }
+
+    /// Override the default validate_and_extract_number to use the finished state
+    fn validate_and_extract_number(
+        &mut self,
+        from_container_end: bool,
+    ) -> Result<Event<'_, '_>, ParseError> {
+        use crate::event_processor::EscapeHandler;
+        let start_pos = match *self.parser_state() {
+            crate::shared::State::Number(pos) => pos,
+            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
+        };
+
+        *self.parser_state_mut() = crate::shared::State::None;
+        // Use the finished-aware extract_number method instead of extract_number_content
+        self.extract_number(start_pos, from_container_end, self.finished)
+    }
+}
+
+/// Shared methods for StreamParser with any BitStackConfig
+impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
+    /// Get the next JSON event from the stream
+    fn next_event_impl(&mut self) -> Result<Event<'_, '_>, ParseError> {
+        // Use the unified ParserCore implementation with StreamParser-specific timing
+        // This achieves the same pattern as SliceParser: self.parser_core.next_event_impl_unified()
+
+        // StreamParser needs byte accumulation for string parsing, so use the accumulator version
+        self.parser_core.next_event_impl_unified_with_accumulator(
+            &mut self.provider,
+            crate::parser_core::EscapeTiming::OnEnd,
+            |provider, byte| {
+                // Delegate to the StreamContentBuilder's byte accumulation logic
+                provider.content_builder.handle_byte_accumulation(byte)
+            },
+        )
+    }
+
+    // The compaction and helper methods are now handled by the provider
+    // These methods can be removed since they're not needed with the new architecture
+}
+
+impl<R: Reader, C: BitStackConfig> PullParser for StreamParser<'_, R, C> {
+    fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
+        // Check if we're already finished (similar to SliceParser's is_past_end check)
+        if self.provider.finished {
+            return Ok(Event::EndDocument);
+        }
+
+        self.provider
+            .content_builder
+            .apply_unescaped_reset_if_queued();
+
+        self.next_event_impl()
     }
 }
 

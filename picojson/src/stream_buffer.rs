@@ -146,10 +146,14 @@ impl<'a> StreamBuffer<'a> {
                 return Err(StreamBufferError::BufferFull);
             }
 
-            let src_range = start_offset..start_offset.wrapping_add(span_len);
-            if src_range.end > self.buffer.len() {
+            let src_range_end = start_offset
+                .checked_add(span_len)
+                .ok_or(StreamBufferError::InvalidSliceBounds)?;
+
+            if src_range_end > self.buffer.len() {
                 return Err(StreamBufferError::InvalidSliceBounds);
             }
+            let src_range = start_offset..src_range_end;
 
             // Copy within the same buffer: move data from [start_offset..end] to [0..span_len]
             // Use our panic-free copy implementation
@@ -157,6 +161,7 @@ impl<'a> StreamBuffer<'a> {
         }
 
         // Update positions
+        let _old_tokenize_pos = self.tokenize_pos;
         self.tokenize_pos = self.tokenize_pos.saturating_sub(offset);
         self.data_end = remaining_data;
 
