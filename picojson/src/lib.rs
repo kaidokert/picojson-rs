@@ -80,7 +80,6 @@ mod shared;
 pub use shared::{Event, PullParser};
 
 mod event_processor;
-pub use event_processor::{EscapeTiming, ParserCore};
 
 mod slice_input_buffer;
 
