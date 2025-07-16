@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::parse_error::ParseError;
-use crate::shared::UnexpectedState;
+use crate::shared::{ContentRange, UnexpectedState};
 
 /// Shared utilities for processing JSON escape sequences.
 /// This module contains pure functions for escape processing that can be used
@@ -277,7 +277,7 @@ impl Default for UnicodeEscapeCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ujson::EventToken;
+    use ujson::EventToken;
 
     #[test]
     fn test_simple_escapes() {
@@ -667,8 +667,7 @@ pub(crate) fn process_unicode_escape_sequence<'a, F>(
 where
     F: FnMut(usize, usize) -> Result<&'a [u8], ParseError>,
 {
-    let (hex_start, hex_end, escape_start_pos) =
-        crate::shared::ContentRange::unicode_escape_bounds(current_pos);
+    let (hex_start, hex_end, escape_start_pos) = ContentRange::unicode_escape_bounds(current_pos);
 
     // Extract the 4 hex digits from the buffer using the provider
     let hex_slice = hex_slice_provider(hex_start, hex_end)?;

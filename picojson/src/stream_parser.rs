@@ -4,6 +4,8 @@ use crate::event_processor::{EscapeTiming, ParserCore};
 use crate::parse_error::ParseError;
 use crate::shared::Event;
 use crate::stream_content_builder::StreamContentBuilder;
+#[cfg(test)]
+use crate::NumberResult;
 use crate::{ujson, PullParser};
 
 use ujson::{BitStackConfig, DefaultConfig};
@@ -717,7 +719,7 @@ mod tests {
         if let Event::Number(num) = parser.next_event().unwrap() {
             assert_eq!(num.as_str(), "42");
             match num.parsed() {
-                crate::NumberResult::Integer(i) => assert_eq!(*i, 42),
+                NumberResult::Integer(i) => assert_eq!(*i, 42),
                 _ => panic!("Expected integer parsing"),
             }
         } else {
@@ -748,20 +750,20 @@ mod tests {
                 // In no-float configuration, this should be FloatDisabled
                 match num.parsed() {
                     #[cfg(not(feature = "float"))]
-                    crate::NumberResult::FloatDisabled => {
+                    NumberResult::FloatDisabled => {
                         // This is expected in no-float build
                     }
                     #[cfg(feature = "float")]
-                    crate::NumberResult::Float(f) => {
+                    NumberResult::Float(f) => {
                         // This is expected in float-enabled build
                         assert!((f - 3.14).abs() < 0.01);
                     }
                     #[cfg(feature = "float-skip")]
-                    crate::NumberResult::FloatSkipped => {
+                    NumberResult::FloatSkipped => {
                         // This is expected in float-skip build
                     }
                     #[cfg(feature = "float-truncate")]
-                    crate::NumberResult::FloatTruncated(i) => {
+                    NumberResult::FloatTruncated(i) => {
                         // This is expected in float-truncate build (3.14 -> 3)
                         assert_eq!(*i, 3);
                     }
@@ -795,15 +797,15 @@ mod tests {
                     assert_eq!(num.as_str(), "1e3");
                     match num.parsed() {
                         #[cfg(not(feature = "float"))]
-                        crate::NumberResult::FloatDisabled => {
+                        NumberResult::FloatDisabled => {
                             // This is expected in no-float build - raw string preserved for manual parsing
                         }
                         #[cfg(feature = "float-skip")]
-                        crate::NumberResult::FloatSkipped => {
+                        NumberResult::FloatSkipped => {
                             // This is expected in float-skip build
                         }
                         #[cfg(feature = "float")]
-                        crate::NumberResult::Float(f) => {
+                        NumberResult::Float(f) => {
                             // This is expected in float-enabled build
                             assert!((f - 1000.0).abs() < f64::EPSILON);
                         }
@@ -1051,7 +1053,7 @@ mod tests {
     }
 
     /// Helper function to test escape sequence parsing with specific buffer size
-    fn test_simple_escape_with_buffer_size(buffer_size: usize) -> Result<(), crate::ParseError> {
+    fn test_simple_escape_with_buffer_size(buffer_size: usize) -> Result<(), ParseError> {
         // DEBUG TEST: Simple escape sequence should need minimal buffer
         // JSON: ["hello\\"] = 10 bytes total, should work with ~7 byte buffer
         let json_stream = br#"["hello\\"]"#;
@@ -1079,7 +1081,7 @@ mod tests {
         // Buffer size 4 - clearly not enough
         assert!(matches!(
             test_simple_escape_with_buffer_size(4),
-            Err(crate::ParseError::ScratchBufferFull)
+            Err(ParseError::ScratchBufferFull)
         ));
     }
 

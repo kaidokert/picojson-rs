@@ -6,10 +6,11 @@ use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ContentExtractor;
 use crate::shared::{ContentRange, State};
 use crate::stream_buffer::StreamBuffer;
-use crate::{Event, ParseError, String};
+use crate::stream_parser::Reader;
+use crate::{Event, JsonNumber, ParseError, String};
 
 /// ContentBuilder implementation for StreamParser that uses StreamBuffer for streaming and escape processing
-pub struct StreamContentBuilder<'b, R: crate::stream_parser::Reader> {
+pub struct StreamContentBuilder<'b, R: Reader> {
     /// StreamBuffer for single-buffer input and escape processing
     stream_buffer: StreamBuffer<'b>,
     /// The reader for fetching more data
@@ -24,7 +25,7 @@ pub struct StreamContentBuilder<'b, R: crate::stream_parser::Reader> {
     finished: bool,
 }
 
-impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
+impl<'b, R: Reader> StreamContentBuilder<'b, R> {
     /// Create a new StreamContentBuilder
     pub fn new(buffer: &'b mut [u8], reader: R) -> Self {
         Self {
@@ -38,25 +39,25 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
     }
 
     /// Fill the buffer from the reader
-    fn fill_buffer_from_reader(&mut self) -> Result<(), crate::ParseError> {
+    fn fill_buffer_from_reader(&mut self) -> Result<(), ParseError> {
         // If buffer is full, try to compact it first (original compaction logic)
         if self.stream_buffer.get_fill_slice().is_none() {
             // Buffer is full - ALWAYS attempt compaction
             let compact_start_pos = match self.parser_state {
-                crate::shared::State::Number(start_pos) => start_pos,
-                crate::shared::State::Key(start_pos) => start_pos,
-                crate::shared::State::String(start_pos) => start_pos,
+                State::Number(start_pos) => start_pos,
+                State::Key(start_pos) => start_pos,
+                State::String(start_pos) => start_pos,
                 _ => self.stream_buffer.current_position(),
             };
 
             let compaction_offset = self
                 .stream_buffer
                 .compact_from(compact_start_pos)
-                .map_err(crate::ParseError::from)?;
+                .map_err(ParseError::from)?;
 
             if compaction_offset == 0 {
                 // SOL: Buffer too small for current token
-                return Err(crate::ParseError::ScratchBufferFull);
+                return Err(ParseError::ScratchBufferFull);
             }
 
             // Update parser state positions after compaction (original logic)
@@ -67,10 +68,10 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
             let bytes_read = self
                 .reader
                 .read(fill_slice)
-                .map_err(|_| crate::ParseError::ReaderError)?;
+                .map_err(|_| ParseError::ReaderError)?;
             self.stream_buffer
                 .mark_filled(bytes_read)
-                .map_err(crate::ParseError::from)?;
+                .map_err(ParseError::from)?;
         }
         Ok(())
     }
@@ -79,20 +80,18 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
     fn update_positions_after_compaction(
         &mut self,
         compaction_offset: usize,
-    ) -> Result<(), crate::ParseError> {
+    ) -> Result<(), ParseError> {
         // Update positions - since we compact from the token start position,
         // positions should not be discarded in normal operation
         match &mut self.parser_state {
-            crate::shared::State::None => {
+            State::None => {
                 // No position-based state to update
             }
-            crate::shared::State::Key(pos)
-            | crate::shared::State::String(pos)
-            | crate::shared::State::Number(pos) => {
+            State::Key(pos) | State::String(pos) | State::Number(pos) => {
                 if *pos >= compaction_offset {
                     *pos = pos.checked_sub(compaction_offset).unwrap_or(0);
                 } else {
-                    return Err(crate::ParseError::Unexpected(
+                    return Err(ParseError::Unexpected(
                         crate::shared::UnexpectedState::InvalidSliceBounds,
                     ));
                 }
@@ -181,8 +180,8 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
     }
 }
 
-impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<'_, R> {
-    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
+impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
         // If buffer is empty, try to fill it first
         if self.stream_buffer.is_empty() {
             self.fill_buffer_from_reader()?;
@@ -250,14 +249,14 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
 
         // A standalone number at the end of the document has no trailing delimiter, so we use the full span.
         let use_full_span = !from_container_end && finished;
-        let end_pos = crate::shared::ContentRange::number_end_position(current_pos, use_full_span);
+        let end_pos = ContentRange::number_end_position(current_pos, use_full_span);
 
         let number_bytes = self
             .stream_buffer
             .get_string_slice(start_pos, end_pos)
             .map_err(ParseError::from)?;
-        let json_number = crate::JsonNumber::from_slice(number_bytes)?;
-        Ok(crate::Event::Number(json_number))
+        let json_number = JsonNumber::from_slice(number_bytes)?;
+        Ok(Event::Number(json_number))
     }
 
     fn is_finished(&self) -> bool {
@@ -267,13 +266,13 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
     fn validate_and_extract_number(
         &mut self,
         from_container_end: bool,
-    ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
+    ) -> Result<Event<'_, '_>, ParseError> {
         let start_pos = match *self.parser_state() {
-            crate::shared::State::Number(pos) => pos,
+            State::Number(pos) => pos,
             _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
         };
 
-        *self.parser_state_mut() = crate::shared::State::None;
+        *self.parser_state_mut() = State::None;
         self.extract_number(start_pos, from_container_end, self.is_finished())
     }
 
@@ -325,10 +324,10 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
     }
 }
 
-impl<R: crate::stream_parser::Reader> StreamContentBuilder<'_, R> {
+impl<R: Reader> StreamContentBuilder<'_, R> {
     /// Handle byte accumulation for StreamParser-specific requirements
     /// This method is called when a byte doesn't generate any events
-    pub fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), crate::ParseError> {
+    pub fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
         // Check if we're in a string or key state and should accumulate bytes
         let in_string_mode = matches!(self.parser_state, State::String(_) | State::Key(_));
 
@@ -339,7 +338,7 @@ impl<R: crate::stream_parser::Reader> StreamContentBuilder<'_, R> {
             if self.stream_buffer.has_unescaped_content() {
                 self.stream_buffer
                     .append_unescaped_byte(byte)
-                    .map_err(crate::ParseError::from)?;
+                    .map_err(ParseError::from)?;
             }
         }
         Ok(())

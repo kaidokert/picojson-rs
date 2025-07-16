@@ -7,7 +7,7 @@ use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ContentExtractor;
 use crate::shared::{ContentRange, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
-use crate::ParseError;
+use crate::{Event, JsonNumber, ParseError};
 
 /// ContentBuilder implementation for SliceParser that uses CopyOnEscape for zero-copy optimization
 pub struct SliceContentBuilder<'a, 'b> {
@@ -44,7 +44,7 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
 }
 
 impl ContentExtractor for SliceContentBuilder<'_, '_> {
-    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
         match self.buffer_mut().consume_byte() {
             Ok(byte) => Ok(Some(byte)),
             Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
@@ -52,7 +52,7 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         }
     }
 
-    fn parser_state_mut(&mut self) -> &mut crate::shared::State {
+    fn parser_state_mut(&mut self) -> &mut State {
         &mut self.parser_state
     }
 
@@ -68,22 +68,16 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         &mut self.unicode_escape_collector
     }
 
-    fn extract_string_content(
-        &mut self,
-        _start_pos: usize,
-    ) -> Result<crate::Event<'_, '_>, ParseError> {
+    fn extract_string_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
         let value_result = self.copy_on_escape.end_string(end_pos)?;
-        Ok(crate::Event::String(value_result))
+        Ok(Event::String(value_result))
     }
 
-    fn extract_key_content(
-        &mut self,
-        _start_pos: usize,
-    ) -> Result<crate::Event<'_, '_>, ParseError> {
+    fn extract_key_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
         let key_result = self.copy_on_escape.end_string(end_pos)?;
-        Ok(crate::Event::Key(key_result))
+        Ok(Event::Key(key_result))
     }
 
     fn extract_number(
@@ -91,7 +85,7 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         start_pos: usize,
         from_container_end: bool,
         _finished: bool,
-    ) -> Result<crate::Event<'_, '_>, ParseError> {
+    ) -> Result<Event<'_, '_>, ParseError> {
         // For SliceParser, use buffer-based document end detection
         // The finished parameter should always be true for complete slices, but we don't rely on it
         let at_document_end = self.buffer.current_pos() >= self.buffer.data_len();
@@ -110,15 +104,15 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
             .buffer
             .slice(start_pos, end_pos)
             .map_err(|_| ParseError::InvalidNumber)?;
-        let json_number = crate::JsonNumber::from_slice(number_bytes)?;
-        Ok(crate::Event::Number(json_number))
+        let json_number = JsonNumber::from_slice(number_bytes)?;
+        Ok(Event::Number(json_number))
     }
 
-    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
+    fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
         Ok(())
     }
 
-    fn parser_state(&self) -> &crate::shared::State {
+    fn parser_state(&self) -> &State {
         &self.parser_state
     }
 

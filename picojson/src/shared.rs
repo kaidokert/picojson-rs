@@ -2,7 +2,7 @@
 
 use crate::ParseError;
 /// Shared components for JSON parsers
-use crate::{JsonNumber, String};
+use crate::{ujson, JsonNumber, String};
 
 /// Events produced by JSON parsers
 #[derive(Debug, PartialEq)]
@@ -55,7 +55,7 @@ pub enum State {
 
 /// Parser state and event storage
 pub struct ParserState {
-    pub evts: [Option<crate::ujson::Event>; 2],
+    pub evts: [Option<ujson::Event>; 2],
 }
 
 impl ParserState {

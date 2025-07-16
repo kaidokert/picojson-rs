@@ -793,7 +793,7 @@ mod tests {
         // Test normal position updates where positions are preserved
 
         // Case 1: String position preserved after compaction
-        let _state = crate::shared::State::String(10);
+        let _state = State::String(10);
         let offset = 5;
 
         // Simulate the position update logic
