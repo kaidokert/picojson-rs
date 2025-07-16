@@ -49,6 +49,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![cfg_attr(not(test), no_std)]
+#![deny(missing_docs)]
 
 // Compile-time configuration validation
 mod config_check;
