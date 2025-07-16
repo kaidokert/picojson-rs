@@ -208,8 +208,8 @@ impl<'a> StreamBuffer<'a> {
             }
 
             // Copy within the same buffer: move data from [copy_start..copy_end] to [0..span_len]
-            // Use copy_within to handle overlapping ranges safely
-            self.buffer.copy_within(src_range, 0);
+            // Use our panic-free copy implementation to handle overlapping ranges safely
+            self.safe_copy_within(src_range.start, src_range.end, 0);
             self.unescaped_len = span_len;
         }
 
