@@ -125,23 +125,22 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        // Clear the escape sequence flag when unicode escape completes
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
         // Shared Unicode escape processing pattern
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
 
-        let mut utf8_buf = [0u8; 4];
-        let (utf8_bytes_opt, escape_start_pos) =
+        let (utf8_bytes_result, escape_start_pos) =
             crate::escape_processor::process_unicode_escape_sequence(
                 current_pos,
                 &mut self.unicode_escape_collector,
                 hex_slice_provider,
-                &mut utf8_buf,
             )?;
+
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
-        if let Some(utf8_bytes) = utf8_bytes_opt {
+        if let Some((utf8_bytes, len)) = utf8_bytes_result {
+            let utf8_slice = &utf8_bytes[..len];
             if had_pending_high_surrogate {
                 // This is completing a surrogate pair - need to consume both escapes
                 // First call: consume the high surrogate (6 bytes earlier)
@@ -149,11 +148,11 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
                     .handle_unicode_escape(escape_start_pos, &[])?;
                 // Second call: consume the low surrogate and write UTF-8
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos + 6, utf8_bytes)?;
+                    .handle_unicode_escape(escape_start_pos + 6, utf8_slice)?;
             } else {
                 // Single Unicode escape - normal processing
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos, utf8_bytes)?;
+                    .handle_unicode_escape(escape_start_pos, utf8_slice)?;
             }
         }
 

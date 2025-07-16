@@ -250,10 +250,7 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
 
     fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         let key = if self.stream_buffer.has_unescaped_content() {
-            self.queue_unescaped_reset();
-            let unescaped_slice = self.stream_buffer.get_unescaped_slice()?;
-            let str_content = crate::shared::from_utf8(unescaped_slice)?;
-            String::Unescaped(str_content)
+            self.create_unescaped_string()?
         } else {
             self.create_borrowed_string(start_pos)?
         };
@@ -316,43 +313,28 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
         // Reset the escape flags
         self.in_unicode_escape = false;
         self.in_escape_sequence = false;
-        // Shared Unicode escape processing pattern - collect UTF-8 bytes first to avoid borrow conflicts
-        let utf8_bytes_result = {
-            let current_pos = self.stream_buffer.current_position();
-            let hex_slice_provider = |start, end| {
-                self.stream_buffer
-                    .get_string_slice(start, end)
-                    .map_err(Into::into)
-            };
 
-            let mut utf8_buf = [0u8; 4];
-            let (utf8_bytes_opt, _) = crate::escape_processor::process_unicode_escape_sequence(
-                current_pos,
-                &mut self.unicode_escape_collector,
-                hex_slice_provider,
-                &mut utf8_buf,
-            )?;
-            // Copy UTF-8 bytes to avoid borrow conflicts
-            utf8_bytes_opt.map(|bytes| {
-                let mut copy = [0u8; 4];
-                let len = bytes.len();
-                if let Some(dest) = copy.get_mut(..len) {
-                    dest.copy_from_slice(bytes);
-                }
-                (copy, len)
-            })
+        // Define the provider for getting hex digits from the stream buffer
+        let hex_slice_provider = |start, end| {
+            self.stream_buffer
+                .get_string_slice(start, end)
+                .map_err(Into::into)
         };
 
-        // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
+        // Call the shared processor, which now returns the result by value
+        let (utf8_bytes_result, _) = crate::escape_processor::process_unicode_escape_sequence(
+            self.stream_buffer.current_position(),
+            &mut self.unicode_escape_collector,
+            hex_slice_provider,
+        )?;
+
+        // Handle the UTF-8 bytes if we have them
         if let Some((utf8_bytes, len)) = utf8_bytes_result {
-            // StreamParser handles all escape sequences the same way - append bytes to escape buffer
-            // Use safe slice access to avoid panic
-            if let Some(valid_bytes) = utf8_bytes.get(..len) {
-                for &byte in valid_bytes {
-                    self.stream_buffer
-                        .append_unescaped_byte(byte)
-                        .map_err(ParseError::from)?;
-                }
+            // Append the resulting bytes to the unescaped buffer
+            for &byte in &utf8_bytes[..len] {
+                self.stream_buffer
+                    .append_unescaped_byte(byte)
+                    .map_err(ParseError::from)?;
             }
         }
 
