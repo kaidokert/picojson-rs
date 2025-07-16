@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::ParseError;
-
 /// Error types for StreamBuffer operations
 #[derive(Debug, PartialEq)]
 pub enum StreamBufferError {
@@ -146,10 +144,14 @@ impl<'a> StreamBuffer<'a> {
                 return Err(StreamBufferError::BufferFull);
             }
 
-            let src_range = start_offset..start_offset.wrapping_add(span_len);
-            if src_range.end > self.buffer.len() {
+            let src_range_end = start_offset
+                .checked_add(span_len)
+                .ok_or(StreamBufferError::InvalidSliceBounds)?;
+
+            if src_range_end > self.buffer.len() {
                 return Err(StreamBufferError::InvalidSliceBounds);
             }
+            let src_range = start_offset..src_range_end;
 
             // Copy within the same buffer: move data from [start_offset..end] to [0..span_len]
             // Use our panic-free copy implementation
@@ -204,8 +206,8 @@ impl<'a> StreamBuffer<'a> {
             }
 
             // Copy within the same buffer: move data from [copy_start..copy_end] to [0..span_len]
-            // Use copy_within to handle overlapping ranges safely
-            self.buffer.copy_within(src_range, 0);
+            // Use our panic-free copy implementation to handle overlapping ranges safely
+            self.safe_copy_within(src_range.start, src_range.end, 0);
             self.unescaped_len = span_len;
         }
 
@@ -989,19 +991,5 @@ mod tests {
             State::Number(pos) => assert_eq!(pos, 14),
             _ => panic!("Expected State::Number"),
         }
-    }
-}
-
-impl crate::number_parser::NumberExtractor for StreamBuffer<'_> {
-    fn get_number_slice(&self, start: usize, end: usize) -> Result<&[u8], ParseError> {
-        self.get_string_slice(start, end).map_err(Into::into)
-    }
-
-    fn current_position(&self) -> usize {
-        self.tokenize_pos
-    }
-
-    fn is_empty(&self) -> bool {
-        self.tokenize_pos >= self.data_end
     }
 }
