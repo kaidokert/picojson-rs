@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::event_processor::{ContentExtractor, EscapeHandler, EscapeTiming, ParserCore};
+use crate::event_processor::{ContentExtractor, EscapeTiming, ParserCore};
 use crate::parse_error::ParseError;
 use crate::shared::{Event, State};
 use crate::stream_content_builder::StreamContentBuilder;
@@ -96,28 +96,6 @@ impl<'b, R: Reader> StreamParserProvider<'b, R> {
     }
 }
 
-impl<R: Reader> EscapeHandler for StreamParserProvider<'_, R> {
-    fn parser_state(&self) -> &State {
-        self.content_builder.parser_state()
-    }
-
-    fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        self.content_builder.process_unicode_escape_with_collector()
-    }
-
-    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
-        self.content_builder.handle_simple_escape_char(escape_char)
-    }
-
-    fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
-        self.content_builder.begin_escape_sequence()
-    }
-
-    fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
-        self.content_builder.begin_unicode_escape()
-    }
-}
-
 impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
         // If buffer is empty, try to fill it first
@@ -190,6 +168,28 @@ impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
         *self.parser_state_mut() = crate::shared::State::None;
         // Use the finished-aware extract_number method
         self.extract_number(start_pos, from_container_end, self.finished)
+    }
+
+    // --- Methods from former EscapeHandler trait ---
+
+    fn parser_state(&self) -> &State {
+        self.content_builder.parser_state()
+    }
+
+    fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
+        self.content_builder.process_unicode_escape_with_collector()
+    }
+
+    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        self.content_builder.handle_simple_escape_char(escape_char)
+    }
+
+    fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
+        self.content_builder.begin_escape_sequence()
+    }
+
+    fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
+        self.content_builder.begin_unicode_escape()
     }
 }
 

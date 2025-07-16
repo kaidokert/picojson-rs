@@ -152,25 +152,6 @@ pub enum EscapeTiming {
 
 // --- Original event_processor.rs content ---
 
-/// Escape handling trait for abstracting escape sequence processing between parsers
-pub trait EscapeHandler {
-    /// Get the current parser state for escape context checking
-    fn parser_state(&self) -> &crate::shared::State;
-
-    /// Process Unicode escape sequence using shared collector logic
-    fn process_unicode_escape_with_collector(&mut self) -> Result<(), crate::ParseError>;
-
-    /// Handle a simple escape character (after EscapeProcessor conversion)
-    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), crate::ParseError>;
-
-    /// Begin escape sequence processing (lifecycle method with default no-op implementation)
-    /// Called when escape sequence processing begins (e.g., on Begin(EscapeSequence))
-    fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError>;
-
-    /// Begin unicode escape sequence processing
-    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError>;
-}
-
 /// Result of processing a tokenizer event
 #[derive(Debug)]
 pub enum EventResult<'a, 'b> {
@@ -234,7 +215,7 @@ pub fn clear_events(event_storage: &mut [Option<crate::ujson::Event>; 2]) {
 
 /// Trait for content extraction operations that differ between parsers
 /// Consolidates ParserContext and ContentExtractor functionality
-pub trait ContentExtractor: EscapeHandler {
+pub trait ContentExtractor {
     /// Get the next byte from the input source
     /// Returns None when end of input is reached
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError>;
@@ -330,6 +311,24 @@ pub trait ContentExtractor: EscapeHandler {
         *self.parser_state_mut() = crate::shared::State::None;
         self.extract_number(start_pos, from_container_end, true)
     }
+
+    // --- Methods from former EscapeHandler trait ---
+
+    /// Get the current parser state for escape context checking
+    fn parser_state(&self) -> &crate::shared::State;
+
+    /// Process Unicode escape sequence using shared collector logic
+    fn process_unicode_escape_with_collector(&mut self) -> Result<(), crate::ParseError>;
+
+    /// Handle a simple escape character (after EscapeProcessor conversion)
+    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), crate::ParseError>;
+
+    /// Begin escape sequence processing (lifecycle method with default no-op implementation)
+    /// Called when escape sequence processing begins (e.g., on Begin(EscapeSequence))
+    fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError>;
+
+    /// Begin unicode escape sequence processing
+    fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError>;
 }
 
 /// Creates a standard tokenizer callback for event storage
@@ -362,8 +361,8 @@ pub fn take_first_event(
 }
 
 /// Process Begin(EscapeSequence) events using the enhanced lifecycle interface
-pub fn process_begin_escape_sequence_event<H: EscapeHandler>(
-    handler: &mut H,
+pub fn process_begin_escape_sequence_event<C: ContentExtractor>(
+    handler: &mut C,
 ) -> Result<(), crate::ParseError> {
     // Only process if we're inside a string or key
     match handler.parser_state() {
@@ -565,28 +564,6 @@ mod tests {
         }
     }
 
-    impl EscapeHandler for MockContentExtractor {
-        fn parser_state(&self) -> &crate::shared::State {
-            &self.state
-        }
-
-        fn process_unicode_escape_with_collector(&mut self) -> Result<(), crate::ParseError> {
-            Ok(())
-        }
-
-        fn handle_simple_escape_char(&mut self, _escape_char: u8) -> Result<(), crate::ParseError> {
-            Ok(())
-        }
-
-        fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
-            Ok(())
-        }
-
-        fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
-            Ok(())
-        }
-    }
-
     impl ContentExtractor for MockContentExtractor {
         fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
             Ok(None)
@@ -631,6 +608,28 @@ mod tests {
             _finished: bool,
         ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
             unimplemented!("Mock doesn't need extraction")
+        }
+
+        // --- Methods from former EscapeHandler trait ---
+
+        fn parser_state(&self) -> &crate::shared::State {
+            &self.state
+        }
+
+        fn process_unicode_escape_with_collector(&mut self) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
+
+        fn handle_simple_escape_char(&mut self, _escape_char: u8) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
+
+        fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
+            Ok(())
+        }
+
+        fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
+            Ok(())
         }
     }
 

@@ -4,7 +4,7 @@
 
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::UnicodeEscapeCollector;
-use crate::event_processor::{ContentExtractor, EscapeHandler};
+use crate::event_processor::ContentExtractor;
 use crate::shared::{ContentRange, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ParseError;
@@ -113,9 +113,9 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         let json_number = crate::JsonNumber::from_slice(number_bytes)?;
         Ok(crate::Event::Number(json_number))
     }
-}
 
-impl EscapeHandler for SliceContentBuilder<'_, '_> {
+    // --- Methods from former EscapeHandler trait ---
+
     fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
         Ok(())
     }

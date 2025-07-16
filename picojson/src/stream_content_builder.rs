@@ -3,7 +3,7 @@
 //! ContentBuilder implementation for StreamParser using StreamBuffer.
 
 use crate::escape_processor::UnicodeEscapeCollector;
-use crate::event_processor::{ContentExtractor, EscapeHandler};
+use crate::event_processor::ContentExtractor;
 use crate::shared::{ContentRange, State};
 use crate::stream_buffer::StreamBuffer;
 use crate::{Event, ParseError, String};
@@ -285,36 +285,9 @@ impl ContentExtractor for StreamContentBuilder<'_> {
         let json_number = crate::JsonNumber::from_slice(number_bytes)?;
         Ok(crate::Event::Number(json_number))
     }
-}
 
-impl StreamContentBuilder<'_> {
-    /// Handle byte accumulation for StreamParser-specific requirements
-    /// This method is called when a byte doesn't generate any events
-    pub fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), crate::ParseError> {
-        // Check if we're in a string or key state and should accumulate bytes
-        let in_string_mode = matches!(self.parser_state, State::String(_) | State::Key(_));
+    // --- Methods from former EscapeHandler trait ---
 
-        if in_string_mode {
-            // When unescaped content is active, we need to accumulate ALL string content
-            // This includes both regular characters and content after escape sequences
-            if self.stream_buffer.has_unescaped_content() {
-                // Follow old implementation pattern - do NOT write to escape buffer
-                // when inside ANY escape sequence (in_escape_sequence == true)
-                // This prevents hex digits from being accumulated as literal text
-                if !self.in_escape_sequence
-                    && !self.unicode_escape_collector.has_pending_high_surrogate()
-                {
-                    self.stream_buffer
-                        .append_unescaped_byte(byte)
-                        .map_err(crate::ParseError::from)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl EscapeHandler for StreamContentBuilder<'_> {
     fn parser_state(&self) -> &State {
         &self.parser_state
     }
@@ -384,5 +357,32 @@ impl EscapeHandler for StreamContentBuilder<'_> {
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         self.in_escape_sequence = true;
         self.start_escape_processing()
+    }
+}
+
+impl StreamContentBuilder<'_> {
+    /// Handle byte accumulation for StreamParser-specific requirements
+    /// This method is called when a byte doesn't generate any events
+    pub fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), crate::ParseError> {
+        // Check if we're in a string or key state and should accumulate bytes
+        let in_string_mode = matches!(self.parser_state, State::String(_) | State::Key(_));
+
+        if in_string_mode {
+            // When unescaped content is active, we need to accumulate ALL string content
+            // This includes both regular characters and content after escape sequences
+            if self.stream_buffer.has_unescaped_content() {
+                // Follow old implementation pattern - do NOT write to escape buffer
+                // when inside ANY escape sequence (in_escape_sequence == true)
+                // This prevents hex digits from being accumulated as literal text
+                if !self.in_escape_sequence
+                    && !self.unicode_escape_collector.has_pending_high_surrogate()
+                {
+                    self.stream_buffer
+                        .append_unescaped_byte(byte)
+                        .map_err(crate::ParseError::from)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
