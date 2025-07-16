@@ -7,8 +7,8 @@
 - [x] Remove unnecessary `'static` lifetime errors
 - [x] Dependency cleanup
 - [x] Clippy cleanup
-- [ ] Unify code in SliceParser and StreamParser
-- [ ] Address and remove `// TODO` comments
+- [x] Unify code in SliceParser and StreamParser
+- [x] Address and remove `// TODO` comments
 - [ ] Clean up reference docs
 - [ ] Provide user guide docs
 - [ ] Direct defmt support

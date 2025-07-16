@@ -90,7 +90,7 @@ The parser's behavior can be customized with feature flags. For example, integer
 
 ## Stability
 
-Very experimental and unproven, even though the tokenizer does pass conformance tests.
+Very experimental and unproven, even though parsers pass conformance tests.
 
 For production code please use [serde-json-core](https://crates.io/crates/serde-json-core) or various other alternatives.
 
