@@ -45,8 +45,6 @@ where
     }
 }
 
-// TODO: Can this be implemented for slices as well ?
-
 /// Trait for depth counters - tracks nesting depth.
 ///
 /// This trait provides overflow-safe operations for tracking JSON nesting depth.
