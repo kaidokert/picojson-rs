@@ -5,7 +5,6 @@
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::{ContentExtractor, EscapeHandler};
-use crate::number_parser::NumberExtractor;
 use crate::shared::{ContentRange, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::ParseError;
@@ -87,7 +86,7 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
     ) -> Result<crate::Event<'_, '_>, ParseError> {
         // For SliceParser, use buffer-based document end detection
         // The finished parameter should always be true for complete slices, but we don't rely on it
-        let at_document_end = self.buffer.is_empty();
+        let at_document_end = self.buffer.current_pos() >= self.buffer.data_len();
         let current_pos = self.buffer.current_pos();
         let use_full_span = !from_container_end && at_document_end;
 
@@ -99,7 +98,12 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
             current_pos.saturating_sub(1)
         };
 
-        crate::number_parser::parse_number_event(&self.buffer, start_pos, end_pos)
+        let number_bytes = self
+            .buffer
+            .slice(start_pos, end_pos)
+            .map_err(|_| ParseError::InvalidNumber)?;
+        let json_number = crate::JsonNumber::from_slice(number_bytes)?;
+        Ok(crate::Event::Number(json_number))
     }
 }
 

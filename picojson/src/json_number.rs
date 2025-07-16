@@ -56,6 +56,37 @@ pub enum JsonNumber<'a, 'b> {
 }
 
 impl JsonNumber<'_, '_> {
+    /// Create a JsonNumber::Borrowed from a byte slice.
+    ///
+    /// This is the main entry point for creating JsonNumber from raw bytes.
+    /// It parses the number according to the configured behavior (int8/int32/int64,
+    /// float support, etc.) and wraps it in a JsonNumber::Borrowed variant.
+    ///
+    /// # Arguments
+    /// * `bytes` - Raw byte slice containing the JSON number
+    ///
+    /// # Returns
+    /// A JsonNumber::Borrowed with the parsed result, or ParseError if invalid
+    pub fn from_slice(bytes: &[u8]) -> Result<JsonNumber<'_, '_>, ParseError> {
+        let parsed_result = if is_integer(bytes) {
+            parse_integer(bytes)
+        } else {
+            #[cfg(feature = "float")]
+            {
+                parse_float(bytes)
+            }
+            #[cfg(not(feature = "float"))]
+            {
+                parse_float(bytes)?
+            }
+        };
+        let number_str = crate::shared::from_utf8(bytes)?;
+        Ok(JsonNumber::Borrowed {
+            raw: number_str,
+            parsed: parsed_result,
+        })
+    }
+
     /// Get the parsed NumberResult.
     pub fn parsed(&self) -> &NumberResult {
         match self {
@@ -247,29 +278,26 @@ pub fn parse_float(bytes: &[u8]) -> Result<NumberResult, ParseError> {
     }
 }
 
-/// Parses a JSON number from a byte slice.
-/// JSON numbers are pure ASCII, so this avoids unnecessary UTF-8 string processing.
-///
-/// This is the main entry point for parsing numbers with all the configured
-/// behavior (int32/int64, float support, etc.).
-pub fn parse_number_from_str(bytes: &[u8]) -> Result<NumberResult, ParseError> {
-    if is_integer(bytes) {
-        Ok(parse_integer(bytes))
-    } else {
-        #[cfg(feature = "float")]
-        {
-            Ok(parse_float(bytes))
-        }
-        #[cfg(not(feature = "float"))]
-        {
-            parse_float(bytes)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_json_number_from_slice_basic() {
+        // Test number parsing from byte slices
+        let json_number = JsonNumber::from_slice(b"56").unwrap();
+        assert_eq!(json_number.as_str(), "56");
+        assert_eq!(json_number.as_int(), Some(56));
+
+        let json_number = JsonNumber::from_slice(b"89").unwrap();
+        assert_eq!(json_number.as_str(), "89");
+        assert_eq!(json_number.as_int(), Some(89));
+
+        // Test with invalid UTF-8 to trigger an error
+        let invalid_utf8 = &[0xFF, 0xFE, 0xFD]; // Invalid UTF-8 sequence
+        let result = JsonNumber::from_slice(invalid_utf8);
+        assert!(result.is_err());
+    }
 
     #[test]
     fn test_json_number_integer() {
@@ -383,5 +411,27 @@ mod tests {
         assert!(!is_integer("3.14".as_bytes()));
         assert!(!is_integer("1e10".as_bytes()));
         assert!(!is_integer("2.5E-3".as_bytes()));
+    }
+
+    #[test]
+    fn test_from_slice_with_container() {
+        // Test parsing number followed by container end delimiter
+        let data = b"56}"; // Number followed by container end
+        let number_bytes = &data[0..2]; // Extract just "56"
+
+        let json_number = JsonNumber::from_slice(number_bytes).unwrap();
+        assert_eq!(json_number.as_str(), "56"); // Should exclude the '}'
+        assert_eq!(json_number.as_int(), Some(56));
+    }
+
+    #[test]
+    fn test_from_slice_at_eof() {
+        // Test parsing number at end of data
+        let data = b"89";
+        let number_bytes = &data[0..2]; // Full data
+
+        let json_number = JsonNumber::from_slice(number_bytes).unwrap();
+        assert_eq!(json_number.as_str(), "89"); // Should include full number
+        assert_eq!(json_number.as_int(), Some(89));
     }
 }

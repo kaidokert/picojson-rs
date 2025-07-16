@@ -256,12 +256,18 @@ impl ContentExtractor for StreamContentBuilder<'_> {
     ) -> Result<Event<'_, '_>, ParseError> {
         // Use shared number parsing with StreamParser-specific document end detection
         // StreamParser uses state-based detection: finished flag indicates true document end
-        crate::number_parser::parse_number_with_delimiter_logic(
-            &self.stream_buffer,
-            start_pos,
-            from_container_end,
-            finished,
-        )
+        let current_pos = self.stream_buffer.current_position();
+
+        // A standalone number at the end of the document has no trailing delimiter, so we use the full span.
+        let use_full_span = !from_container_end && finished;
+        let end_pos = crate::shared::ContentRange::number_end_position(current_pos, use_full_span);
+
+        let number_bytes = self
+            .stream_buffer
+            .get_string_slice(start_pos, end_pos)
+            .map_err(ParseError::from)?;
+        let json_number = crate::JsonNumber::from_slice(number_bytes)?;
+        Ok(crate::Event::Number(json_number))
     }
 }
 

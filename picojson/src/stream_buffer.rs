@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::ParseError;
-
 /// Error types for StreamBuffer operations
 #[derive(Debug, PartialEq)]
 pub enum StreamBufferError {
@@ -993,19 +991,5 @@ mod tests {
             State::Number(pos) => assert_eq!(pos, 14),
             _ => panic!("Expected State::Number"),
         }
-    }
-}
-
-impl crate::number_parser::NumberExtractor for StreamBuffer<'_> {
-    fn get_number_slice(&self, start: usize, end: usize) -> Result<&[u8], ParseError> {
-        self.get_string_slice(start, end).map_err(Into::into)
-    }
-
-    fn current_position(&self) -> usize {
-        self.tokenize_pos
-    }
-
-    fn is_empty(&self) -> bool {
-        self.tokenize_pos >= self.data_end
     }
 }

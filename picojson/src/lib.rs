@@ -86,14 +86,12 @@ mod event_processor;
 mod slice_input_buffer;
 
 mod json_number;
-use json_number::parse_number_from_str;
 pub use json_number::{JsonNumber, NumberResult};
 
 mod json_string;
 pub use json_string::String;
 
 mod int_parser;
-mod number_parser;
 
 pub use slice_parser::SliceParser;
 pub use stream_parser::{Reader, StreamParser};
