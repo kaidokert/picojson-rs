@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::event_processor::{EscapeTiming, ParserCore};
 use crate::parse_error::ParseError;
-use crate::parser_core::ParserCore;
 use crate::shared::{Event, PullParser};
 use crate::slice_content_builder::SliceContentBuilder;
 use crate::slice_input_buffer::InputBuffer;
@@ -149,7 +149,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         // No byte accumulation needed for SliceParser (pass no-op closure)
         self.parser_core.next_event_impl(
             &mut self.content_builder,
-            crate::parser_core::EscapeTiming::OnBegin,
+            EscapeTiming::OnBegin,
             |_, _| Ok(()),
         )
     }
@@ -161,16 +161,6 @@ impl<C: BitStackConfig> PullParser for SliceParser<'_, '_, C> {
             return Ok(Event::EndDocument);
         }
         self.next_event_impl()
-    }
-}
-
-impl<C: BitStackConfig> crate::shared::ByteProvider for SliceParser<'_, '_, C> {
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        match self.content_builder.buffer_mut().consume_byte() {
-            Ok(byte) => Ok(Some(byte)),
-            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
     }
 }
 

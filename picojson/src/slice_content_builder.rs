@@ -44,6 +44,14 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
 }
 
 impl ContentExtractor for SliceContentBuilder<'_, '_> {
+    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
+        match self.buffer_mut().consume_byte() {
+            Ok(byte) => Ok(Some(byte)),
+            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     fn parser_state_mut(&mut self) -> &mut crate::shared::State {
         &mut self.parser_state
     }
@@ -104,16 +112,6 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
             .map_err(|_| ParseError::InvalidNumber)?;
         let json_number = crate::JsonNumber::from_slice(number_bytes)?;
         Ok(crate::Event::Number(json_number))
-    }
-}
-
-impl crate::shared::ByteProvider for SliceContentBuilder<'_, '_> {
-    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
-        match self.buffer_mut().consume_byte() {
-            Ok(byte) => Ok(Some(byte)),
-            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
     }
 }
 

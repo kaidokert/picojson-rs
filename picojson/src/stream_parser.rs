@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::event_processor::{ContentExtractor, EscapeHandler};
+use crate::event_processor::{ContentExtractor, EscapeHandler, EscapeTiming, ParserCore};
 use crate::parse_error::ParseError;
-use crate::parser_core::ParserCore;
-use crate::shared::{ByteProvider, Event, State};
+use crate::shared::{Event, State};
 use crate::stream_content_builder::StreamContentBuilder;
 use crate::{ujson, PullParser};
 
@@ -97,30 +96,6 @@ impl<'b, R: Reader> StreamParserProvider<'b, R> {
     }
 }
 
-impl<R: Reader> ByteProvider for StreamParserProvider<'_, R> {
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        // If buffer is empty, try to fill it first
-        if self.content_builder.stream_buffer().is_empty() {
-            self.content_builder
-                .fill_buffer_from_reader(&mut self.reader)?;
-        }
-
-        // If still empty after fill attempt, we're at EOF
-        if self.content_builder.stream_buffer().is_empty() {
-            if !self.finished {
-                self.finished = true;
-                self.content_builder.set_finished(true);
-            }
-            return Ok(None);
-        }
-
-        // Get byte and advance
-        let byte = self.content_builder.stream_buffer().current_byte()?;
-        self.content_builder.stream_buffer_mut().advance()?;
-        Ok(Some(byte))
-    }
-}
-
 impl<R: Reader> EscapeHandler for StreamParserProvider<'_, R> {
     fn parser_state(&self) -> &State {
         self.content_builder.parser_state()
@@ -144,6 +119,28 @@ impl<R: Reader> EscapeHandler for StreamParserProvider<'_, R> {
 }
 
 impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        // If buffer is empty, try to fill it first
+        if self.content_builder.stream_buffer().is_empty() {
+            self.content_builder
+                .fill_buffer_from_reader(&mut self.reader)?;
+        }
+
+        // If still empty after fill attempt, we're at EOF
+        if self.content_builder.stream_buffer().is_empty() {
+            if !self.finished {
+                self.finished = true;
+                self.content_builder.set_finished(true);
+            }
+            return Ok(None);
+        }
+
+        // Get byte and advance
+        let byte = self.content_builder.stream_buffer().current_byte()?;
+        self.content_builder.stream_buffer_mut().advance()?;
+        Ok(Some(byte))
+    }
+
     fn parser_state_mut(&mut self) -> &mut State {
         self.content_builder.parser_state_mut()
     }
@@ -204,7 +201,7 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         // StreamParser needs byte accumulation for string parsing
         self.parser_core.next_event_impl(
             &mut self.provider,
-            crate::parser_core::EscapeTiming::OnEnd,
+            EscapeTiming::OnEnd,
             |provider, byte| {
                 // Delegate to the StreamContentBuilder's byte accumulation logic
                 provider.content_builder.handle_byte_accumulation(byte)

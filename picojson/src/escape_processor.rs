@@ -268,6 +268,12 @@ impl UnicodeEscapeCollector {
     }
 }
 
+impl Default for UnicodeEscapeCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

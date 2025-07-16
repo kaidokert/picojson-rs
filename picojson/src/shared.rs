@@ -54,7 +54,7 @@ pub enum State {
 }
 
 /// Parser state and event storage
-pub(super) struct ParserState {
+pub struct ParserState {
     pub evts: [Option<crate::ujson::Event>; 2],
 }
 
@@ -169,13 +169,6 @@ impl ContentRange {
             current_pos.saturating_sub(1)
         }
     }
-}
-
-/// Trait for abstracting byte input sources between SliceParser and StreamParser
-pub trait ByteProvider {
-    /// Get the next byte from the input source
-    /// Returns None when end of input is reached
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError>;
 }
 
 pub fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {

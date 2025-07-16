@@ -210,6 +210,22 @@ impl<'b> StreamContentBuilder<'b> {
 }
 
 impl ContentExtractor for StreamContentBuilder<'_> {
+    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
+        // This implementation doesn't have access to the reader
+        // It relies on StreamParser to fill the buffer before calling the unified method
+
+        // If buffer is empty, cannot provide bytes
+        if self.stream_buffer.is_empty() {
+            return Ok(None);
+        }
+
+        // Get byte and advance
+        let byte = self.stream_buffer.current_byte()?;
+        self.stream_buffer.advance()?;
+
+        Ok(Some(byte))
+    }
+
     fn parser_state_mut(&mut self) -> &mut State {
         &mut self.parser_state
     }
@@ -268,24 +284,6 @@ impl ContentExtractor for StreamContentBuilder<'_> {
             .map_err(ParseError::from)?;
         let json_number = crate::JsonNumber::from_slice(number_bytes)?;
         Ok(crate::Event::Number(json_number))
-    }
-}
-
-impl crate::shared::ByteProvider for StreamContentBuilder<'_> {
-    fn next_byte(&mut self) -> Result<Option<u8>, crate::ParseError> {
-        // This implementation doesn't have access to the reader
-        // It relies on StreamParser to fill the buffer before calling the unified method
-
-        // If buffer is empty, cannot provide bytes
-        if self.stream_buffer.is_empty() {
-            return Ok(None);
-        }
-
-        // Get byte and advance
-        let byte = self.stream_buffer.current_byte()?;
-        self.stream_buffer.advance()?;
-
-        Ok(Some(byte))
     }
 }
 

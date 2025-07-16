@@ -63,8 +63,6 @@ mod copy_on_escape;
 
 mod escape_processor;
 
-mod parser_core;
-
 mod stream_buffer;
 
 mod stream_content_builder;
@@ -82,6 +80,7 @@ mod shared;
 pub use shared::{Event, PullParser};
 
 mod event_processor;
+pub use event_processor::{EscapeTiming, ParserCore};
 
 mod slice_input_buffer;
 
