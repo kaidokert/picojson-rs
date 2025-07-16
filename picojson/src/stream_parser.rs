@@ -582,8 +582,8 @@ impl<'b, R: Reader, C: BitStackConfig> EscapeHandler for StreamParser<'b, R, C> 
             // StreamParser handles all escape sequences the same way - append bytes to escape buffer
             // Use safe slice access to avoid panic
             if let Some(valid_bytes) = utf8_bytes.get(..len) {
-            for &byte in valid_bytes {
-                self.append_byte_to_escape_buffer(byte)?;
+                for &byte in valid_bytes {
+                    self.append_byte_to_escape_buffer(byte)?;
                 }
             }
         }

@@ -271,6 +271,7 @@ impl UnicodeEscapeCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ujson::EventToken;
 
     #[test]
     fn test_simple_escapes() {
@@ -375,8 +376,6 @@ mod tests {
 
     #[test]
     fn test_token_to_escape_char() {
-        use crate::ujson::EventToken;
-
         // Test all valid escape tokens
         assert_eq!(
             EscapeProcessor::token_to_escape_char(&EventToken::EscapeQuote).unwrap(),
@@ -420,8 +419,6 @@ mod tests {
 
     #[test]
     fn test_process_escape_token() {
-        use crate::ujson::EventToken;
-
         // Test valid escape tokens that produce correct unescaped bytes
         assert_eq!(
             EscapeProcessor::process_escape_token(&EventToken::EscapeQuote).unwrap(),
