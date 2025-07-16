@@ -20,10 +20,6 @@ pub struct StreamContentBuilder<'b, R: crate::stream_parser::Reader> {
     unicode_escape_collector: UnicodeEscapeCollector,
     /// Flag to reset unescaped content on next operation
     unescaped_reset_queued: bool,
-    /// Flag to track when we're inside a Unicode escape sequence (collecting hex digits)
-    in_unicode_escape: bool,
-    /// Flag to track when we're inside ANY escape sequence (like old implementation)
-    in_escape_sequence: bool,
     /// Flag to track when the input stream has been finished (for number parsing)
     finished: bool,
 }
@@ -37,8 +33,6 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
             parser_state: State::None,
             unicode_escape_collector: UnicodeEscapeCollector::new(),
             unescaped_reset_queued: false,
-            in_unicode_escape: false,
-            in_escape_sequence: false,
             finished: false,
         }
     }
@@ -296,24 +290,16 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
         self.extract_number(start_pos, from_container_end, self.is_finished())
     }
 
-    // --- Methods from former EscapeHandler trait ---
-
     fn parser_state(&self) -> &State {
         &self.parser_state
     }
 
     fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
         // Called when Begin(UnicodeEscape) is received
-        self.in_unicode_escape = true;
-        self.in_escape_sequence = true;
         Ok(())
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        // Reset the escape flags
-        self.in_unicode_escape = false;
-        self.in_escape_sequence = false;
-
         // Define the provider for getting hex digits from the stream buffer
         let hex_slice_provider = |start, end| {
             self.stream_buffer
@@ -342,15 +328,12 @@ impl<R: crate::stream_parser::Reader> ContentExtractor for StreamContentBuilder<
     }
 
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
-        // Clear the escape sequence flag when simple escape completes
-        self.in_escape_sequence = false;
         self.stream_buffer
             .append_unescaped_byte(escape_char)
             .map_err(ParseError::from)
     }
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
-        self.in_escape_sequence = true;
         self.start_escape_processing()
     }
 }
@@ -363,19 +346,13 @@ impl<R: crate::stream_parser::Reader> StreamContentBuilder<'_, R> {
         let in_string_mode = matches!(self.parser_state, State::String(_) | State::Key(_));
 
         if in_string_mode {
-            // When unescaped content is active, we need to accumulate ALL string content
-            // This includes both regular characters and content after escape sequences
+            // When unescaped content is active, we need to accumulate ALL string content.
+            // The ParserCore now correctly prevents this function from being called for
+            // bytes that are part of an escape sequence.
             if self.stream_buffer.has_unescaped_content() {
-                // Follow old implementation pattern - do NOT write to escape buffer
-                // when inside ANY escape sequence (in_escape_sequence == true)
-                // This prevents hex digits from being accumulated as literal text
-                if !self.in_escape_sequence
-                    && !self.unicode_escape_collector.has_pending_high_surrogate()
-                {
-                    self.stream_buffer
-                        .append_unescaped_byte(byte)
-                        .map_err(crate::ParseError::from)?;
-                }
+                self.stream_buffer
+                    .append_unescaped_byte(byte)
+                    .map_err(crate::ParseError::from)?;
             }
         }
         Ok(())

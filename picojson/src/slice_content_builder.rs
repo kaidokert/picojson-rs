@@ -114,8 +114,6 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         Ok(crate::Event::Number(json_number))
     }
 
-    // --- Methods from former EscapeHandler trait ---
-
     fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError> {
         Ok(())
     }

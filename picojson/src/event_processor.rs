@@ -21,6 +21,8 @@ pub struct ParserCore<T: ujson::BitBucket, C: ujson::DepthCounter> {
     pub tokenizer: Tokenizer<T, C>,
     /// Parser state and event storage
     pub parser_state: ParserState,
+    /// Tracks if the parser is currently inside any escape sequence (\n, \uXXXX, etc.)
+    in_escape_sequence: bool,
 }
 
 impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
@@ -29,6 +31,7 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         Self {
             tokenizer: Tokenizer::new(),
             parser_state: ParserState::new(),
+            in_escape_sequence: false,
         }
     }
 
@@ -48,20 +51,27 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         loop {
             while !have_events(&self.parser_state.evts) {
                 if let Some(byte) = provider.next_byte()? {
-                    process_byte_through_tokenizer(
-                        byte,
-                        &mut self.tokenizer,
-                        &mut self.parser_state.evts,
-                    )?;
+                    {
+                        clear_events(&mut self.parser_state.evts);
+                        let mut callback = create_tokenizer_callback(&mut self.parser_state.evts);
+                        self.tokenizer
+                            .parse_chunk(&[byte], &mut callback)
+                            .map_err(ParseError::TokenizerError)?;
+                    }
 
-                    // Call byte accumulator if no events were generated (StreamParser-specific)
-                    if !have_events(&self.parser_state.evts) {
+                    // Call byte accumulator if no events were generated AND we are not in an escape sequence
+                    if !have_events(&self.parser_state.evts) && !self.in_escape_sequence {
                         byte_accumulator(provider, byte)?;
                     }
                 } else {
-                    // Handle end of stream - let the provider handle any cleanup
-                    // For StreamParser, this is where finished flag gets set
-                    finish_tokenizer(&mut self.tokenizer, &mut self.parser_state.evts)?;
+                    // Handle end of stream
+                    {
+                        clear_events(&mut self.parser_state.evts);
+                        let mut callback = create_tokenizer_callback(&mut self.parser_state.evts);
+                        self.tokenizer
+                            .finish(&mut callback)
+                            .map_err(ParseError::TokenizerError)?;
+                    }
 
                     if !have_events(&self.parser_state.evts) {
                         return Ok(Event::EndDocument);
@@ -92,10 +102,16 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
             // Handle parser-specific events based on escape timing
             match taken {
                 ujson::Event::Begin(EventToken::EscapeSequence) => {
+                    self.in_escape_sequence = true;
                     provider.process_begin_escape_sequence_event()?;
                 }
-                _ if provider.process_unicode_escape_events(&taken)? => {
-                    // Unicode escape events handled by shared function
+                ujson::Event::Begin(EventToken::UnicodeEscape) => {
+                    self.in_escape_sequence = true;
+                    provider.process_unicode_escape_events(&taken)?;
+                }
+                ujson::Event::End(EventToken::UnicodeEscape) => {
+                    self.in_escape_sequence = false;
+                    provider.process_unicode_escape_events(&taken)?;
                 }
                 ujson::Event::Begin(
                     escape_token @ (EventToken::EscapeQuote
@@ -107,10 +123,11 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     | EventToken::EscapeCarriageReturn
                     | EventToken::EscapeTab),
                 ) if escape_timing == EscapeTiming::OnBegin => {
-                    // SliceParser-specific: Handle simple escape sequences on Begin events
-                    // because CopyOnEscape requires starting unescaping immediately when
-                    // the escape token begins to maintain zero-copy optimization
+                    // For SliceParser, the escape is handled in a single event.
+                    // It begins and ends within this block.
+                    self.in_escape_sequence = true;
                     provider.process_simple_escape_event(&escape_token)?;
+                    self.in_escape_sequence = false;
                 }
                 ujson::Event::End(
                     escape_token @ (EventToken::EscapeQuote
@@ -122,10 +139,9 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     | EventToken::EscapeCarriageReturn
                     | EventToken::EscapeTab),
                 ) if escape_timing == EscapeTiming::OnEnd => {
-                    // StreamParser-specific: Handle simple escape sequences on End events
-                    // because StreamBuffer must wait until the token ends to accumulate
-                    // all bytes before processing the complete escape sequence
+                    // For StreamParser, the escape ends here.
                     provider.process_simple_escape_event(&escape_token)?;
+                    self.in_escape_sequence = false;
                 }
                 _ => {
                     // All other events continue to next iteration
@@ -149,8 +165,6 @@ pub enum EscapeTiming {
     /// Process simple escape sequences on End events (StreamParser)
     OnEnd,
 }
-
-// --- Original event_processor.rs content ---
 
 /// Result of processing a tokenizer event
 #[derive(Debug)]
@@ -272,8 +286,6 @@ pub trait ContentExtractor {
         *self.parser_state_mut() = crate::shared::State::None;
         self.extract_number(start_pos, from_container_end, true)
     }
-
-    // --- Methods from former EscapeHandler trait ---
 
     /// Get the current parser state for escape context checking
     fn parser_state(&self) -> &crate::shared::State;
@@ -468,33 +480,6 @@ pub fn process_simple_events(event: &crate::ujson::Event) -> Option<EventResult<
     }
 }
 
-/// Process a specific byte through the tokenizer (for cases where byte is already available)
-pub fn process_byte_through_tokenizer<T: crate::ujson::BitBucket, C: crate::ujson::DepthCounter>(
-    byte: u8,
-    tokenizer: &mut crate::ujson::Tokenizer<T, C>,
-    event_storage: &mut [Option<crate::ujson::Event>; 2],
-) -> Result<(), ParseError> {
-    clear_events(event_storage);
-    let mut callback = create_tokenizer_callback(event_storage);
-    tokenizer
-        .parse_chunk(&[byte], &mut callback)
-        .map_err(ParseError::TokenizerError)?;
-    Ok(())
-}
-
-/// Finish the tokenizer and collect any final events
-pub fn finish_tokenizer<T: crate::ujson::BitBucket, C: crate::ujson::DepthCounter>(
-    tokenizer: &mut crate::ujson::Tokenizer<T, C>,
-    event_storage: &mut [Option<crate::ujson::Event>; 2],
-) -> Result<(), ParseError> {
-    clear_events(event_storage);
-    let mut callback = create_tokenizer_callback(event_storage);
-    tokenizer
-        .finish(&mut callback)
-        .map_err(ParseError::TokenizerError)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,8 +598,6 @@ mod tests {
         ) -> Result<crate::Event<'_, '_>, crate::ParseError> {
             unimplemented!("Mock doesn't need extraction")
         }
-
-        // --- Methods from former EscapeHandler trait ---
 
         fn parser_state(&self) -> &crate::shared::State {
             &self.state
