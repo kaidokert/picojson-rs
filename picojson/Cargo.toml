@@ -1,6 +1,6 @@
 [package]
 name = "picojson"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "Apache-2.0"
 exclude = ["/.github/**"]
@@ -33,11 +33,8 @@ float-skip = []         # Skip float values during parsing (continue with next t
 float-error = []        # Error when encountering floats
 float-truncate = []     # Truncate floats to integers (1.7 → 1)
 
-# Remote conformance testing
+# Remote conformance test suites
 remote-tests = ["dep:ureq", "dep:zip"]
-
-# JSON_checker test suite from json.org
-json-checker-tests = []
 
 [package.metadata.conformance-tests]
 # JSONTestSuite configuration

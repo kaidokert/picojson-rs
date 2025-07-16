@@ -259,10 +259,6 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         Ok(Event::Number(json_number))
     }
 
-    fn is_finished(&self) -> bool {
-        self.finished
-    }
-
     fn validate_and_extract_number(
         &mut self,
         from_container_end: bool,

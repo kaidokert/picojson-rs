@@ -220,12 +220,6 @@ pub trait ContentExtractor {
         finished: bool,
     ) -> Result<Event<'_, '_>, ParseError>;
 
-    /// Check if the underlying source is finished (e.g., EOF for a stream).
-    /// The default is `true`, suitable for complete sources like slices.
-    fn is_finished(&self) -> bool {
-        true
-    }
-
     /// Shared validation and extraction for string content
     fn validate_and_extract_string(&mut self) -> Result<Event<'_, '_>, ParseError> {
         let start_pos = match *self.parser_state() {

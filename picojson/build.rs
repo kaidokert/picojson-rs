@@ -177,7 +177,7 @@ fn get_jsontest_suite_commit() -> String {
         .unwrap_or_else(|_| "1ef36fa01286573e846ac449e8683f8833c5b26a".to_string())
 }
 
-#[cfg(feature = "json-checker-tests")]
+#[cfg(feature = "remote-tests")]
 fn get_json_checker_url() -> String {
     std::env::var("CARGO_PKG_METADATA_CONFORMANCE_TESTS_JSON_CHECKER_URL")
         .unwrap_or_else(|_| "https://www.json.org/JSON_checker/test.zip".to_string())
@@ -266,7 +266,7 @@ fn download_json_test_suite() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(feature = "json-checker-tests")]
+#[cfg(feature = "remote-tests")]
 fn download_json_checker() -> Result<(), Box<dyn std::error::Error>> {
     use std::fs;
     use std::io::{self, Read};
@@ -344,7 +344,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         download_json_test_suite()?;
     }
 
-    #[cfg(feature = "json-checker-tests")]
+    #[cfg(feature = "remote-tests")]
     {
         download_json_checker()?;
     }
@@ -353,7 +353,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "remote-tests")]
     {
         generate_conformance_tests()?;
-        println!("cargo:warning=You can now run conformance tests with: cargo test --features remote-tests,json-checker-tests");
+        println!("cargo:warning=You can now run conformance tests with: cargo test --features remote-tests");
     }
 
     Ok(())

@@ -102,14 +102,9 @@ jobs:
           fi
           echo "Found $(find picojson/tests/data/JSONTestSuite/test_parsing -name '*.json' | wc -l) conformance test files"
 
-      - name: Run JSONTestSuite conformance tests
+      - name: Run JSONTestSuite and JSON_checker conformance tests
         working-directory: picojson
         run: cargo test --features remote-tests
-        continue-on-error: true
-
-      - name: Run JSON_checker conformance tests
-        working-directory: picojson
-        run: cargo test --features remote-tests,json-checker-tests
         continue-on-error: true
 
       - name: Report conformance test results

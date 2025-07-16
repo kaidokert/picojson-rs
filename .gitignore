@@ -23,3 +23,6 @@ Cargo.lock
 
 # Downloaded conformance test files
 **/conformance_tests/
+picojson/tests/data/json_checker/
+picojson/tests/data/JSONTestSuite/
+picojson/tests/conformance_generated.rs

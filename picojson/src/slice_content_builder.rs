@@ -3,7 +3,7 @@
 //! ContentBuilder implementation for SliceParser using CopyOnEscape optimization.
 
 use crate::copy_on_escape::CopyOnEscape;
-use crate::escape_processor::UnicodeEscapeCollector;
+use crate::escape_processor::{self, UnicodeEscapeCollector};
 use crate::event_processor::ContentExtractor;
 use crate::shared::{ContentRange, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
@@ -124,7 +124,7 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
 
         let (utf8_bytes_result, escape_start_pos) =
-            crate::escape_processor::process_unicode_escape_sequence(
+            escape_processor::process_unicode_escape_sequence(
                 current_pos,
                 &mut self.unicode_escape_collector,
                 hex_slice_provider,
