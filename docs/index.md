@@ -4,7 +4,7 @@
 
 Generated deeply nested JSON parsing stack behavior test.
 
-Test code can be found [in avr_demo](https://github.com/kaidokert/picojson-rs/tree/main/avr_demo), the numbers are as of [version 0.1.3](https://github.com/kaidokert/picojson-rs/releases/tag/v0.1.3) from [test run here](https://github.com/kaidokert/picojson-rs/actions/runs/16097454843).
+Test code can be found [in avr_demo](https://github.com/kaidokert/picojson-rs/tree/main/avr_demo), the numbers are as of [version 0.2.0](https://github.com/kaidokert/picojson-rs/releases/tag/v0.2.0) from [test run here](https://github.com/kaidokert/picojson-rs/actions/runs/16314213503).
 
 *   `serde`: The default [`serde-json-core`](https://crates.io/crates/serde-json-core) implementation.
 *   `slice-tiny`: [`picojson`](https://crates.io/crates/picojson) SliceParser with its default 32-level nesting limit.
@@ -17,28 +17,28 @@ Test code can be found [in avr_demo](https://github.com/kaidokert/picojson-rs/tr
 
 | Nesting Depth | serde | slice-tiny | slice-small | slice-huge | stream-tiny | stream-small | stream-huge|
 |---|---|---|---|---|---|---|---|
-| 7 levels | 208 bytes | 192 bytes | 289 bytes | 484 bytes | 188 bytes | 289 bytes | 481 bytes |
-| 9 levels | 224 bytes | 192 bytes | 289 bytes | 484 bytes | 188 bytes | 289 bytes | 481 bytes |
-| 30 levels | 392 bytes | 192 bytes | 289 bytes | 484 bytes | 188 bytes | 289 bytes | 481 bytes |
-| 33 levels | 416 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 62 levels | 648 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 65 levels | 672 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 126 levels | 1160 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 129 levels | 1184 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 254 levels | 2184 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 257 levels | 2208 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 510 levels | 4232 bytes | Clean Fail | 289 bytes | 484 bytes | Clean Fail | 289 bytes | 481 bytes |
-| 513 levels | 4256 bytes | Clean Fail | Clean Fail | 484 bytes | Clean Fail | Clean Fail | 481 bytes |
-| 1022 levels | Stack Overflow (Binary Output) | Clean Fail | Clean Fail | 484 bytes | Clean Fail | Clean Fail | 481 bytes |
-| 1025 levels | Stack Overflow (Binary Output) | Clean Fail | Clean Fail | 484 bytes | Clean Fail | Clean Fail | 481 bytes |
+| 7 levels | 208 bytes | 201 bytes | 305 bytes | 497 bytes | 160 bytes | 263 bytes | 455 bytes |
+| 9 levels | 224 bytes | 201 bytes | 305 bytes | 497 bytes | 160 bytes | 263 bytes | 455 bytes |
+| 30 levels | 392 bytes | 201 bytes | 305 bytes | 497 bytes | 160 bytes | 263 bytes | 455 bytes |
+| 33 levels | 416 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 62 levels | 648 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 65 levels | 672 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 126 levels | 1160 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 129 levels | 1184 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 254 levels | 2184 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 257 levels | 2208 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 510 levels | 4232 bytes | Clean Fail | 305 bytes | 497 bytes | Clean Fail | 263 bytes | 455 bytes |
+| 513 levels | 4256 bytes | Clean Fail | Clean Fail | 497 bytes | Clean Fail | Clean Fail | 455 bytes |
+| 1022 levels | Stack Overflow (Binary Output) | Clean Fail | Clean Fail | 497 bytes | Clean Fail | Clean Fail | 455 bytes |
+| 1025 levels | Stack Overflow (Binary Output) | Clean Fail | Clean Fail | 497 bytes | Clean Fail | Clean Fail | 455 bytes |
 
 ## Binary Size Analysis (cargo-bloat)
 
 | Configuration | Binary Size |
 |---|---|
 | serde | 7.4 KB |
-| picojson-slice | 7.8 KB |
-| picojson-stream | 9.6 KB |
+| picojson-slice | 8.1 KB |
+| picojson-stream | 9.0 KB |
 
 ## Summary
 
