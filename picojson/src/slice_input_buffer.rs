@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::ParseError;
-
 /// Error type for SliceInputBuffer operations.
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -54,22 +52,10 @@ impl<'a> SliceInputBuffer<'a> {
     pub fn slice(&self, start: usize, end: usize) -> Result<&'a [u8], Error> {
         self.data.get(start..end).ok_or(Error::InvalidSliceBounds)
     }
-}
 
-impl crate::number_parser::NumberExtractor for SliceInputBuffer<'_> {
-    fn get_number_slice(&self, start: usize, end: usize) -> Result<&[u8], ParseError> {
-        self.slice(start, end)
-            .map_err(|_| ParseError::InvalidNumber)
-    }
-
-    fn current_position(&self) -> usize {
-        // Return the actual current position (AFTER any delimiter)
-        // Delimiter handling is now centralized in parse_number_event()
-        self.pos
-    }
-
-    fn is_empty(&self) -> bool {
-        self.pos >= self.data.len()
+    /// Gets the length of the underlying data for bounds checking.
+    pub fn data_len(&self) -> usize {
+        self.data.len()
     }
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::parse_error::ParseError;
-use crate::shared::UnexpectedState;
+use crate::shared::{ContentRange, UnexpectedState};
 
 /// Shared utilities for processing JSON escape sequences.
 /// This module contains pure functions for escape processing that can be used
@@ -268,10 +268,16 @@ impl UnicodeEscapeCollector {
     }
 }
 
+impl Default for UnicodeEscapeCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ujson::EventToken;
+    use ujson::EventToken;
 
     #[test]
     fn test_simple_escapes() {
@@ -657,13 +663,11 @@ pub(crate) fn process_unicode_escape_sequence<'a, F>(
     current_pos: usize,
     unicode_escape_collector: &mut UnicodeEscapeCollector,
     mut hex_slice_provider: F,
-    utf8_buf: &'a mut [u8; 4],
-) -> Result<(Option<&'a [u8]>, usize), ParseError>
+) -> Result<(Option<([u8; 4], usize)>, usize), ParseError>
 where
     F: FnMut(usize, usize) -> Result<&'a [u8], ParseError>,
 {
-    let (hex_start, hex_end, escape_start_pos) =
-        crate::shared::ContentRange::unicode_escape_bounds(current_pos);
+    let (hex_start, hex_end, escape_start_pos) = ContentRange::unicode_escape_bounds(current_pos);
 
     // Extract the 4 hex digits from the buffer using the provider
     let hex_slice = hex_slice_provider(hex_start, hex_end)?;
@@ -680,18 +684,29 @@ where
     // Check if we had a pending high surrogate before processing
     let had_pending_high_surrogate = unicode_escape_collector.has_pending_high_surrogate();
 
+    // Create a local buffer for the UTF-8 result
+    let mut utf8_buf = [0u8; 4];
+
     // Process the complete sequence to UTF-8 with surrogate support
     let (utf8_bytes_opt, _surrogate_state_changed) =
-        unicode_escape_collector.process_to_utf8(utf8_buf)?;
+        unicode_escape_collector.process_to_utf8(&mut utf8_buf)?;
+
+    // If we have a result, copy it to a new array to return by value
+    let result_by_value = utf8_bytes_opt.map(|bytes| {
+        let mut value_buf = [0u8; 4];
+        let len = bytes.len();
+        value_buf[..len].copy_from_slice(bytes);
+        (value_buf, len)
+    });
 
     // If we're completing a surrogate pair (had pending high surrogate and now have UTF-8 bytes),
     // return the position of the high surrogate start instead of the low surrogate start
-    let final_escape_start_pos = if had_pending_high_surrogate && utf8_bytes_opt.is_some() {
+    let final_escape_start_pos = if had_pending_high_surrogate && result_by_value.is_some() {
         // High surrogate started 6 bytes before the current low surrogate
         escape_start_pos.saturating_sub(6)
     } else {
         escape_start_pos
     };
 
-    Ok((utf8_bytes_opt, final_escape_start_pos))
+    Ok((result_by_value, final_escape_start_pos))
 }
