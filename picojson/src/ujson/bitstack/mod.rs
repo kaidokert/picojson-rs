@@ -88,7 +88,11 @@ impl_depth_counter!(u8, u16, u32, u64, u128, usize);
 
 /// Configuration trait for BitStack systems - defines bucket and counter types.
 pub trait BitStackConfig {
+    /// The type used for storing the bit stack (e.g., u32, or a custom array-based type).
+    /// This type must implement the [`BitBucket`] trait.
     type Bucket: BitBucket + Default;
+    /// The type used for tracking nesting depth (e.g., u8).
+    /// This type must implement the [`DepthCounter`] trait.
     type Counter: DepthCounter + Default;
 }
 

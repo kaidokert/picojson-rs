@@ -50,9 +50,19 @@ pub enum NumberResult {
 #[derive(Debug, PartialEq)]
 pub enum JsonNumber<'a, 'b> {
     /// A raw slice from the original input, used when no copying is needed.
-    Borrowed { raw: &'a str, parsed: NumberResult },
+    Borrowed {
+        /// The exact string representation of the number from the input.
+        raw: &'a str,
+        /// The result of parsing the number according to crate features.
+        parsed: NumberResult,
+    },
     /// A slice from the scratch/copy buffer, used when number had to be copied.
-    Copied { raw: &'b str, parsed: NumberResult },
+    Copied {
+        /// The exact string representation of the number from the copy buffer.
+        raw: &'b str,
+        /// The result of parsing the number according to crate features.
+        parsed: NumberResult,
+    },
 }
 
 impl JsonNumber<'_, '_> {
