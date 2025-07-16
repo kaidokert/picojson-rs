@@ -76,7 +76,7 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
 
             // Try shared event processors first
             if let Some(result) =
-                process_simple_events(&taken).or_else(|| process_begin_events(&taken, provider))
+                process_simple_events(&taken).or_else(|| provider.process_begin_events(&taken))
             {
                 match result {
                     EventResult::Complete(event) => return Ok(event),
@@ -92,9 +92,9 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
             // Handle parser-specific events based on escape timing
             match taken {
                 ujson::Event::Begin(EventToken::EscapeSequence) => {
-                    process_begin_escape_sequence_event(provider)?;
+                    provider.process_begin_escape_sequence_event()?;
                 }
-                _ if process_unicode_escape_events(&taken, provider)? => {
+                _ if provider.process_unicode_escape_events(&taken)? => {
                     // Unicode escape events handled by shared function
                 }
                 ujson::Event::Begin(
@@ -110,7 +110,7 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     // SliceParser-specific: Handle simple escape sequences on Begin events
                     // because CopyOnEscape requires starting unescaping immediately when
                     // the escape token begins to maintain zero-copy optimization
-                    process_simple_escape_event(&escape_token, provider)?;
+                    provider.process_simple_escape_event(&escape_token)?;
                 }
                 ujson::Event::End(
                     escape_token @ (EventToken::EscapeQuote
@@ -125,7 +125,7 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     // StreamParser-specific: Handle simple escape sequences on End events
                     // because StreamBuffer must wait until the token ends to accumulate
                     // all bytes before processing the complete escape sequence
-                    process_simple_escape_event(&escape_token, provider)?;
+                    provider.process_simple_escape_event(&escape_token)?;
                 }
                 _ => {
                     // All other events continue to next iteration
@@ -166,51 +166,6 @@ pub enum EventResult<'a, 'b> {
     /// Extract number content (delegate to parser-specific logic)
     /// bool indicates if number was terminated by container delimiter
     ExtractNumber(bool),
-}
-
-/// Process Begin events that have similar patterns between parsers
-pub fn process_begin_events<C: ContentExtractor>(
-    event: &crate::ujson::Event,
-    content_extractor: &mut C,
-) -> Option<EventResult<'static, 'static>> {
-    match event {
-        // String/Key Begin events - nearly identical patterns
-        crate::ujson::Event::Begin(EventToken::Key) => {
-            let pos = content_extractor.current_position();
-            *content_extractor.parser_state_mut() = State::Key(pos);
-            content_extractor.begin_string_content(pos);
-            Some(EventResult::Continue)
-        }
-        crate::ujson::Event::Begin(EventToken::String) => {
-            let pos = content_extractor.current_position();
-            *content_extractor.parser_state_mut() = State::String(pos);
-            content_extractor.begin_string_content(pos);
-            Some(EventResult::Continue)
-        }
-
-        // Number Begin events - identical logic
-        crate::ujson::Event::Begin(
-            EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject,
-        ) => {
-            let pos = content_extractor.current_position();
-            let number_start = ContentRange::number_start_from_current(pos);
-            *content_extractor.parser_state_mut() = State::Number(number_start);
-            Some(EventResult::Continue)
-        }
-
-        // Primitive Begin events - identical logic
-        crate::ujson::Event::Begin(EventToken::True | EventToken::False | EventToken::Null) => {
-            Some(EventResult::Continue)
-        }
-
-        _ => None,
-    }
-}
-
-/// Clear event storage array - utility function
-pub fn clear_events(event_storage: &mut [Option<crate::ujson::Event>; 2]) {
-    event_storage[0] = None;
-    event_storage[1] = None;
 }
 
 /// Trait for content extraction operations that differ between parsers
@@ -261,7 +216,10 @@ pub trait ContentExtractor {
     ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
 
     /// Check if the underlying source is finished (e.g., EOF for a stream).
-    fn is_finished(&self) -> bool;
+    /// The default is `true`, suitable for complete sources like slices.
+    fn is_finished(&self) -> bool {
+        true
+    }
 
     /// Shared validation and extraction for string content
     fn validate_and_extract_string(&mut self) -> Result<crate::Event<'_, '_>, crate::ParseError> {
@@ -332,6 +290,119 @@ pub trait ContentExtractor {
 
     /// Begin unicode escape sequence processing
     fn begin_unicode_escape(&mut self) -> Result<(), crate::ParseError>;
+
+    /// Process Begin events that have similar patterns between parsers
+    fn process_begin_events(
+        &mut self,
+        event: &crate::ujson::Event,
+    ) -> Option<EventResult<'static, 'static>> {
+        match event {
+            // String/Key Begin events - nearly identical patterns
+            crate::ujson::Event::Begin(EventToken::Key) => {
+                let pos = self.current_position();
+                *self.parser_state_mut() = State::Key(pos);
+                self.begin_string_content(pos);
+                Some(EventResult::Continue)
+            }
+            crate::ujson::Event::Begin(EventToken::String) => {
+                let pos = self.current_position();
+                *self.parser_state_mut() = State::String(pos);
+                self.begin_string_content(pos);
+                Some(EventResult::Continue)
+            }
+
+            // Number Begin events - identical logic
+            crate::ujson::Event::Begin(
+                EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject,
+            ) => {
+                let pos = self.current_position();
+                let number_start = ContentRange::number_start_from_current(pos);
+                *self.parser_state_mut() = State::Number(number_start);
+                Some(EventResult::Continue)
+            }
+
+            // Primitive Begin events - identical logic
+            crate::ujson::Event::Begin(EventToken::True | EventToken::False | EventToken::Null) => {
+                Some(EventResult::Continue)
+            }
+
+            _ => None,
+        }
+    }
+
+    /// Process Begin(EscapeSequence) events using the enhanced lifecycle interface
+    fn process_begin_escape_sequence_event(&mut self) -> Result<(), crate::ParseError> {
+        // Only process if we're inside a string or key
+        match self.parser_state() {
+            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                self.begin_escape_sequence()?;
+            }
+            _ => {} // Ignore if not in string/key context
+        }
+        Ok(())
+    }
+
+    /// Process simple escape sequence events that have similar patterns between parsers
+    fn process_simple_escape_event(
+        &mut self,
+        escape_token: &EventToken,
+    ) -> Result<(), crate::ParseError> {
+        // Clear any pending high surrogate state when we encounter a simple escape
+        // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
+        self.unicode_escape_collector_mut().reset_all();
+
+        // Use unified escape token processing from EscapeProcessor
+        let unescaped_char =
+            crate::escape_processor::EscapeProcessor::process_escape_token(escape_token)?;
+
+        // Only process if we're inside a string or key
+        match self.parser_state() {
+            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                self.handle_simple_escape_char(unescaped_char)?;
+            }
+            _ => {} // Ignore if not in string/key context
+        }
+
+        Ok(())
+    }
+
+    /// Process Unicode escape begin/end events that have similar patterns between parsers
+    fn process_unicode_escape_events(
+        &mut self,
+        event: &crate::ujson::Event,
+    ) -> Result<bool, crate::ParseError> {
+        match event {
+            crate::ujson::Event::Begin(EventToken::UnicodeEscape) => {
+                // Start Unicode escape collection - reset collector for new sequence
+                // Only handle if we're inside a string or key
+                match self.parser_state() {
+                    crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                        self.unicode_escape_collector_mut().reset();
+                        self.begin_unicode_escape()?;
+                    }
+                    _ => {} // Ignore if not in string/key context
+                }
+                Ok(true) // Event was handled
+            }
+            crate::ujson::Event::End(EventToken::UnicodeEscape) => {
+                // Handle end of Unicode escape sequence (\uXXXX)
+                match self.parser_state() {
+                    crate::shared::State::String(_) | crate::shared::State::Key(_) => {
+                        self.process_unicode_escape_with_collector()?;
+                    }
+                    _ => {} // Ignore if not in string/key context
+                }
+                Ok(true) // Event was handled
+            }
+            _ => Ok(false), // Event was not handled
+        }
+    }
+}
+
+/// Clear event storage array - utility function
+pub fn clear_events(event_storage: &mut [Option<crate::ujson::Event>; 2]) {
+    event_storage[0] = None;
+    event_storage[1] = None;
 }
 
 /// Creates a standard tokenizer callback for event storage
@@ -361,76 +432,6 @@ pub fn take_first_event(
     event_storage: &mut [Option<crate::ujson::Event>; 2],
 ) -> Option<crate::ujson::Event> {
     event_storage.iter_mut().find_map(|e| e.take())
-}
-
-/// Process Begin(EscapeSequence) events using the enhanced lifecycle interface
-pub fn process_begin_escape_sequence_event<C: ContentExtractor>(
-    handler: &mut C,
-) -> Result<(), crate::ParseError> {
-    // Only process if we're inside a string or key
-    match handler.parser_state() {
-        crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-            handler.begin_escape_sequence()?;
-        }
-        _ => {} // Ignore if not in string/key context
-    }
-    Ok(())
-}
-
-/// Process simple escape sequence events that have similar patterns between parsers
-pub fn process_simple_escape_event<C: ContentExtractor>(
-    escape_token: &EventToken,
-    content_extractor: &mut C,
-) -> Result<(), crate::ParseError> {
-    // Clear any pending high surrogate state when we encounter a simple escape
-    // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
-    content_extractor.unicode_escape_collector_mut().reset_all();
-
-    // Use unified escape token processing from EscapeProcessor
-    let unescaped_char =
-        crate::escape_processor::EscapeProcessor::process_escape_token(escape_token)?;
-
-    // Only process if we're inside a string or key
-    match content_extractor.parser_state() {
-        crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-            content_extractor.handle_simple_escape_char(unescaped_char)?;
-        }
-        _ => {} // Ignore if not in string/key context
-    }
-
-    Ok(())
-}
-
-/// Process Unicode escape begin/end events that have similar patterns between parsers
-pub fn process_unicode_escape_events<C: ContentExtractor>(
-    event: &crate::ujson::Event,
-    content_extractor: &mut C,
-) -> Result<bool, crate::ParseError> {
-    match event {
-        crate::ujson::Event::Begin(EventToken::UnicodeEscape) => {
-            // Start Unicode escape collection - reset collector for new sequence
-            // Only handle if we're inside a string or key
-            match content_extractor.parser_state() {
-                crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                    content_extractor.unicode_escape_collector_mut().reset();
-                    content_extractor.begin_unicode_escape()?;
-                }
-                _ => {} // Ignore if not in string/key context
-            }
-            Ok(true) // Event was handled
-        }
-        crate::ujson::Event::End(EventToken::UnicodeEscape) => {
-            // Handle end of Unicode escape sequence (\uXXXX)
-            match content_extractor.parser_state() {
-                crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                    content_extractor.process_unicode_escape_with_collector()?;
-                }
-                _ => {} // Ignore if not in string/key context
-            }
-            Ok(true) // Event was handled
-        }
-        _ => Ok(false), // Event was not handled
-    }
 }
 
 /// Process simple container and primitive events that are identical between parsers
@@ -634,10 +635,6 @@ mod tests {
         fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
             Ok(())
         }
-
-        fn is_finished(&self) -> bool {
-            true
-        }
     }
 
     #[test]
@@ -645,7 +642,7 @@ mod tests {
         let mut context = MockContentExtractor::new();
         let event = crate::ujson::Event::Begin(EventToken::Key);
 
-        let result = process_begin_events(&event, &mut context);
+        let result = context.process_begin_events(&event);
 
         assert!(matches!(result, Some(EventResult::Continue)));
         assert!(matches!(context.state, crate::shared::State::Key(42)));
@@ -657,7 +654,7 @@ mod tests {
         let mut context = MockContentExtractor::new();
         let event = crate::ujson::Event::Begin(EventToken::String);
 
-        let result = process_begin_events(&event, &mut context);
+        let result = context.process_begin_events(&event);
 
         assert!(matches!(result, Some(EventResult::Continue)));
         assert!(matches!(context.state, crate::shared::State::String(42)));
@@ -669,7 +666,7 @@ mod tests {
         let mut context = MockContentExtractor::new();
         let event = crate::ujson::Event::Begin(EventToken::Number);
 
-        let result = process_begin_events(&event, &mut context);
+        let result = context.process_begin_events(&event);
 
         assert!(matches!(result, Some(EventResult::Continue)));
         // Number should get position adjusted by ContentRange::number_start_from_current
@@ -683,7 +680,7 @@ mod tests {
 
         for token in [EventToken::True, EventToken::False, EventToken::Null] {
             let event = crate::ujson::Event::Begin(token);
-            let result = process_begin_events(&event, &mut context);
+            let result = context.process_begin_events(&event);
             assert!(matches!(result, Some(EventResult::Continue)));
         }
 
@@ -697,7 +694,7 @@ mod tests {
         let mut context = MockContentExtractor::new();
         let event = crate::ujson::Event::Begin(EventToken::EscapeQuote);
 
-        let result = process_begin_events(&event, &mut context);
+        let result = context.process_begin_events(&event);
 
         assert!(result.is_none());
         assert!(matches!(context.state, crate::shared::State::None));
