@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::event_processor::{ContentExtractor, EscapeTiming, ParserCore};
+use crate::event_processor::{EscapeTiming, ParserCore};
 use crate::parse_error::ParseError;
-use crate::shared::{Event, State};
+use crate::shared::Event;
 use crate::stream_content_builder::StreamContentBuilder;
 use crate::{ujson, PullParser};
 
@@ -31,9 +31,8 @@ pub trait Reader {
 pub struct StreamParser<'b, R: Reader, C: BitStackConfig = DefaultConfig> {
     /// The shared parser core that handles the unified event processing loop
     parser_core: ParserCore<C::Bucket, C::Counter>,
-    /// The unified provider that handles both content building and reader access
-    /// This allows us to use the same unified pattern as SliceParser
-    provider: StreamParserProvider<'b, R>,
+    /// The content builder that handles StreamParser-specific content extraction and reader access
+    content_builder: StreamContentBuilder<'b, R>,
 }
 
 /// Methods for StreamParser using DefaultConfig
@@ -69,127 +68,8 @@ impl<'b, R: Reader, C: BitStackConfig> StreamParser<'b, R, C> {
     pub fn with_config(reader: R, buffer: &'b mut [u8]) -> Self {
         Self {
             parser_core: ParserCore::new(),
-            provider: StreamParserProvider::new(reader, buffer),
+            content_builder: StreamContentBuilder::new(buffer, reader),
         }
-    }
-}
-
-/// Implement the required traits for StreamParser to work with unified ParserCore
-/// This provider handles the StreamParser-specific operations needed by the unified parser core
-/// It bridges the gap between the generic ParserCore and the StreamParser's specific requirements
-/// for streaming input and buffer management
-/// The provider contains mutable references to the StreamParser's internal state
-/// which allows the unified parser core to control the parsing process
-pub struct StreamParserProvider<'b, R: Reader> {
-    content_builder: StreamContentBuilder<'b>,
-    reader: R,
-    finished: bool,
-}
-
-impl<'b, R: Reader> StreamParserProvider<'b, R> {
-    pub fn new(reader: R, buffer: &'b mut [u8]) -> Self {
-        Self {
-            content_builder: StreamContentBuilder::new(buffer),
-            reader,
-            finished: false,
-        }
-    }
-}
-
-impl<R: Reader> ContentExtractor for StreamParserProvider<'_, R> {
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        // If buffer is empty, try to fill it first
-        if self.content_builder.stream_buffer().is_empty() {
-            self.content_builder
-                .fill_buffer_from_reader(&mut self.reader)?;
-        }
-
-        // If still empty after fill attempt, we're at EOF
-        if self.content_builder.stream_buffer().is_empty() {
-            if !self.finished {
-                self.finished = true;
-                self.content_builder.set_finished(true);
-            }
-            return Ok(None);
-        }
-
-        // Get byte and advance
-        let byte = self.content_builder.stream_buffer().current_byte()?;
-        self.content_builder.stream_buffer_mut().advance()?;
-        Ok(Some(byte))
-    }
-
-    fn parser_state_mut(&mut self) -> &mut State {
-        self.content_builder.parser_state_mut()
-    }
-
-    fn current_position(&self) -> usize {
-        self.content_builder.current_position()
-    }
-
-    fn begin_string_content(&mut self, pos: usize) {
-        self.content_builder.begin_string_content(pos);
-    }
-
-    fn unicode_escape_collector_mut(
-        &mut self,
-    ) -> &mut crate::escape_processor::UnicodeEscapeCollector {
-        self.content_builder.unicode_escape_collector_mut()
-    }
-
-    fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        self.content_builder.extract_string_content(start_pos)
-    }
-
-    fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        self.content_builder.extract_key_content(start_pos)
-    }
-
-    fn extract_number(
-        &mut self,
-        start_pos: usize,
-        from_container_end: bool,
-        finished: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        self.content_builder
-            .extract_number(start_pos, from_container_end, finished)
-    }
-
-    /// Override the default validate_and_extract_number to use the finished state
-    fn validate_and_extract_number(
-        &mut self,
-        from_container_end: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        let start_pos = match *self.parser_state() {
-            crate::shared::State::Number(pos) => pos,
-            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
-        };
-
-        *self.parser_state_mut() = crate::shared::State::None;
-        // Use the finished-aware extract_number method
-        self.extract_number(start_pos, from_container_end, self.finished)
-    }
-
-    // --- Methods from former EscapeHandler trait ---
-
-    fn parser_state(&self) -> &State {
-        self.content_builder.parser_state()
-    }
-
-    fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        self.content_builder.process_unicode_escape_with_collector()
-    }
-
-    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
-        self.content_builder.handle_simple_escape_char(escape_char)
-    }
-
-    fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
-        self.content_builder.begin_escape_sequence()
-    }
-
-    fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
-        self.content_builder.begin_unicode_escape()
     }
 }
 
@@ -200,29 +80,24 @@ impl<R: Reader, C: BitStackConfig> StreamParser<'_, R, C> {
         // Use the unified ParserCore implementation with StreamParser-specific timing
         // StreamParser needs byte accumulation for string parsing
         self.parser_core.next_event_impl(
-            &mut self.provider,
+            &mut self.content_builder,
             EscapeTiming::OnEnd,
             |provider, byte| {
                 // Delegate to the StreamContentBuilder's byte accumulation logic
-                provider.content_builder.handle_byte_accumulation(byte)
+                provider.handle_byte_accumulation(byte)
             },
         )
     }
-
-    // The compaction and helper methods are now handled by the provider
-    // These methods can be removed since they're not needed with the new architecture
 }
 
 impl<R: Reader, C: BitStackConfig> PullParser for StreamParser<'_, R, C> {
     fn next_event(&mut self) -> Result<Event<'_, '_>, ParseError> {
         // Check if we're already finished (similar to SliceParser's is_past_end check)
-        if self.provider.finished {
+        if self.content_builder.is_finished() {
             return Ok(Event::EndDocument);
         }
 
-        self.provider
-            .content_builder
-            .apply_unescaped_reset_if_queued();
+        self.content_builder.apply_unescaped_reset_if_queued();
 
         self.next_event_impl()
     }

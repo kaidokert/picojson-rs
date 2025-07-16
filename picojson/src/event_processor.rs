@@ -260,6 +260,9 @@ pub trait ContentExtractor {
         finished: bool,
     ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
 
+    /// Check if the underlying source is finished (e.g., EOF for a stream).
+    fn is_finished(&self) -> bool;
+
     /// Shared validation and extraction for string content
     fn validate_and_extract_string(&mut self) -> Result<crate::Event<'_, '_>, crate::ParseError> {
         let start_pos = match *self.parser_state() {
@@ -630,6 +633,10 @@ mod tests {
 
         fn begin_escape_sequence(&mut self) -> Result<(), crate::ParseError> {
             Ok(())
+        }
+
+        fn is_finished(&self) -> bool {
+            true
         }
     }
 
