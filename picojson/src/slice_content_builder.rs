@@ -20,8 +20,6 @@ pub struct SliceContentBuilder<'a, 'b> {
     parser_state: State,
     /// Unicode escape collector for \uXXXX sequences
     unicode_escape_collector: UnicodeEscapeCollector,
-    /// Flag to track when we're inside ANY escape sequence (like stream implementation)
-    in_escape_sequence: bool,
 }
 
 impl<'a, 'b> SliceContentBuilder<'a, 'b> {
@@ -32,7 +30,6 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
             copy_on_escape: CopyOnEscape::new(input, scratch_buffer),
             parser_state: State::None,
             unicode_escape_collector: UnicodeEscapeCollector::new(),
-            in_escape_sequence: false,
         }
     }
 
@@ -127,7 +124,6 @@ impl EscapeHandler for SliceContentBuilder<'_, '_> {
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         // Clear the escape sequence flag when unicode escape completes
-        self.in_escape_sequence = false;
         let current_pos = self.buffer.current_pos();
         let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
@@ -164,15 +160,12 @@ impl EscapeHandler for SliceContentBuilder<'_, '_> {
 
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
         // Clear the escape sequence flag when simple escape completes
-        self.in_escape_sequence = false;
         self.copy_on_escape
             .handle_escape(self.buffer.current_pos(), escape_char)?;
         Ok(())
     }
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
-        // Set escape flag to prevent literal byte accumulation during escape processing
-        self.in_escape_sequence = true;
         Ok(())
     }
 }
