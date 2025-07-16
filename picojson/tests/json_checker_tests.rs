@@ -12,7 +12,7 @@
 //! This provides complementary validation to JSONTestSuite with focused
 //! testing of specific JSON specification violations.
 
-#[cfg(feature = "json-checker-tests")]
+#[cfg(feature = "remote-tests")]
 mod json_checker_tests {
     use picojson::{Event, ParseError, PullParser, SliceParser};
     use std::fs;
