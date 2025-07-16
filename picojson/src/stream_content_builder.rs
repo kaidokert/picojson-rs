@@ -86,27 +86,12 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
             crate::shared::State::None => {
                 // No position-based state to update
             }
-            crate::shared::State::Key(pos) => {
+            crate::shared::State::Key(pos)
+            | crate::shared::State::String(pos)
+            | crate::shared::State::Number(pos) => {
                 if *pos >= compaction_offset {
                     *pos = pos.checked_sub(compaction_offset).unwrap_or(0);
                 } else {
-                    // This shouldn't happen since we compact from the token start
-                    *pos = 0;
-                }
-            }
-            crate::shared::State::String(pos) => {
-                if *pos >= compaction_offset {
-                    *pos = pos.checked_sub(compaction_offset).unwrap_or(0);
-                } else {
-                    // This shouldn't happen since we compact from the token start
-                    *pos = 0;
-                }
-            }
-            crate::shared::State::Number(pos) => {
-                if *pos >= compaction_offset {
-                    *pos = pos.checked_sub(compaction_offset).unwrap_or(0);
-                } else {
-                    // This shouldn't happen since we compact from the token start
                     *pos = 0;
                 }
             }
