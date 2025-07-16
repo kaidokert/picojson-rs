@@ -218,7 +218,7 @@ pub trait ContentExtractor {
         start_pos: usize,
         from_container_end: bool,
         finished: bool,
-    ) -> Result<crate::Event<'_, '_>, crate::ParseError>;
+    ) -> Result<Event<'_, '_>, ParseError>;
 
     /// Shared validation and extraction for string content
     fn validate_and_extract_string(&mut self) -> Result<Event<'_, '_>, ParseError> {
