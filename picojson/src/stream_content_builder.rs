@@ -92,7 +92,9 @@ impl<'b, R: crate::stream_parser::Reader> StreamContentBuilder<'b, R> {
                 if *pos >= compaction_offset {
                     *pos = pos.checked_sub(compaction_offset).unwrap_or(0);
                 } else {
-                    *pos = 0;
+                    return Err(crate::ParseError::Unexpected(
+                        crate::shared::UnexpectedState::InvalidSliceBounds,
+                    ));
                 }
             }
         }
