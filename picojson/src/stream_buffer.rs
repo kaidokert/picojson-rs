@@ -265,6 +265,11 @@ impl<'a> StreamBuffer<'a> {
             .get(start..end)
             .ok_or(StreamBufferError::InvalidSliceBounds)
     }
+
+    /// Get the current buffer slice available for tokenizing
+    pub fn get_tokenize_slice(&self) -> &[u8] {
+        self.buffer.get(self.tokenize_pos..self.data_end).unwrap_or(&[])
+    }
 }
 
 #[cfg(test)]
