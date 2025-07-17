@@ -73,6 +73,12 @@ impl From<UnexpectedState> for ParseError {
     }
 }
 
+impl From<ujson::Error> for ParseError {
+    fn from(err: ujson::Error) -> Self {
+        ParseError::TokenizerError(err)
+    }
+}
+
 impl core::fmt::Display for ParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
