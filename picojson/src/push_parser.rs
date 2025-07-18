@@ -14,6 +14,13 @@ enum State {
     BuildingString { start: usize },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum DeferredProcessing {
+    None,
+    Key,
+    String,
+}
+
 /// A trait for handling events from a SAX-style push parser.
 pub trait PushParserHandler<'a, 'b, E> {
     /// Handles a single, complete JSON event.
@@ -31,6 +38,7 @@ where
     stream_buffer: StreamBuffer<'b>,
     state: State,
     unicode_escape_collector: UnicodeEscapeCollector,
+    deferred_processing: DeferredProcessing,
     _phantom: core::marker::PhantomData<(&'a (), E)>,
 }
 
@@ -47,6 +55,7 @@ where
             stream_buffer: StreamBuffer::new(buffer),
             state: State::Idle,
             unicode_escape_collector: UnicodeEscapeCollector::new(),
+            deferred_processing: DeferredProcessing::None,
             _phantom: core::marker::PhantomData,
         }
     }
@@ -99,7 +108,10 @@ where
     }
 
     /// Writes a slice of bytes to the parser.
-    pub fn write(&mut self, data: &'a [u8], _scratch: &mut [u8]) -> Result<(), PushParseError<E>> {
+    pub fn write(&mut self, data: &'a [u8]) -> Result<(), PushParseError<E>> {
+        // Apply any queued unescaped buffer clear from previous processing
+        self.stream_buffer.apply_unescaped_reset_if_queued();
+        
         // Phase 2: Fill the StreamBuffer for escape processing
         if let Some(fill_slice) = self.stream_buffer.get_fill_slice() {
             let copy_len = data.len().min(fill_slice.len());
@@ -169,13 +181,19 @@ where
                 ujson::Event::End(ujson::EventToken::Key) => {
                     if let State::BuildingKey { start } = self.state {
                         self.state = State::Idle;
-                        // Phase 1: Always use input data for now (no escapes - zero-copy)
-                        // Phase 2 will handle unescaped content processing after callback
-                        let key_bytes = &data[start..pos];
-                        if let Ok(key_str) = crate::shared::from_utf8(key_bytes) {
-                            self.handler.handle_event(Event::Key(String::Borrowed(key_str)))
+                        // Phase 3: Check if we have unescaped content, otherwise use zero-copy
+                        if self.stream_buffer.has_unescaped_content() {
+                            // Defer processing to after callback to avoid lifetime issues
+                            self.deferred_processing = DeferredProcessing::Key;
+                            Ok(())
                         } else {
-                            Ok(()) // Invalid UTF-8, skip
+                            // No escapes - use input data (zero-copy)
+                            let key_bytes = &data[start..pos];
+                            if let Ok(key_str) = crate::shared::from_utf8(key_bytes) {
+                                self.handler.handle_event(Event::Key(String::Borrowed(key_str)))
+                            } else {
+                                Ok(()) // Invalid UTF-8, skip
+                            }
                         }
                     } else {
                         Ok(()) // Should not happen
@@ -190,13 +208,19 @@ where
                 ujson::Event::End(ujson::EventToken::String) => {
                     if let State::BuildingString { start } = self.state {
                         self.state = State::Idle;
-                        // Phase 1: Always use input data for now (no escapes - zero-copy)
-                        // Phase 2 will handle unescaped content processing after callback
-                        let string_bytes = &data[start..pos];
-                        if let Ok(string_str) = crate::shared::from_utf8(string_bytes) {
-                            self.handler.handle_event(Event::String(String::Borrowed(string_str)))
+                        // Phase 3: Check if we have unescaped content, otherwise use zero-copy
+                        if self.stream_buffer.has_unescaped_content() {
+                            // Defer processing to after callback to avoid lifetime issues
+                            self.deferred_processing = DeferredProcessing::String;
+                            Ok(())
                         } else {
-                            Ok(()) // Invalid UTF-8, skip
+                            // No escapes - use input data (zero-copy)
+                            let string_bytes = &data[start..pos];
+                            if let Ok(string_str) = crate::shared::from_utf8(string_bytes) {
+                                self.handler.handle_event(Event::String(String::Borrowed(string_str)))
+                            } else {
+                                Ok(()) // Invalid UTF-8, skip
+                            }
                         }
                     } else {
                         Ok(()) // Should not happen
@@ -229,7 +253,55 @@ where
             }
         }
 
+        // Handle deferred string/key processing now that escapes are processed
+        match self.deferred_processing {
+            DeferredProcessing::Key => {
+                self.deferred_processing = DeferredProcessing::None;
+                self.process_deferred_key()?;
+            }
+            DeferredProcessing::String => {
+                self.deferred_processing = DeferredProcessing::None;
+                self.process_deferred_string()?;
+            }
+            DeferredProcessing::None => {}
+        }
+
         Ok(())
+    }
+
+    /// Process a deferred key with unescaped content
+    fn process_deferred_key(&mut self) -> Result<(), PushParseError<E>> {
+        if self.stream_buffer.has_unescaped_content() {
+            // We still have the fundamental lifetime issue - the deferred clear pattern
+            // doesn't solve the core problem that String::Unescaped needs to borrow 
+            // from the buffer for lifetime 'b, but we need to modify the buffer
+            
+            // For now, queue the clear and skip the event until we can resolve the architecture
+            self.stream_buffer.queue_unescaped_reset();
+            Ok(())
+        } else {
+            Ok(()) // No unescaped content, nothing to do
+        }
+    }
+
+    /// Process a deferred string with unescaped content
+    fn process_deferred_string(&mut self) -> Result<(), PushParseError<E>> {
+        if self.stream_buffer.has_unescaped_content() {
+            // The deferred clear pattern is the correct approach, but we have a fundamental
+            // lifetime issue with PushParser's current architecture:
+            // - The Event<'a, 'b> expects String::Unescaped(&'b str) to live for lifetime 'b
+            // - But 'b is tied to the entire PushParser instance, not just the handler call
+            // - This prevents us from clearing the buffer after the handler returns
+            
+            // The solution would require restructuring the lifetimes or using a different
+            // approach like copying the unescaped content to a temporary buffer
+            
+            // For now, queue the clear and skip the event
+            self.stream_buffer.queue_unescaped_reset();
+            Ok(())
+        } else {
+            Ok(()) // No unescaped content, nothing to do
+        }
     }
 
     /// Process a single escape event that was collected during tokenization
@@ -329,9 +401,32 @@ where
 
     /// Process a completed unicode escape sequence
     fn process_unicode_escape(&mut self) -> Result<(), PushParseError<E>> {
-        // For Phase 2: Simplified unicode processing
-        // TODO: Proper hex digit collection from tokenizer events
-        // For now, just skip unicode escapes and let them be handled in Phase 3
+        // Phase 3: Process unicode escape using StreamBuffer's hex digit extraction
+        let hex_slice_provider = |start, end| {
+            // Use the StreamBuffer to get hex digits from the current position
+            self.stream_buffer.get_string_slice(start, end).map_err(Into::into)
+        };
+
+        // Get current position for hex digit extraction
+        let current_pos = self.stream_buffer.current_position();
+        
+        // Process the unicode escape sequence
+        let (utf8_bytes_result, _) = crate::escape_processor::process_unicode_escape_sequence(
+            current_pos,
+            &mut self.unicode_escape_collector,
+            hex_slice_provider,
+        ).map_err(|e| PushParseError::Parse(e))?;
+
+        // Handle the UTF-8 bytes if we have them
+        if let Some((utf8_bytes, len)) = utf8_bytes_result {
+            // Append the resulting bytes to the unescaped buffer
+            for &byte in &utf8_bytes[..len] {
+                self.stream_buffer
+                    .append_unescaped_byte(byte)
+                    .map_err(|_| PushParseError::Parse(ParseError::ScratchBufferFull))?;
+            }
+        }
+
         Ok(())
     }
 

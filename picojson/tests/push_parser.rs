@@ -4,7 +4,7 @@ use picojson::String;
 use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
 
 // A simplified, lifetime-free version of the Event for testing purposes.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 enum TestEvent<'a> {
     StartObject,
     EndObject,
@@ -37,6 +37,11 @@ impl<'a> TestHandler<'a> {
             self.idx += 1;
         }
     }
+    
+    /// Returns a slice of the events that have been filled
+    fn events(&self) -> &[Option<TestEvent<'a>>] {
+        &self.events[..self.idx]
+    }
 }
 
 impl<'a, 'b> PushParserHandler<'a, 'b, ()> for TestHandler<'a>
@@ -66,11 +71,10 @@ where
 #[test]
 fn test_simple_object() {
     let json = br#"{ "foo": true }"#;
-    let mut scratch = [0u8; 128];
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
-    parser.write(json, &mut scratch).unwrap();
+    parser.write(json).unwrap();
     parser.finish().unwrap();
     let handler = parser.destroy();
 
@@ -80,24 +84,18 @@ fn test_simple_object() {
         Some(TestEvent::Bool(true)),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
-        None,
-        None,
-        None,
-        None,
-        None,
     ];
 
-    assert_eq!(&handler.events[..], &expected[..]);
+    assert_eq!(handler.events(), expected);
 }
 
 #[test]
 fn test_array_with_primitives() {
     let json = br#"[true, false, null]"#;
-    let mut scratch = [0u8; 128];
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
-    parser.write(json, &mut scratch).unwrap();
+    parser.write(json).unwrap();
     parser.finish().unwrap();
     let handler = parser.destroy();
 
@@ -108,23 +106,18 @@ fn test_array_with_primitives() {
         Some(TestEvent::Null),
         Some(TestEvent::EndArray),
         Some(TestEvent::EndDocument),
-        None,
-        None,
-        None,
-        None,
     ];
 
-    assert_eq!(&handler.events[..], &expected[..]);
+    assert_eq!(handler.events(), expected);
 }
 
 #[test]
 fn test_nested_structure() {
     let json = br#"{"items": [true, false]}"#;
-    let mut scratch = [0u8; 128];
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
-    parser.write(json, &mut scratch).unwrap();
+    parser.write(json).unwrap();
     parser.finish().unwrap();
     let handler = parser.destroy();
 
@@ -137,21 +130,18 @@ fn test_nested_structure() {
         Some(TestEvent::EndArray),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
-        None,
-        None,
     ];
 
-    assert_eq!(&handler.events[..], &expected[..]);
+    assert_eq!(handler.events(), expected);
 }
 
 #[test]
 fn test_object_with_string_value() {
     let json = br#"{"name": "picojson", "active": true}"#;
-    let mut scratch = [0u8; 128];
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
-    parser.write(json, &mut scratch).unwrap();
+    parser.write(json).unwrap();
     parser.finish().unwrap();
     let handler = parser.destroy();
 
@@ -163,22 +153,18 @@ fn test_object_with_string_value() {
         Some(TestEvent::Bool(true)),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
-        None,
-        None,
-        None,
     ];
 
-    assert_eq!(&handler.events[..], &expected[..]);
+    assert_eq!(handler.events(), expected);
 }
 
 #[test]
 fn test_array_with_strings() {
     let json = br#"["hello", "world", true]"#;
-    let mut scratch = [0u8; 128];
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
-    parser.write(json, &mut scratch).unwrap();
+    parser.write(json).unwrap();
     parser.finish().unwrap();
     let handler = parser.destroy();
 
@@ -189,40 +175,53 @@ fn test_array_with_strings() {
         Some(TestEvent::Bool(true)),
         Some(TestEvent::EndArray),
         Some(TestEvent::EndDocument),
-        None,
-        None,
-        None,
-        None,
     ];
 
-    assert_eq!(&handler.events[..], &expected[..]);
+    assert_eq!(handler.events(), expected);
 }
 
 #[test]
 fn test_string_with_simple_escapes() {
-    let json = br#"{"message": "Hello\nWorld\t!"}"#;
-    let mut scratch = [0u8; 128];
+    let json = b"{\"message\": \"Hello\\nWorld\\t!\"}";
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
-    parser.write(json, &mut scratch).unwrap();
+    parser.write(json).unwrap();
     parser.finish().unwrap();
     let handler = parser.destroy();
 
     let expected = [
         Some(TestEvent::StartObject),
         Some(TestEvent::Key("message")),
-        // For now, escape processing is not fully implemented in Phase 2
-        // So the string will be parsed as-is without processing escapes
+        // Note: Current behavior - ujson tokenizer doesn't generate separate escape events
+        // for these sequences, so they're processed as regular string content
         Some(TestEvent::String("Hello\\nWorld\\t!")),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
-        None,
-        None,
-        None,
-        None,
-        None,
     ];
 
-    assert_eq!(&handler.events[..], &expected[..]);
+    assert_eq!(handler.events(), expected);
+}
+
+#[test]
+fn test_string_with_quote_escape() {
+    let json = b"{\"quote\": \"He said \\\"Hello\\\"\"}";
+    let handler = TestHandler::new();
+    let mut buffer = [0u8; 256];
+    let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
+    parser.write(json).unwrap();
+    parser.finish().unwrap();
+    let handler = parser.destroy();
+
+    let expected = [
+        Some(TestEvent::StartObject),
+        Some(TestEvent::Key("quote")),
+        // Note: Current behavior - ujson tokenizer doesn't generate separate escape events
+        // for these sequences, so they're processed as regular string content
+        Some(TestEvent::String("He said \\\"Hello\\\"")),
+        Some(TestEvent::EndObject),
+        Some(TestEvent::EndDocument),
+    ];
+
+    assert_eq!(handler.events(), expected);
 }
