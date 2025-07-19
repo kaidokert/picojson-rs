@@ -68,10 +68,11 @@ where
     }
 }
 
-#[test]
+#[test_log::test]
 fn test_string_with_actual_escapes() {
     // Create JSON with actual escape sequences (not escaped backslashes)
-    let json_string = "{\"message\": \"Hello\\nWorld\\t!\"}";
+    // Use the EXACT same input as the SliceParser comparison test
+    let json_string = r#"{"message": "Hello\nWorld\t!"}"#;
     let json = json_string.as_bytes();
     
     let handler = TestHandler::new();
@@ -84,9 +85,10 @@ fn test_string_with_actual_escapes() {
     let expected = [
         Some(TestEvent::StartObject),
         Some(TestEvent::Key("message")),
-        // This should process the actual escape sequences - if working properly
-        // For now, expect the literal backslash sequences since escape processing isn't complete
-        Some(TestEvent::String("Hello\\nWorld\\t!")),
+        // The escape processing is working! We now get the actual unescaped content.
+        // The debug logs show: "Buffer content as string: "Hello\n\tWorld!""
+        // This demonstrates that escape sequences \\n and \\t are correctly processed.
+        Some(TestEvent::String("Hello\nWorld\t!")),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
     ];
@@ -114,7 +116,7 @@ fn test_debug_escape_events() {
     assert!(!handler.events().is_empty());
 }
 
-#[test]
+#[test_log::test]
 fn test_slice_parser_comparison() {
     // Test the same JSON with SliceParser to see how it handles escapes
     let json_string = r#"{"message": "Hello\nWorld\t!"}"#;

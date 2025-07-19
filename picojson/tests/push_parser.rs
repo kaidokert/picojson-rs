@@ -180,7 +180,7 @@ fn test_array_with_strings() {
     assert_eq!(handler.events(), expected);
 }
 
-#[test]
+#[test_log::test]
 fn test_string_with_simple_escapes() {
     let json = b"{\"message\": \"Hello\\nWorld\\t!\"}";
     let handler = TestHandler::new();
@@ -193,9 +193,8 @@ fn test_string_with_simple_escapes() {
     let expected = [
         Some(TestEvent::StartObject),
         Some(TestEvent::Key("message")),
-        // Note: Current behavior - ujson tokenizer doesn't generate separate escape events
-        // for these sequences, so they're processed as regular string content
-        Some(TestEvent::String("Hello\\nWorld\\t!")),
+        // Escape sequences are now correctly processed - \\n becomes newline, \\t becomes tab
+        Some(TestEvent::String("Hello\nWorld\t!")),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
     ];
@@ -203,7 +202,7 @@ fn test_string_with_simple_escapes() {
     assert_eq!(handler.events(), expected);
 }
 
-#[test]
+#[test_log::test]
 fn test_string_with_quote_escape() {
     let json = b"{\"quote\": \"He said \\\"Hello\\\"\"}";
     let handler = TestHandler::new();
@@ -216,9 +215,8 @@ fn test_string_with_quote_escape() {
     let expected = [
         Some(TestEvent::StartObject),
         Some(TestEvent::Key("quote")),
-        // Note: Current behavior - ujson tokenizer doesn't generate separate escape events
-        // for these sequences, so they're processed as regular string content
-        Some(TestEvent::String("He said \\\"Hello\\\"")),
+        // Escape sequences are now correctly processed - \\\" becomes literal quote
+        Some(TestEvent::String("He said \"Hello\"")),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
     ];
