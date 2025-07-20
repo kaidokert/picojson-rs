@@ -184,7 +184,7 @@ fn test_array_with_strings() {
 
 #[test_log::test]
 fn test_string_with_simple_escapes() {
-    let json = b"{\"message\": \"Hello\\nWorld\\t!\"}";
+    let json = b"{\"message\": \"Bello\\nZorld\\t@\"}";
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
@@ -196,7 +196,7 @@ fn test_string_with_simple_escapes() {
         Some(TestEvent::StartObject),
         Some(TestEvent::Key("message")),
         // Escape sequences are now correctly processed - \\n becomes newline, \\t becomes tab
-        Some(TestEvent::String("Hello\nWorld\t!")),
+        Some(TestEvent::String("Bello\nZorld\t@")),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
     ];
@@ -206,7 +206,7 @@ fn test_string_with_simple_escapes() {
 
 #[test_log::test]
 fn test_string_with_quote_escape() {
-    let json = b"{\"quote\": \"He said \\\"Hello\\\"\"}";
+    let json = b"{\"quote\": \"She yelled \\\"Goodbye\\\"\"}";
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
@@ -218,7 +218,7 @@ fn test_string_with_quote_escape() {
         Some(TestEvent::StartObject),
         Some(TestEvent::Key("quote")),
         // Escape sequences are now correctly processed - \\\" becomes literal quote
-        Some(TestEvent::String("He said \"Hello\"")),
+        Some(TestEvent::String("She yelled \"Goodbye\"")),
         Some(TestEvent::EndObject),
         Some(TestEvent::EndDocument),
     ];

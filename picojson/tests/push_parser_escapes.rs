@@ -78,8 +78,11 @@ fn test_string_with_actual_escapes() {
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
+    {
     parser.write(json).unwrap();
+    }{
     parser.finish().unwrap();
+    }
     let handler = parser.destroy();
 
     let expected = [
