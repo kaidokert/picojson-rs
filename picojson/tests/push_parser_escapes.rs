@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use picojson::String;
-use picojson::{DefaultConfig, Event, PushParser, PushParserHandler, PullParser};
+use picojson::{DefaultConfig, Event, PullParser, PushParser, PushParserHandler};
 
 // A simplified, lifetime-free version of the Event for testing purposes.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -37,7 +37,7 @@ impl<'a> TestHandler<'a> {
             self.idx += 1;
         }
     }
-    
+
     /// Returns a slice of the events that have been filled
     fn events(&self) -> &[Option<TestEvent<'a>>] {
         &self.events[..self.idx]
@@ -74,7 +74,7 @@ fn test_string_with_actual_escapes() {
     // Use the EXACT same input as the SliceParser comparison test
     let json_string = r#"{"message": "Hello\nWorld\t!"}"#;
     let json = json_string.as_bytes();
-    
+
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
@@ -102,7 +102,7 @@ fn test_debug_escape_events() {
     // Test with a simple quote escape to see if we get escape events
     let json_string = r#"{"test": "quote\"here"}"#;
     let json = json_string.as_bytes();
-    
+
     let handler = TestHandler::new();
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
@@ -111,7 +111,7 @@ fn test_debug_escape_events() {
     let handler = parser.destroy();
 
     println!("Debug escape events: {:?}", handler.events());
-    
+
     // For now, just check that it doesn't crash
     assert!(!handler.events().is_empty());
 }
@@ -122,7 +122,7 @@ fn test_slice_parser_comparison() {
     let json_string = r#"{"message": "Hello\nWorld\t!"}"#;
     let mut scratch = [0u8; 256];
     let mut parser = picojson::SliceParser::with_buffer(json_string, &mut scratch);
-    
+
     println!("SliceParser results:");
     while let Ok(event) = parser.next_event() {
         match event {
@@ -130,4 +130,59 @@ fn test_slice_parser_comparison() {
             _ => println!("  {:?}", event),
         }
     }
+}
+
+#[test_log::test]
+fn test_escaped_key_with_newline() {
+    // Test key with escape sequence - key "ke\ny" with value "value"
+    let json_string = r#"{"ke\ny": "value"}"#;
+    let json = json_string.as_bytes();
+
+    let handler = TestHandler::new();
+    let mut buffer = [0u8; 256];
+    let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
+    parser.write(json).unwrap();
+    parser.finish().unwrap();
+    let handler = parser.destroy();
+
+    let expected = [
+        Some(TestEvent::StartObject),
+        // Key with escape sequence should be processed correctly
+        Some(TestEvent::Key("ke\ny")),
+        Some(TestEvent::String("value")),
+        Some(TestEvent::EndObject),
+        Some(TestEvent::EndDocument),
+    ];
+
+    println!("Escaped key test - actual events: {:?}", handler.events());
+    assert_eq!(handler.events(), expected);
+}
+
+#[test_log::test]
+fn test_escaped_key_with_quote() {
+    // Test key with quote escape - key "quo\"te" with value "data"
+    let json_string = r#"{"quo\"te": "data"}"#;
+    let json = json_string.as_bytes();
+
+    let handler = TestHandler::new();
+    let mut buffer = [0u8; 256];
+    let mut parser = PushParser::<_, DefaultConfig, _>::new(handler, &mut buffer);
+    parser.write(json).unwrap();
+    parser.finish().unwrap();
+    let handler = parser.destroy();
+
+    let expected = [
+        Some(TestEvent::StartObject),
+        // Key with quote escape should be processed correctly
+        Some(TestEvent::Key("quo\"te")),
+        Some(TestEvent::String("data")),
+        Some(TestEvent::EndObject),
+        Some(TestEvent::EndDocument),
+    ];
+
+    println!(
+        "Escaped key quote test - actual events: {:?}",
+        handler.events()
+    );
+    assert_eq!(handler.events(), expected);
 }

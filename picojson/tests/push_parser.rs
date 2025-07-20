@@ -37,7 +37,7 @@ impl<'a> TestHandler<'a> {
             self.idx += 1;
         }
     }
-    
+
     /// Returns a slice of the events that have been filled
     fn events(&self) -> &[Option<TestEvent<'a>>] {
         &self.events[..self.idx]
@@ -61,6 +61,8 @@ where
             Event::Key(String::Unescaped(k)) => TestEvent::Key(k),
             Event::String(String::Borrowed(s)) => TestEvent::String(s),
             Event::String(String::Unescaped(s)) => TestEvent::String(s),
+            // TODO: Number handling disabled for now
+            // Event::Number(json_number) => { ... }
             _ => return Ok(()), // Ignore other events for now
         };
         self.add_event(test_event);

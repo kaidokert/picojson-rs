@@ -288,7 +288,9 @@ impl<'a> StreamBuffer<'a> {
 
     /// Get the current buffer slice available for tokenizing
     pub fn get_tokenize_slice(&self) -> &[u8] {
-        self.buffer.get(self.tokenize_pos..self.data_end).unwrap_or(&[])
+        self.buffer
+            .get(self.tokenize_pos..self.data_end)
+            .unwrap_or(&[])
     }
 }
 
@@ -945,91 +947,91 @@ mod tests {
     fn test_deferred_clear_pattern() {
         let mut buffer = [0u8; 10];
         let mut db = StreamBuffer::new(&mut buffer);
-        
+
         // Add some unescaped content
         db.unescaped_len = 5;
         db.buffer[0..5].copy_from_slice(b"hello");
-        
+
         // Verify content is there
         assert!(db.has_unescaped_content());
         assert_eq!(db.unescaped_len, 5);
         assert_eq!(db.get_unescaped_slice().unwrap(), b"hello");
-        
+
         // Queue a clear
         db.queue_unescaped_reset();
-        
+
         // Content should still be there (clear is queued, not applied)
         assert!(db.has_unescaped_content());
         assert_eq!(db.unescaped_len, 5);
         assert_eq!(db.get_unescaped_slice().unwrap(), b"hello");
-        
+
         // Apply the queued clear
         db.apply_unescaped_reset_if_queued();
-        
+
         // Content should now be cleared
         assert!(!db.has_unescaped_content());
         assert_eq!(db.unescaped_len, 0);
         assert!(db.get_unescaped_slice().is_err());
     }
-    
+
     #[test]
     fn test_apply_unescaped_reset_when_not_queued() {
         let mut buffer = [0u8; 10];
         let mut db = StreamBuffer::new(&mut buffer);
-        
+
         // Add some unescaped content
         db.unescaped_len = 3;
         db.buffer[0..3].copy_from_slice(b"abc");
-        
+
         // Apply reset when not queued - should do nothing
         db.apply_unescaped_reset_if_queued();
-        
+
         // Content should still be there
         assert!(db.has_unescaped_content());
         assert_eq!(db.unescaped_len, 3);
         assert_eq!(db.get_unescaped_slice().unwrap(), b"abc");
     }
-    
+
     #[test]
     fn test_clear_unescaped_resets_queued_flag() {
         let mut buffer = [0u8; 10];
         let mut db = StreamBuffer::new(&mut buffer);
-        
+
         // Add some unescaped content and queue a clear
         db.unescaped_len = 4;
         db.buffer[0..4].copy_from_slice(b"test");
         db.queue_unescaped_reset();
-        
+
         // Verify setup
         assert!(db.has_unescaped_content());
         assert_eq!(db.unescaped_clear_queued, true);
-        
+
         // Call clear_unescaped - should reset both content and queued flag
         db.clear_unescaped();
-        
+
         // Both should be reset
         assert!(!db.has_unescaped_content());
         assert_eq!(db.unescaped_len, 0);
         assert_eq!(db.unescaped_clear_queued, false);
     }
-    
+
     #[test]
     fn test_queue_multiple_times() {
         let mut buffer = [0u8; 10];
         let mut db = StreamBuffer::new(&mut buffer);
-        
+
         // Add some unescaped content
         db.unescaped_len = 4;
         db.buffer[0..4].copy_from_slice(b"test");
-        
+
         // Queue multiple times
         db.queue_unescaped_reset();
         db.queue_unescaped_reset();
         db.queue_unescaped_reset();
-        
+
         // Should still work correctly
         db.apply_unescaped_reset_if_queued();
-        
+
         // Content should be cleared
         assert!(!db.has_unescaped_content());
         assert_eq!(db.unescaped_len, 0);
