@@ -18,6 +18,12 @@ enum ParserState {
     ParsingNumber,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EscapeState {
+    None,
+    InEscapeSequence,
+}
+
 /// A trait for handling events from a SAX-style push parser.
 pub trait PushParserHandler<'input, 'scratch, E> {
     /// Handles a single, complete JSON event.
@@ -34,6 +40,8 @@ where
     core: ParserCore<C::Bucket, C::Counter>,
     unicode_escape_collector: UnicodeEscapeCollector,
     state: ParserState,
+    escape_state: EscapeState,
+    position_offset: usize,
 }
 
 impl<'scratch, H, C> PushParser<'scratch, H, C>
@@ -48,6 +56,8 @@ where
             core: ParserCore::new(),
             unicode_escape_collector: UnicodeEscapeCollector::new(),
             state: ParserState::Idle,
+            escape_state: EscapeState::None,
+            position_offset: 0,
         }
     }
 
@@ -58,12 +68,12 @@ where
     {
         let mut event_storage: [Option<(ujson::Event, usize)>; 2] = [None, None];
 
-        for (_pos, &byte) in data.iter().enumerate() {
+        for (local_pos, &byte) in data.iter().enumerate() {
             let mut append_byte = true;
 
             // Tokenizer generates events that drive state transitions.
             {
-                let mut callback = create_tokenizer_callback(&mut event_storage);
+                let mut callback = create_tokenizer_callback(&mut event_storage, self.position_offset + local_pos);
                 self.core.tokenizer.parse_chunk(&[byte], &mut callback)?;
             }
 
@@ -75,8 +85,8 @@ where
                 }
             }
 
-            // Append the raw byte if we are in a content-parsing state.
-            if append_byte {
+            // Append the raw byte if we are in a content-parsing state and not in an escape sequence.
+            if append_byte && self.escape_state == EscapeState::None {
                 match self.state {
                     ParserState::ParsingString | ParserState::ParsingKey | ParserState::ParsingNumber => {
                         self.stream_buffer.append_unescaped_byte(byte)?;
@@ -85,6 +95,9 @@ where
                 }
             }
         }
+
+        // Update position offset for next call
+        self.position_offset += data.len();
 
         Ok(())
     }
@@ -216,20 +229,46 @@ where
     {
         match event {
             ujson::Event::Begin(ujson::EventToken::EscapeSequence) => {
-                // This marks the beginning of an escape, but we handle the specific escapes below
+                // This marks the beginning of an escape sequence - suppress raw byte appending
+                self.escape_state = EscapeState::InEscapeSequence;
             }
-            ujson::Event::End(ujson::EventToken::EscapeQuote) => self.stream_buffer.append_unescaped_byte(b'"')?,
-            ujson::Event::End(ujson::EventToken::EscapeBackslash) => self.stream_buffer.append_unescaped_byte(b'\\')?,
-            ujson::Event::End(ujson::EventToken::EscapeSlash) => self.stream_buffer.append_unescaped_byte(b'\\')?,
-            ujson::Event::End(ujson::EventToken::EscapeBackspace) => self.stream_buffer.append_unescaped_byte(b'\x08')?,
-            ujson::Event::End(ujson::EventToken::EscapeFormFeed) => self.stream_buffer.append_unescaped_byte(b'\x0C')?,
-            ujson::Event::End(ujson::EventToken::EscapeNewline) => self.stream_buffer.append_unescaped_byte(b'\n')?,
-            ujson::Event::End(ujson::EventToken::EscapeCarriageReturn) => self.stream_buffer.append_unescaped_byte(b'\r')?,
-            ujson::Event::End(ujson::EventToken::EscapeTab) => self.stream_buffer.append_unescaped_byte(b'\t')?,
+            ujson::Event::End(ujson::EventToken::EscapeQuote) => {
+                self.stream_buffer.append_unescaped_byte(b'"')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeBackslash) => {
+                self.stream_buffer.append_unescaped_byte(b'\\')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeSlash) => {
+                self.stream_buffer.append_unescaped_byte(b'\\')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeBackspace) => {
+                self.stream_buffer.append_unescaped_byte(b'\x08')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeFormFeed) => {
+                self.stream_buffer.append_unescaped_byte(b'\x0C')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeNewline) => {
+                self.stream_buffer.append_unescaped_byte(b'\n')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeCarriageReturn) => {
+                self.stream_buffer.append_unescaped_byte(b'\r')?;
+                self.escape_state = EscapeState::None;
+            }
+            ujson::Event::End(ujson::EventToken::EscapeTab) => {
+                self.stream_buffer.append_unescaped_byte(b'\t')?;
+                self.escape_state = EscapeState::None;
+            }
             ujson::Event::End(ujson::EventToken::UnicodeEscape) => {
-                if pos >= 5 {
-                    let hex_slice = &data[pos.saturating_sub(5)..pos + 1];
-                    let hex_provider = |_, _| Ok(hex_slice);
+                if pos >= 3 {
+                    // Extract just the 4 hex digits (0041 from \u0041)
+                    let hex_slice = &data[pos.saturating_sub(3)..pos + 1];
+                    let hex_provider = |_start: usize, _end: usize| Ok(hex_slice);
                     let (utf8_bytes, _) =
                         process_unicode_escape_sequence(pos, &mut self.unicode_escape_collector, hex_provider)?;
                     if let Some((bytes, len)) = utf8_bytes {
@@ -238,6 +277,7 @@ where
                         }
                     }
                 }
+                self.escape_state = EscapeState::None;
             }
             _ => {}
         }
@@ -280,11 +320,12 @@ impl<E> From<core::str::Utf8Error> for PushParseError<E> {
 
 fn create_tokenizer_callback(
     event_storage: &mut [Option<(ujson::Event, usize)>; 2],
+    position_offset: usize,
 ) -> impl FnMut(ujson::Event, usize) + '_ {
-    |event, pos| {
+    move |event, _pos| {
         for evt in event_storage.iter_mut() {
             if evt.is_none() {
-                *evt = Some((event, pos));
+                *evt = Some((event, position_offset));
                 return;
             }
         }
