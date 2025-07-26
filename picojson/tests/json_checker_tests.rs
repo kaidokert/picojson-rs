@@ -39,7 +39,6 @@ mod json_checker_tests {
     // Test handler for PushParser conformance tests
     struct ConformanceTestHandler {
         event_count: usize,
-        error: Option<String>,
     }
 
     impl<'a, 'b> PushParserHandler<'a, 'b, String> for ConformanceTestHandler {
@@ -53,7 +52,6 @@ mod json_checker_tests {
         let mut buffer = [0u8; 2048]; // Larger buffer for pass1.json
         let handler = ConformanceTestHandler {
             event_count: 0,
-            error: None,
         };
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 

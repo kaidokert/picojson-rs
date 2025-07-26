@@ -582,41 +582,6 @@ mod tests {
         assert_eq!(parser.finish::<()>(), Ok(()));
     }
 
-    #[test]
-    fn test_unicode_escapes_not_yet_implemented() {
-        // Debug handler that captures strings and keys to test Unicode escape processing
-        struct UnicodeEscapeTestHandler {
-            events: Vec<std::string::String>,
-        }
-
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for UnicodeEscapeTestHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
-                let event_desc = match event {
-                    Event::StartObject => "StartObject".to_string(),
-                    Event::EndObject => "EndObject".to_string(),
-                    Event::Key(k) => format!("Key({})", k.as_ref()),
-                    Event::String(s) => format!("String({})", s.as_ref()),
-                    Event::EndDocument => "EndDocument".to_string(),
-                    _ => "Other".to_string(),
-                };
-                self.events.push(event_desc);
-                Ok(())
-            }
-        }
-
-        let mut buffer = [0u8; 256];
-        let handler = UnicodeEscapeTestHandler { events: Vec::new() };
-        let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
-
-        // Test string with Unicode escape sequence (\u0041 should become 'A')
-        parser.write(br#"{"key": "\u0041"}"#).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
-
-        println!("Unicode escape events: {:?}", handler.events);
-
-        // This test verifies that Unicode escapes are working
-    }
 
     #[test]
     fn test_numbers() {

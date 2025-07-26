@@ -139,11 +139,11 @@ where
                                                         }
                                                     }
                                                 }
-                                                Err(_e) => {}
+                                                Err(e) => return Err(e.into()),
                                             }
                                         }
                                     }
-                                    Err(_e) => {}
+                                    Err(e) => return Err(e.into()),
                                 }
                             }
                             _ => {}
@@ -175,14 +175,23 @@ where
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
     {
-        // Handle any remaining content in the buffer
-        if self.state == ParserState::ParsingNumber {
-            let s = self.stream_buffer.get_unescaped_slice()?;
-            let num = JsonNumber::from_slice(s)?;
-            self.handler
-                .handle_event(Event::Number(num))
-                .map_err(PushParseError::Handler)?;
-            self.stream_buffer.clear_unescaped();
+        // Handle any remaining content in the buffer and check for incomplete parsing
+        match self.state {
+            ParserState::ParsingNumber => {
+                let s = self.stream_buffer.get_unescaped_slice()?;
+                let num = JsonNumber::from_slice(s)?;
+                self.handler
+                    .handle_event(Event::Number(num))
+                    .map_err(PushParseError::Handler)?;
+                self.stream_buffer.clear_unescaped();
+            }
+            ParserState::ParsingString => {
+                return Err(PushParseError::Parse(ParseError::EndOfData));
+            }
+            ParserState::ParsingKey => {
+                return Err(PushParseError::Parse(ParseError::EndOfData));
+            }
+            ParserState::Idle => {}
         }
 
         // Check that the JSON document is complete (all containers closed)
@@ -528,11 +537,11 @@ where
                                                 }
                                             }
                                         }
-                                        Err(_e) => {}
+                                        Err(e) => return Err(e.into()),
                                     }
                                 }
                             }
-                            Err(_e) => {}
+                            Err(e) => return Err(e.into()),
                         }
                     }
                 }
@@ -630,10 +639,10 @@ fn create_tokenizer_callback(
     event_storage: &mut [Option<(ujson::Event, usize)>; 2],
     position_offset: usize,
 ) -> impl FnMut(ujson::Event, usize) + '_ {
-    move |event, _pos| {
+    move |event, pos| {
         for evt in event_storage.iter_mut() {
             if evt.is_none() {
-                *evt = Some((event, position_offset));
+                *evt = Some((event, position_offset + pos));
                 return;
             }
         }

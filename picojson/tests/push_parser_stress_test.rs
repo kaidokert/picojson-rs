@@ -9,15 +9,30 @@ use picojson::{
     DefaultConfig, Event, JsonNumber, NumberResult, PushParseError, PushParser, PushParserHandler,
 };
 
+/// Owned event representation for comparison
+#[derive(Debug, Clone, PartialEq)]
+enum OwnedEvent {
+    StartObject,
+    EndObject,
+    StartArray,
+    EndArray,
+    Key(String),
+    String(String),
+    Number(String),
+    Bool(bool),
+    Null,
+    EndDocument,
+}
+
 /// Handler that collects events for verification during stress testing
-struct StressTestHandler<'expected> {
-    events: Vec<Event<'static, 'static>>,
-    expected_events: &'expected [Event<'static, 'static>],
+struct StressTestHandler {
+    events: Vec<OwnedEvent>,
+    expected_events: Vec<OwnedEvent>,
     current_index: usize,
 }
 
-impl<'expected> StressTestHandler<'expected> {
-    fn new(expected_events: &'expected [Event<'static, 'static>]) -> Self {
+impl StressTestHandler {
+    fn new(expected_events: Vec<OwnedEvent>) -> Self {
         Self {
             events: Vec::new(),
             expected_events,
@@ -40,7 +55,7 @@ impl<'expected> StressTestHandler<'expected> {
             .zip(self.expected_events.iter())
             .enumerate()
         {
-            if !events_equal(actual, expected) {
+            if actual != expected {
                 return Err(format!(
                     "Event {} mismatch: expected {:?}, got {:?}",
                     i, expected, actual
@@ -52,30 +67,22 @@ impl<'expected> StressTestHandler<'expected> {
     }
 }
 
-impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, String>
-    for StressTestHandler<'expected>
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String>
+    for StressTestHandler
 {
     fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), String> {
         // Convert to owned event for storage
         let owned_event = match event {
-            Event::StartObject => Event::StartObject,
-            Event::EndObject => Event::EndObject,
-            Event::StartArray => Event::StartArray,
-            Event::EndArray => Event::EndArray,
-            Event::Key(k) => Event::Key(picojson::String::Borrowed(k.as_ref().to_string().leak())),
-            Event::String(s) => {
-                Event::String(picojson::String::Borrowed(s.as_ref().to_string().leak()))
-            }
-            Event::Number(n) => Event::Number(JsonNumber::Borrowed {
-                raw: n.as_str().to_string().leak(),
-                parsed: n
-                    .as_int()
-                    .map(NumberResult::Integer)
-                    .unwrap_or(NumberResult::IntegerOverflow),
-            }),
-            Event::Bool(b) => Event::Bool(b),
-            Event::Null => Event::Null,
-            Event::EndDocument => Event::EndDocument,
+            Event::StartObject => OwnedEvent::StartObject,
+            Event::EndObject => OwnedEvent::EndObject,
+            Event::StartArray => OwnedEvent::StartArray,
+            Event::EndArray => OwnedEvent::EndArray,
+            Event::Key(k) => OwnedEvent::Key(k.as_ref().to_string()),
+            Event::String(s) => OwnedEvent::String(s.as_ref().to_string()),
+            Event::Number(n) => OwnedEvent::Number(n.as_str().to_string()),
+            Event::Bool(b) => OwnedEvent::Bool(b),
+            Event::Null => OwnedEvent::Null,
+            Event::EndDocument => OwnedEvent::EndDocument,
         };
 
         self.events.push(owned_event);
@@ -84,20 +91,21 @@ impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, String>
     }
 }
 
-/// Compare events for equality, handling lifetime differences
-fn events_equal(a: &Event, b: &Event) -> bool {
-    match (a, b) {
-        (Event::StartObject, Event::StartObject) => true,
-        (Event::EndObject, Event::EndObject) => true,
-        (Event::StartArray, Event::StartArray) => true,
-        (Event::EndArray, Event::EndArray) => true,
-        (Event::Key(k1), Event::Key(k2)) => k1.as_ref() == k2.as_ref(),
-        (Event::String(s1), Event::String(s2)) => s1.as_ref() == s2.as_ref(),
-        (Event::Number(n1), Event::Number(n2)) => n1.as_str() == n2.as_str(),
-        (Event::Bool(b1), Event::Bool(b2)) => b1 == b2,
-        (Event::Null, Event::Null) => true,
-        (Event::EndDocument, Event::EndDocument) => true,
-        _ => false,
+impl OwnedEvent {
+    /// Convert from Event to OwnedEvent
+    fn from_event(event: &Event) -> Self {
+        match event {
+            Event::StartObject => OwnedEvent::StartObject,
+            Event::EndObject => OwnedEvent::EndObject,
+            Event::StartArray => OwnedEvent::StartArray,
+            Event::EndArray => OwnedEvent::EndArray,
+            Event::Key(k) => OwnedEvent::Key(k.as_ref().to_string()),
+            Event::String(s) => OwnedEvent::String(s.as_ref().to_string()),
+            Event::Number(n) => OwnedEvent::Number(n.as_str().to_string()),
+            Event::Bool(b) => OwnedEvent::Bool(*b),
+            Event::Null => OwnedEvent::Null,
+            Event::EndDocument => OwnedEvent::EndDocument,
+        }
     }
 }
 
@@ -299,7 +307,7 @@ fn test_push_parsing_with_config(
     chunk_pattern: &[usize],
 ) -> Result<(), String> {
     let mut buffer = vec![0u8; buffer_size];
-    let handler = StressTestHandler::new(&scenario.expected_events);
+    let handler = StressTestHandler::new(scenario.expected_events.iter().map(OwnedEvent::from_event).collect());
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     let mut writer = ChunkedWriter::new(scenario.json, chunk_pattern);
@@ -539,7 +547,7 @@ fn test_push_parser_stress_document_validation() {
 
         for &pattern in chunk_patterns {
             let mut buffer = vec![0u8; buffer_size];
-            let handler = StressTestHandler::new(&[]);
+            let handler = StressTestHandler::new(vec![]);
             let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
             let mut writer = ChunkedWriter::new(json, pattern);
 
