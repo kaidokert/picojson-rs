@@ -11,8 +11,12 @@ use crate::ujson;
 pub enum ParseError {
     /// An error bubbled up from the underlying tokenizer.
     TokenizerError(ujson::Error),
-    /// The provided scratch buffer was not large enough for an operation.
+    /// A UTF-8 error occurred.
+    Utf8(core::str::Utf8Error),
+    /// The scratch buffer is full.
     ScratchBufferFull,
+    /// The input buffer is full.
+    InputBufferFull,
     /// A string slice was not valid UTF-8.
     InvalidUtf8(core::str::Utf8Error),
     /// A number string could not be parsed.
@@ -70,6 +74,12 @@ impl From<core::str::Utf8Error> for ParseError {
 impl From<UnexpectedState> for ParseError {
     fn from(info: UnexpectedState) -> Self {
         ParseError::Unexpected(info)
+    }
+}
+
+impl From<ujson::Error> for ParseError {
+    fn from(err: ujson::Error) -> Self {
+        ParseError::TokenizerError(err)
     }
 }
 

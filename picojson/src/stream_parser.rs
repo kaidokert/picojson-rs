@@ -756,6 +756,7 @@ mod tests {
                     #[cfg(feature = "float")]
                     NumberResult::Float(f) => {
                         // This is expected in float-enabled build
+                        #[allow(clippy::approx_constant)]
                         assert!((f - 3.14).abs() < 0.01);
                     }
                     #[cfg(feature = "float-skip")]
