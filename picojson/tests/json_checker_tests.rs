@@ -61,8 +61,8 @@ mod json_checker_tests {
                 return Err(match e {
                     PushParseError::Parse(parse_err) => parse_err,
                     PushParseError::Handler(_handler_err) => {
-                        // Convert handler error to a parse error for consistency
-                        ParseError::InvalidNumber // Use any available ParseError variant
+                        // Handler error - use ReaderError as it represents external error
+                        ParseError::ReaderError
                     }
                 });
             }
@@ -74,7 +74,8 @@ mod json_checker_tests {
                 return Err(match e {
                     PushParseError::Parse(parse_err) => parse_err,
                     PushParseError::Handler(_handler_err) => {
-                        ParseError::InvalidNumber // Use any available ParseError variant
+                        // Handler error - use ReaderError as it represents external error
+                        ParseError::ReaderError
                     }
                 });
             }
@@ -165,8 +166,28 @@ mod json_checker_tests {
             let mut parser = SliceParser::with_buffer(unicode_sequence, &mut buffer);
 
             match parser.next_event() {
-                Ok(Event::String(s)) => {}
-                Ok(other) => {}
+                Ok(Event::String(s)) => {
+                    let parsed_content = s.as_ref();
+                    // Verify that unicode escapes are properly decoded
+                    assert!(parsed_content.contains('\u{CAFE}'), "Should contain \\uCAFE decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{BABE}'), "Should contain \\uBABE decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{AB98}'), "Should contain \\uAB98 decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{FCDE}'), "Should contain \\uFCDE decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{bcda}'), "Should contain \\ubcda decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{ef4A}'), "Should contain \\uef4A decoded as Unicode character");
+                    // Verify that other escape sequences are also processed
+                    assert!(parsed_content.contains('/'), "Should contain / from \\/ escape");
+                    assert!(parsed_content.contains('\\'), "Should contain \\ from \\\\ escape");
+                    assert!(parsed_content.contains('"'), "Should contain \" from \\\" escape");
+                    assert!(parsed_content.contains('\u{08}'), "Should contain backspace from \\b escape");
+                    assert!(parsed_content.contains('\u{0C}'), "Should contain form feed from \\f escape");
+                    assert!(parsed_content.contains('\n'), "Should contain newline from \\n escape");
+                    assert!(parsed_content.contains('\r'), "Should contain carriage return from \\r escape");
+                    assert!(parsed_content.contains('\t'), "Should contain tab from \\t escape");
+                }
+                Ok(other) => {
+                    panic!("Expected String event, got: {:?}", other);
+                }
                 Err(e) => {
                     panic!(
                         "SliceParser should handle this sequence, got error: {:?}",
@@ -249,8 +270,28 @@ mod json_checker_tests {
             let mut parser = StreamParser::<_, DefaultConfig>::new(reader, &mut buffer);
 
             match parser.next_event() {
-                Ok(Event::String(s)) => {}
-                Ok(other) => {}
+                Ok(Event::String(s)) => {
+                    let parsed_content = s.as_ref();
+                    // Verify that unicode escapes are properly decoded
+                    assert!(parsed_content.contains('\u{CAFE}'), "Should contain \\uCAFE decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{BABE}'), "Should contain \\uBABE decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{AB98}'), "Should contain \\uAB98 decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{FCDE}'), "Should contain \\uFCDE decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{bcda}'), "Should contain \\ubcda decoded as Unicode character");
+                    assert!(parsed_content.contains('\u{ef4A}'), "Should contain \\uef4A decoded as Unicode character");
+                    // Verify that other escape sequences are also processed
+                    assert!(parsed_content.contains('/'), "Should contain / from \\/ escape");
+                    assert!(parsed_content.contains('\\'), "Should contain \\ from \\\\ escape");
+                    assert!(parsed_content.contains('"'), "Should contain \" from \\\" escape");
+                    assert!(parsed_content.contains('\u{08}'), "Should contain backspace from \\b escape");
+                    assert!(parsed_content.contains('\u{0C}'), "Should contain form feed from \\f escape");
+                    assert!(parsed_content.contains('\n'), "Should contain newline from \\n escape");
+                    assert!(parsed_content.contains('\r'), "Should contain carriage return from \\r escape");
+                    assert!(parsed_content.contains('\t'), "Should contain tab from \\t escape");
+                }
+                Ok(other) => {
+                    panic!("Expected String event, got: {:?}", other);
+                }
                 Err(e) => {
                     panic!(
                         "StreamParser should handle this sequence, got error: {:?}",

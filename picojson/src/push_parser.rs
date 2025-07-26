@@ -73,8 +73,13 @@ where
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
     {
+        // Event storage for tokenizer output. Fixed size of 2 events is by design:
+        // the tokenizer never returns more than 2 events per input byte. This is a 
+        // fundamental limit that all parsers in this codebase use.
         let mut event_storage: [Option<(ujson::Event, usize)>; 2] = [None, None];
 
+        // TODO: Consider optimizing byte-by-byte processing for better performance
+        // Currently processes one byte at a time which may be suboptimal for large inputs
         for (local_pos, &byte) in data.iter().enumerate() {
             // Update current position to absolute position
             self.current_position = self.position_offset + local_pos;
@@ -637,12 +642,15 @@ impl<E> From<core::str::Utf8Error> for PushParseError<E> {
 
 fn create_tokenizer_callback(
     event_storage: &mut [Option<(ujson::Event, usize)>; 2],
-    position_offset: usize,
+    base_position: usize,
 ) -> impl FnMut(ujson::Event, usize) + '_ {
-    move |event, pos| {
+    move |event, relative_pos| {
         for evt in event_storage.iter_mut() {
             if evt.is_none() {
-                *evt = Some((event, position_offset + pos));
+                // Convert relative position from tokenizer to absolute position
+                // base_position is the absolute position where this chunk starts
+                // relative_pos is the position within this chunk (0 for single-byte processing)
+                *evt = Some((event, base_position + relative_pos));
                 return;
             }
         }
