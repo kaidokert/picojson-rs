@@ -11,10 +11,12 @@ use crate::ujson;
 pub enum ParseError {
     /// An error bubbled up from the underlying tokenizer.
     TokenizerError(ujson::Error),
-    /// The provided scratch buffer was not large enough for an operation.
+    /// A UTF-8 error occurred.
+    Utf8(core::str::Utf8Error),
+    /// The scratch buffer is full.
     ScratchBufferFull,
-    /// A string slice was not valid UTF-8.
-    InvalidUtf8(core::str::Utf8Error),
+    /// The input buffer is full.
+    InputBufferFull,
     /// A number string could not be parsed.
     InvalidNumber,
     /// The parser entered an unexpected internal state.
@@ -63,7 +65,7 @@ impl From<stream_buffer::StreamBufferError> for ParseError {
 
 impl From<core::str::Utf8Error> for ParseError {
     fn from(err: core::str::Utf8Error) -> Self {
-        ParseError::InvalidUtf8(err)
+        ParseError::Utf8(err)
     }
 }
 
@@ -73,11 +75,17 @@ impl From<UnexpectedState> for ParseError {
     }
 }
 
+impl From<ujson::Error> for ParseError {
+    fn from(err: ujson::Error) -> Self {
+        ParseError::TokenizerError(err)
+    }
+}
+
 impl core::fmt::Display for ParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ParseError::TokenizerError(e) => write!(f, "{e}"),
-            ParseError::InvalidUtf8(e) => write!(f, "Invalid UTF-8: {e}"),
+            ParseError::Utf8(e) => write!(f, "Invalid UTF-8: {e}"),
             _ => write!(f, "{self:?}"),
         }
     }
@@ -131,10 +139,10 @@ mod tests {
             Err(utf8_error) => {
                 let parse_error: ParseError = utf8_error.into();
                 match parse_error {
-                    ParseError::InvalidUtf8(_) => {
+                    ParseError::Utf8(_) => {
                         // Expected - conversion works correctly
                     }
-                    _ => panic!("Expected InvalidUtf8 error"),
+                    _ => panic!("Expected Utf8 error"),
                 }
             }
             Ok(_) => panic!("Expected UTF-8 validation to fail"),
