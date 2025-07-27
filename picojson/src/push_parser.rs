@@ -434,7 +434,10 @@ where
 
                 // Process the collected unicode escape to UTF-8
                 let mut utf8_buffer = [0u8; 4];
-                match self.unicode_escape_collector.process_to_utf8(&mut utf8_buffer) {
+                match self
+                    .unicode_escape_collector
+                    .process_to_utf8(&mut utf8_buffer)
+                {
                     Ok((utf8_bytes, _)) => {
                         if let Some(bytes) = utf8_bytes {
                             for &b in bytes {
@@ -470,8 +473,8 @@ where
             if end_pos > start_pos {
                 self.using_unescaped_buffer = true;
                 self.stream_buffer.clear_unescaped();
-                let initial_part = &data
-                    [(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                let initial_part =
+                    &data[(start_pos - self.position_offset)..(end_pos - self.position_offset)];
                 for &byte in initial_part {
                     self.stream_buffer.append_unescaped_byte(byte)?;
                 }
@@ -496,8 +499,8 @@ where
             let start_pos = self.token_start_pos + 1;
             let end_pos = self.current_position;
             if end_pos > start_pos {
-                let initial_part = &data
-                    [(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                let initial_part =
+                    &data[(start_pos - self.position_offset)..(end_pos - self.position_offset)];
                 for &byte in initial_part {
                     self.stream_buffer.append_unescaped_byte(byte)?;
                 }
@@ -543,7 +546,6 @@ where
             Ok("")
         }
     }
-
 }
 
 /// An error that can occur during push-based parsing.

@@ -164,7 +164,7 @@ fn test_reproduce_invalidslicebounds_exact_pass1() {
         Err(e) => {
             #[cfg(feature = "float")]
             panic!("WRITE ERROR: {:?}", e);
-            
+
             #[cfg(not(feature = "float"))]
             {
                 // pass1.json contains floats, so when float feature is disabled, it should fail

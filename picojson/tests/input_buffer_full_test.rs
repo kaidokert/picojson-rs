@@ -29,10 +29,10 @@ impl picojson::Reader for LargeDataReader {
 
         let remaining = self.data.len() - self.position;
         let to_read = std::cmp::min(std::cmp::min(buf.len(), self.chunk_size), remaining);
-        
+
         buf[..to_read].copy_from_slice(&self.data[self.position..self.position + to_read]);
         self.position += to_read;
-        
+
         Ok(to_read)
     }
 }
@@ -44,13 +44,13 @@ fn test_input_buffer_full_scenario() {
         r#"{{"key": "{}"}}"#,
         "x".repeat(10000) // Very long string value
     );
-    
+
     // Use a very small buffer that would be insufficient for the large content
     let mut buffer = [0u8; 32]; // Intentionally small buffer
     let reader = LargeDataReader::new(&large_object, 16); // Small read chunks
-    
+
     let mut parser = StreamParser::new(reader, &mut buffer);
-    
+
     // Attempt to parse the large document with insufficient buffer space
     let mut events = Vec::new();
     loop {
@@ -63,7 +63,7 @@ fn test_input_buffer_full_scenario() {
             }
             Err(e) => {
                 println!("Parser error: {:?}", e);
-                
+
                 // Currently, this will likely result in ScratchBufferFull rather than InputBufferFull
                 // because InputBufferFull is not implemented
                 match e {
@@ -73,7 +73,9 @@ fn test_input_buffer_full_scenario() {
                         return;
                     }
                     ParseError::InputBufferFull => {
-                        println!("Got InputBufferFull (this would be the ideal error for this scenario)");
+                        println!(
+                            "Got InputBufferFull (this would be the ideal error for this scenario)"
+                        );
                         // This would be the desired behavior if InputBufferFull were implemented
                         return;
                     }
@@ -84,23 +86,28 @@ fn test_input_buffer_full_scenario() {
             }
         }
     }
-    
+
     // If we reach here, the parser somehow managed to handle the large document
-    println!("Parser successfully handled large document with small buffer");
-    println!("Events: {:?}", events);
+    // This is unexpected behavior that should cause the test to fail
+    panic!(
+        "Test should have failed: Parser unexpectedly succeeded in handling large document with small buffer. \
+        Expected ScratchBufferFull or InputBufferFull error, but got {} events: {:?}",
+        events.len(),
+        events
+    );
 }
 
-#[test] 
+#[test]
 fn test_input_buffer_full_with_extremely_long_token() {
     // Test with an extremely long single token that exceeds reasonable input buffer limits
     let extremely_long_key = "k".repeat(50000);
     let json = format!(r#"{{"{key}": "value"}}"#, key = extremely_long_key);
-    
+
     let mut buffer = [0u8; 64]; // Very small buffer
     let reader = LargeDataReader::new(&json, 32);
-    
+
     let mut parser = StreamParser::new(reader, &mut buffer);
-    
+
     match parser.next_event() {
         Ok(_) => {
             // Continue parsing to see what happens
@@ -111,37 +118,33 @@ fn test_input_buffer_full_with_extremely_long_token() {
                             break;
                         }
                     }
-                    Err(e) => {
-                        match e {
-                            ParseError::ScratchBufferFull => {
-                                println!("Got ScratchBufferFull for extremely long token");
-                                return;
-                            }
-                            ParseError::InputBufferFull => {
-                                println!("Got InputBufferFull for extremely long token");
-                                return;
-                            }
-                            _ => {
-                                println!("Got other error for extremely long token: {:?}", e);
-                                return;
-                            }
+                    Err(e) => match e {
+                        ParseError::ScratchBufferFull => {
+                            println!("Got ScratchBufferFull for extremely long token");
+                            return;
                         }
-                    }
+                        ParseError::InputBufferFull => {
+                            println!("Got InputBufferFull for extremely long token");
+                            return;
+                        }
+                        _ => {
+                            println!("Got other error for extremely long token: {:?}", e);
+                            return;
+                        }
+                    },
                 }
             }
         }
-        Err(e) => {
-            match e {
-                ParseError::ScratchBufferFull => {
-                    println!("Got ScratchBufferFull on first event for extremely long token");
-                }
-                ParseError::InputBufferFull => {
-                    println!("Got InputBufferFull on first event for extremely long token");
-                }
-                _ => {
-                    println!("Got other error on first event: {:?}", e);
-                }
+        Err(e) => match e {
+            ParseError::ScratchBufferFull => {
+                println!("Got ScratchBufferFull on first event for extremely long token");
             }
-        }
+            ParseError::InputBufferFull => {
+                println!("Got InputBufferFull on first event for extremely long token");
+            }
+            _ => {
+                println!("Got other error on first event: {:?}", e);
+            }
+        },
     }
 }

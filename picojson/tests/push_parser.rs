@@ -177,7 +177,7 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         // Test string with escape sequence (\n should become newline)
-        parser.write(br#"{"key": "hello\\nworld"}"#).unwrap();
+        parser.write(br#"{"key": "hello\nworld"}"#).unwrap();
         parser.finish::<()>().unwrap();
         let handler = parser.destroy();
 
@@ -189,7 +189,7 @@ mod tests {
             vec![
                 "StartObject".to_string(),
                 "Key(key)".to_string(),
-                "String(hello\\nworld)".to_string(), // \\n should be converted to actual newline
+                "String(hello\nworld)".to_string(), // \n should be converted to actual newline
                 "EndObject".to_string(),
                 "EndDocument".to_string()
             ]
@@ -268,9 +268,7 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         // Test string with mixed escapes like in pass1.json line 45
-        parser
-            .write(br#"{"key": "\uCAFE\uBABE"}"#)
-            .unwrap();
+        parser.write(br#"{"key": "\uCAFE\uBABE"}"#).unwrap();
         parser.finish::<()>().unwrap();
         let handler = parser.destroy();
 
@@ -512,7 +510,7 @@ mod tests {
             "Key(negative)".to_string(),
             "Number(-123)".to_string(),
             "EndObject".to_string(),
-            "EndDocument".to_string()
+            "EndDocument".to_string(),
         ];
 
         #[cfg(not(feature = "float"))]
@@ -523,7 +521,7 @@ mod tests {
             "Key(negative)".to_string(),
             "Number(-123)".to_string(),
             "EndObject".to_string(),
-            "EndDocument".to_string()
+            "EndDocument".to_string(),
         ];
 
         assert_eq!(handler.events, expected);
