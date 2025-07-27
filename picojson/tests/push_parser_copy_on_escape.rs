@@ -160,12 +160,12 @@ fn test_buffer_isolation() {
     let first = &handler.first_string.unwrap()[..handler.first_len];
     assert_eq!(first, b"simple", "First string should be 'simple'");
 
-    // TODO: Verify second string is "esc\n" (with actual newline) when escape processing is fully working
-    // Currently in this test context, escape sequences are not being processed
+    // Verify second string: JSON "esc\\n" (double backslash) becomes "esc\n" (single backslash + n)
+    // This is correct behavior - double backslash in JSON becomes single backslash in string
     assert!(handler.second_string.is_some());
     let second = &handler.second_string.unwrap()[..handler.second_len];
     assert_eq!(
         second, b"esc\\n",
-        "Second string should be 'esc\\\\n' (currently literal, to be fixed in Issue #3)"
+        "JSON \"esc\\\\n\" should become string \"esc\\n\" (literal backslash + n, not newline)"
     );
 }

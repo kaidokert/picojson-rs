@@ -63,11 +63,10 @@ fn test_input_buffer_full_scenario() {
             }
             Err(e) => {
 
-                // Currently, this will likely result in ScratchBufferFull rather than InputBufferFull
-                // because InputBufferFull is not implemented
+                // InputBufferFull is now properly implemented as of stream_content_builder.rs fix
                 match e {
                     ParseError::ScratchBufferFull => {
-                        // This is the current expected behavior since InputBufferFull is not implemented
+                        // Legacy case: ScratchBufferFull for escape processing issues
                         assert!(
                             matches!(e, ParseError::ScratchBufferFull),
                             "Expected ScratchBufferFull, got: {:?}", e
@@ -75,7 +74,7 @@ fn test_input_buffer_full_scenario() {
                         return;
                     }
                     ParseError::InputBufferFull => {
-                        // This would be the ideal behavior if InputBufferFull were implemented
+                        // InputBufferFull for tokens too large for buffer capacity
                         assert!(
                             matches!(e, ParseError::InputBufferFull),
                             "Expected InputBufferFull, got: {:?}", e

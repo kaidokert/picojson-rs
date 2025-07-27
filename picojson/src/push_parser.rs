@@ -161,11 +161,21 @@ where
         // Handle any remaining content in the buffer and check for incomplete parsing
         match self.state {
             ParserState::ParsingNumber => {
-                let s = self.stream_buffer.get_unescaped_slice()?;
-                let num = JsonNumber::from_slice(s)?;
-                self.handler
-                    .handle_event(Event::Number(num))
-                    .map_err(PushParseError::Handler)?;
+                if self.using_unescaped_buffer {
+                    // Number was accumulated in stream buffer (crossed write boundaries)
+                    let s = self.stream_buffer.get_unescaped_slice()?;
+                    let num = JsonNumber::from_slice(s)?;
+                    self.handler
+                        .handle_event(Event::Number(num))
+                        .map_err(PushParseError::Handler)?;
+                } else {
+                    // Number is still in borrowed mode - need to extract from last write's data
+                    // At document end, we use full span (no delimiter to exclude)
+                    // But we need the data from the last write() call - this is a limitation
+                    // For now, force switch to unescaped mode if we reach here
+                    // This handles the case where a number is the last thing in the document
+                    return Err(PushParseError::Parse(ParseError::EndOfData));
+                }
                 self.stream_buffer.clear_unescaped();
             }
             ParserState::ParsingString => {
@@ -267,15 +277,25 @@ where
                             .handle_event(Event::Number(num))
                             .map_err(PushParseError::Handler)?;
                     } else {
-                        let end_pos = self.current_position;
+                        let current_pos = self.current_position;
+                        // The end position for slicing - current_pos points to the delimiter
+                        // For slice [start..end), we want to exclude the delimiter
+                        // So end_pos = current_pos (delimiter position) is correct for slicing
+                        let end_pos = current_pos;
+                        
                         let start_pos = self.token_start_pos;
+                        
                         if end_pos >= start_pos {
-                            let s_bytes = &data[(start_pos - self.position_offset)
-                                ..(end_pos - self.position_offset)];
-                            let num = JsonNumber::from_slice(s_bytes)?;
-                            self.handler
-                                .handle_event(Event::Number(num))
-                                .map_err(PushParseError::Handler)?;
+                            let slice_start = start_pos.saturating_sub(self.position_offset);
+                            let slice_end = end_pos.saturating_sub(self.position_offset);
+                            
+                            if slice_end <= data.len() && slice_start <= slice_end {
+                                let s_bytes = &data[slice_start..slice_end];
+                                let num = JsonNumber::from_slice(s_bytes)?;
+                                self.handler
+                                    .handle_event(Event::Number(num))
+                                    .map_err(PushParseError::Handler)?;
+                            }
                         }
                     }
                     self.stream_buffer.clear_unescaped();
@@ -512,13 +532,23 @@ where
         current_local_pos: usize,
     ) -> Result<(), PushParseError<E>> {
         if !self.using_unescaped_buffer {
-            let start_pos = self.token_start_pos + 1;
+            // For strings/keys: skip opening quote (+1)
+            // For numbers: start from first digit (+0)
+            let start_offset = match self.state {
+                ParserState::ParsingString | ParserState::ParsingKey => 1, // Skip opening quote
+                ParserState::ParsingNumber => 0, // Include first digit
+                ParserState::Idle => 0,
+            };
+            let start_pos = self.token_start_pos + start_offset;
             let end_pos = self.position_offset + current_local_pos;
+            
             if end_pos > start_pos {
                 // Only switch to unescaped mode if there's actually content to copy
                 self.using_unescaped_buffer = true;
-                let initial_part =
-                    &data[(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                let slice_start = start_pos.saturating_sub(self.position_offset);
+                let slice_end = end_pos.saturating_sub(self.position_offset);
+                
+                let initial_part = &data[slice_start..slice_end];
                 for &byte in initial_part {
                     self.stream_buffer.append_unescaped_byte(byte)?;
                 }

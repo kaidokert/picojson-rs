@@ -104,7 +104,7 @@ fn test_slice_parser_comparison() {
 
 #[test]
 fn test_escaped_key_with_newline() {
-    // Test key with escape sequence - key "ke\ny" with value "value"
+    // Test key with literal backslash-n characters (not escape sequence)
     let json_string = r#"{"ke\\ny": "value"}"#;
     let json = json_string.as_bytes();
 
@@ -117,8 +117,7 @@ fn test_escaped_key_with_newline() {
 
     let expected = vec![
         "StartObject".to_string(),
-        // TODO: Key with escape sequence should be processed correctly (Issue #3)
-        // Currently in this test context, they remain as literal sequences
+        // This key contains literal backslash+n chars (not escape sequence) - correct behavior
         "Key(ke\\ny)".to_string(),
         "String(value)".to_string(),
         "EndObject".to_string(),
@@ -126,6 +125,32 @@ fn test_escaped_key_with_newline() {
     ];
 
     println!("Escaped key test - actual events: {:?}", handler.events);
+    assert_eq!(handler.events, expected);
+}
+
+#[test]
+fn test_actual_key_escape_sequence() {
+    // Test key with ACTUAL escape sequence: \n becomes newline character
+    let json_string = r#"{"ke\ny": "value"}"#;  // JSON with actual \n escape sequence
+    let json = json_string.as_bytes();
+
+    let handler = EventCollector::new();
+    let mut buffer = [0u8; 256];
+    let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
+    parser.write(json).unwrap();
+    parser.finish::<()>().unwrap();
+    let handler = parser.destroy();
+
+    let expected = vec![
+        "StartObject".to_string(),
+        // Key escape processing should convert \n to actual newline
+        "Key(ke\ny)".to_string(),
+        "String(value)".to_string(),
+        "EndObject".to_string(),
+        "EndDocument".to_string(),
+    ];
+
+    println!("Actual key escape test - events: {:?}", handler.events);
     assert_eq!(handler.events, expected);
 }
 
