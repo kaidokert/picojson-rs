@@ -424,10 +424,7 @@ where
                             Ok(_is_complete) => {
                                 // Continue to process the complete sequence
                             }
-                            Err(_) => {
-                                // Hex digit was already processed or is invalid
-                                // Continue anyway to process what we have
-                            }
+                            Err(e) => return Err(e.into()),
                         }
                     }
                 }

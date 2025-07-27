@@ -35,7 +35,7 @@ impl<'a, 'b> PushParserHandler<'a, 'b, ()> for EventCollector {
 #[test]
 fn test_string_with_actual_escapes() {
     // Test that escape sequences in strings are properly processed
-    let json_string = r#"{"message": "Hello\\nWorld\\t!"}"#;
+    let json_string = "{\"message\": \"Hello\\nWorld\\t!\"}";
     let json = json_string.as_bytes();
 
     let handler = EventCollector::new();
@@ -49,9 +49,8 @@ fn test_string_with_actual_escapes() {
     let expected = vec![
         "StartObject".to_string(),
         "Key(message)".to_string(),
-        // TODO: The escape sequences \\n and \\t should be converted to actual newline and tab (Issue #3)
-        // Currently in this test context, they remain as literal sequences
-        "String(Hello\\nWorld\\t!)".to_string(),
+        // Escape sequences \\n and \\t should be converted to actual newline and tab
+        "String(Hello\nWorld\t!)".to_string(),
         "EndObject".to_string(),
         "EndDocument".to_string(),
     ];
