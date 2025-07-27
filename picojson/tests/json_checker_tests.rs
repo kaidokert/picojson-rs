@@ -14,7 +14,10 @@
 
 #[cfg(feature = "remote-tests")]
 mod json_checker_tests {
-    use picojson::{Event, ParseError, PullParser, SliceParser};
+    use picojson::{
+        ChunkReader, DefaultConfig, Event, ParseError, PullParser, PushParseError, PushParser,
+        PushParserHandler, SliceParser, StreamParser,
+    };
     use std::fs;
     use std::path::Path;
 
@@ -27,6 +30,59 @@ mod json_checker_tests {
             match parser.next_event() {
                 Ok(Event::EndDocument) => break,
                 Ok(_event) => event_count += 1,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(event_count)
+    }
+
+    // Test handler for PushParser conformance tests
+    struct ConformanceTestHandler {
+        event_count: usize,
+    }
+
+    impl<'a, 'b> PushParserHandler<'a, 'b, String> for ConformanceTestHandler {
+        fn handle_event(&mut self, _event: Event<'a, 'b>) -> Result<(), String> {
+            self.event_count += 1;
+            Ok(())
+        }
+    }
+
+    fn run_push_parser_test(json_content: &str) -> Result<usize, ParseError> {
+        let mut buffer = [0u8; 2048]; // Larger buffer for pass1.json
+        let handler = ConformanceTestHandler { event_count: 0 };
+        let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
+
+        let to_parse_error = |e: PushParseError<String>| match e {
+            PushParseError::Parse(parse_err) => parse_err,
+            PushParseError::Handler(_handler_err) => {
+                // Handler error - use ReaderError as it represents external error
+                ParseError::ReaderError
+            }
+        };
+
+        parser
+            .write(json_content.as_bytes())
+            .map_err(to_parse_error)?;
+
+        parser.finish::<String>().map_err(to_parse_error)?;
+
+        let handler = parser.destroy();
+        Ok(handler.event_count)
+    }
+
+    fn run_stream_parser_test(json_content: &str) -> Result<usize, ParseError> {
+        let reader = ChunkReader::full_slice(json_content.as_bytes());
+        let mut buffer = [0u8; 2048]; // Larger buffer for pass1.json
+        let mut parser = StreamParser::<_, DefaultConfig>::new(reader, &mut buffer);
+        let mut event_count = 0;
+
+        loop {
+            match parser.next_event() {
+                Ok(Event::EndDocument) => break,
+                Ok(_event) => {
+                    event_count += 1;
+                }
                 Err(e) => return Err(e),
             }
         }
@@ -85,6 +141,261 @@ mod json_checker_tests {
                 result.err()
             );
         }
+
+        // Debug test for tracing SliceParser unicode escape processing
+        #[test]
+        fn test_slice_parser_unicode_trace() {
+            // Test the problematic sequence from pass1.json line 45
+            let unicode_sequence = r#""\/\\\"\\uCAFE\\uBABE\\uAB98\\uFCDE\\ubcda\\uef4A\\b\\f\\n\\r\\t`1~!@#$%^&*()_+-=[]{}|;:',./<>?""#;
+
+            let mut buffer = [0u8; 1024];
+            let mut parser = SliceParser::with_buffer(unicode_sequence, &mut buffer);
+
+            match parser.next_event() {
+                Ok(Event::String(s)) => {
+                    let parsed_content = s.as_ref();
+
+                    // Verify that the parser successfully processed the complex string
+                    assert!(
+                        !parsed_content.is_empty(),
+                        "Should have parsed some content"
+                    );
+
+                    // The input contains literal backslashes, so verify basic escape processing works
+                    // The \/ should become /, \\ should become \, \" should become ", etc.
+                    assert!(
+                        parsed_content.starts_with('/'),
+                        "Should start with / from \\/ escape"
+                    );
+                    assert!(
+                        parsed_content.contains('\\'),
+                        "Should contain \\ from \\\\ escape"
+                    );
+                    assert!(
+                        parsed_content.contains('"'),
+                        "Should contain \" from \\\" escape"
+                    );
+
+                    // For unicode escapes in raw strings, they remain as literal text
+                    assert!(
+                        parsed_content.contains("\\uCAFE"),
+                        "Should contain literal \\uCAFE sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\uBABE"),
+                        "Should contain literal \\uBABE sequence"
+                    );
+
+                    // Verify the string is parsed correctly - it should contain the literal escape sequences
+                    // not the actual control characters since the input is a raw string
+                    assert!(
+                        parsed_content.contains("\\b"),
+                        "Should contain literal \\b sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\f"),
+                        "Should contain literal \\f sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\n"),
+                        "Should contain literal \\n sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\r"),
+                        "Should contain literal \\r sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\t"),
+                        "Should contain literal \\t sequence"
+                    );
+
+                    // Verify it contains the expected trailing content
+                    assert!(
+                        parsed_content.contains("`1~!@#$%^&*()_+-=[]{}|;:',./<>?"),
+                        "Should contain trailing special characters"
+                    );
+                }
+                Ok(other) => {
+                    panic!("Expected String event, got: {:?}", other);
+                }
+                Err(e) => {
+                    panic!(
+                        "SliceParser should handle this sequence, got error: {:?}",
+                        e
+                    );
+                }
+            }
+        }
+
+        // PushParser conformance tests
+        #[test]
+        fn test_push_parser_pass1_comprehensive() {
+            let content = load_test_file("pass1.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: pass1.json should parse successfully but failed: {:?}",
+                result.err()
+            );
+
+            // pass1.json is a comprehensive test with many JSON features
+            let event_count = result.unwrap();
+            assert!(
+                event_count > 50,
+                "PushParser: pass1.json should generate substantial events, got: {}",
+                event_count
+            );
+        }
+
+        #[test]
+        fn test_push_parser_pass2_deep_nesting() {
+            let content = load_test_file("pass2.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: pass2.json (deep nesting) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
+
+        #[test]
+        fn test_push_parser_pass3_simple_object() {
+            let content = load_test_file("pass3.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: pass3.json (simple object) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
+
+        // StreamParser conformance tests with logging
+        #[test]
+        fn test_stream_parser_pass1_comprehensive() {
+            let content = load_test_file("pass1.json");
+            let result = run_stream_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "StreamParser: pass1.json should parse successfully but failed: {:?}",
+                result.err()
+            );
+
+            // pass1.json is a comprehensive test with many JSON features
+            let event_count = result.unwrap();
+            assert!(
+                event_count > 50,
+                "StreamParser: pass1.json should generate substantial events, got: {}",
+                event_count
+            );
+        }
+
+        // Debug test for tracing StreamParser unicode escape processing
+        #[test]
+        fn test_stream_parser_unicode_trace() {
+            // Test the problematic sequence from pass1.json line 45
+            let unicode_sequence = r#""\/\\\"\\uCAFE\\uBABE\\uAB98\\uFCDE\\ubcda\\uef4A\\b\\f\\n\\r\\t`1~!@#$%^&*()_+-=[]{}|;:',./<>?""#;
+
+            let reader = ChunkReader::full_slice(unicode_sequence.as_bytes());
+            let mut buffer = [0u8; 1024];
+            let mut parser = StreamParser::<_, DefaultConfig>::new(reader, &mut buffer);
+
+            match parser.next_event() {
+                Ok(Event::String(s)) => {
+                    let parsed_content = s.as_ref();
+
+                    // Verify that the parser successfully processed the complex string
+                    assert!(
+                        !parsed_content.is_empty(),
+                        "Should have parsed some content"
+                    );
+
+                    // The input contains literal backslashes, so verify basic escape processing works
+                    // The \/ should become /, \\ should become \, \" should become ", etc.
+                    assert!(
+                        parsed_content.starts_with('/'),
+                        "Should start with / from \\/ escape"
+                    );
+                    assert!(
+                        parsed_content.contains('\\'),
+                        "Should contain \\ from \\\\ escape"
+                    );
+                    assert!(
+                        parsed_content.contains('"'),
+                        "Should contain \" from \\\" escape"
+                    );
+
+                    // For unicode escapes in raw strings, they remain as literal text
+                    assert!(
+                        parsed_content.contains("\\uCAFE"),
+                        "Should contain literal \\uCAFE sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\uBABE"),
+                        "Should contain literal \\uBABE sequence"
+                    );
+
+                    // Verify the string is parsed correctly - it should contain the literal escape sequences
+                    // not the actual control characters since the input is a raw string
+                    assert!(
+                        parsed_content.contains("\\b"),
+                        "Should contain literal \\b sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\f"),
+                        "Should contain literal \\f sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\n"),
+                        "Should contain literal \\n sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\r"),
+                        "Should contain literal \\r sequence"
+                    );
+                    assert!(
+                        parsed_content.contains("\\t"),
+                        "Should contain literal \\t sequence"
+                    );
+
+                    // Verify it contains the expected trailing content
+                    assert!(
+                        parsed_content.contains("`1~!@#$%^&*()_+-=[]{}|;:',./<>?"),
+                        "Should contain trailing special characters"
+                    );
+                }
+                Ok(other) => {
+                    panic!("Expected String event, got: {:?}", other);
+                }
+                Err(e) => {
+                    panic!(
+                        "StreamParser should handle this sequence, got error: {:?}",
+                        e
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_stream_parser_pass2_deep_nesting() {
+            let content = load_test_file("pass2.json");
+            let result = run_stream_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "StreamParser: pass2.json (deep nesting) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
+
+        #[test]
+        fn test_stream_parser_pass3_simple_object() {
+            let content = load_test_file("pass3.json");
+            let result = run_stream_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "StreamParser: pass3.json (simple object) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
     }
 
     // Indices of fail*.json files that should fail to parse (excluding known deviations)
@@ -122,6 +433,33 @@ mod json_checker_tests {
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26,
             27, 28, 29, 30, 31, 32, 33
         );
+
+        macro_rules! generate_push_parser_fail_tests {
+            ($($num:expr),*) => {
+                $(
+                    paste::paste! {
+                        #[test]
+                        fn [<test_push_parser_fail $num>]() {
+                            let content = load_test_file(&format!("fail{}.json", $num));
+                            let result = run_push_parser_test(&content);
+                            assert!(
+                                result.is_err(),
+                                "PushParser: fail{}.json should fail to parse but succeeded with {} events. Content: {:?}",
+                                $num,
+                                result.unwrap_or(0),
+                                content
+                            );
+                        }
+                    }
+                )*
+            };
+        }
+
+        // Generate PushParser test cases for the same 31 fail*.json files
+        generate_push_parser_fail_tests!(
+            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26,
+            27, 28, 29, 30, 31, 32, 33
+        );
     }
 
     mod known_deviations {
@@ -144,6 +482,27 @@ mod json_checker_tests {
             assert!(
                 result.is_ok(),
                 "fail18.json is expected to pass because the non-recursive parser handles deep nesting."
+            );
+        }
+
+        // PushParser known deviations - should match SliceParser behavior
+        #[test]
+        fn test_push_parser_fail1_root_string_allowed() {
+            let content = load_test_file("fail1.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: fail1.json is expected to pass because modern JSON (RFC 7159) allows scalar root values."
+            );
+        }
+
+        #[test]
+        fn test_push_parser_fail18_deep_nesting_supported() {
+            let content = load_test_file("fail18.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: fail18.json is expected to pass because the non-recursive parser handles deep nesting."
             );
         }
     }
