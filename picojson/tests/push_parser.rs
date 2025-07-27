@@ -583,10 +583,16 @@ mod tests {
         if write_result.is_ok() {
             // If write succeeds, the error should be caught in finish
             let finish_result = parser.finish::<()>();
-            assert!(finish_result.is_err(), "Incomplete Unicode escape should fail during finish");
+            assert!(
+                finish_result.is_err(),
+                "Incomplete Unicode escape should fail during finish"
+            );
         } else {
             // If write fails, that's also acceptable for incomplete escape
-            assert!(write_result.is_err(), "Incomplete Unicode escape should fail");
+            assert!(
+                write_result.is_err(),
+                "Incomplete Unicode escape should fail"
+            );
         }
     }
 

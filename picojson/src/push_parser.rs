@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! A SAX-style, `no_std` JSON push parser.
+//! A SAX-style JSON push parser.
 //!
 //! Clean implementation based on handler_design pattern with proper HRTB lifetime management.
 
@@ -26,19 +26,27 @@ enum EscapeState {
 }
 
 /// A trait for handling events from a SAX-style push parser.
+///
+/// # Generic Parameters
+///
+/// * `'input` - Lifetime for the input data being parsed
+/// * `'scratch` - Lifetime for the scratch buffer used for temporary storage
+/// * `E` - The error type that can be returned by the handler
 pub trait PushParserHandler<'input, 'scratch, E> {
     /// Handles a single, complete JSON event.
     fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), E>;
 }
 
-/// A SAX-style, `no_std` JSON push parser.
-/// 
-/// TODO: CRITICAL BUG - Unicode escape processing is completely broken!
-/// Unicode sequences like \u0041\u0042\u0043 are returned as literal strings
-/// instead of being decoded to ABC. This affects all Unicode escapes in
-/// strings and keys. The UnicodeEscapeCollector is present but the processing
-/// logic in append_escape_content() is not working correctly.
-/// MUST be fixed before any production use.
+/// A SAX-style JSON push parser.
+///
+/// Generic over BitStack storage type for configurable nesting depth. Parsing
+/// events are returned to the handler.
+///
+/// # Generic Parameters
+///
+/// * `'scratch` - Lifetime for the scratch buffer used for temporary storage
+/// * `H` - The event handler type that implements [`PushParserHandler`]
+/// * `C` - BitStack configuration type that implements [`BitStackConfig`]
 pub struct PushParser<'scratch, H, C>
 where
     C: BitStackConfig,
@@ -171,9 +179,11 @@ where
                 // Numbers are automatically switched to unescaped mode at the end of each write() call,
                 // so by the time we reach finish(), they should always be in the stream buffer
                 if !self.using_unescaped_buffer {
-                    return Err(PushParseError::Parse(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch)));
+                    return Err(PushParseError::Parse(ParseError::Unexpected(
+                        crate::shared::UnexpectedState::StateMismatch,
+                    )));
                 }
-                
+
                 let s = self.stream_buffer.get_unescaped_slice()?;
                 let num = JsonNumber::from_slice(s)?;
                 self.handler
@@ -285,13 +295,13 @@ where
                         // For slice [start..end), we want to exclude the delimiter
                         // So end_pos = current_pos (delimiter position) is correct for slicing
                         let end_pos = current_pos;
-                        
+
                         let start_pos = self.token_start_pos;
-                        
+
                         if end_pos >= start_pos {
                             let slice_start = start_pos.saturating_sub(self.position_offset);
                             let slice_end = end_pos.saturating_sub(self.position_offset);
-                            
+
                             if slice_end <= data.len() && slice_start <= slice_end {
                                 let s_bytes = &data[slice_start..slice_end];
                                 let num = JsonNumber::from_slice(s_bytes)?;
@@ -539,18 +549,18 @@ where
             // For numbers: start from first digit (+0)
             let start_offset = match self.state {
                 ParserState::ParsingString | ParserState::ParsingKey => 1, // Skip opening quote
-                ParserState::ParsingNumber => 0, // Include first digit
+                ParserState::ParsingNumber => 0,                           // Include first digit
                 ParserState::Idle => 0,
             };
             let start_pos = self.token_start_pos + start_offset;
             let end_pos = self.position_offset + current_local_pos;
-            
+
             if end_pos > start_pos {
                 // Only switch to unescaped mode if there's actually content to copy
                 self.using_unescaped_buffer = true;
                 let slice_start = start_pos.saturating_sub(self.position_offset);
                 let slice_end = end_pos.saturating_sub(self.position_offset);
-                
+
                 let initial_part = &data[slice_start..slice_end];
                 for &byte in initial_part {
                     self.stream_buffer.append_unescaped_byte(byte)?;

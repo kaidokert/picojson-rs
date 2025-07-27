@@ -61,7 +61,10 @@ fn test_reproduce_invalidslicebounds_minimal() {
         "EndDocument".to_string(),
     ];
 
-    assert_eq!(handler.events, expected_events, "Should parse Unicode escapes without InvalidSliceBounds errors");
+    assert_eq!(
+        handler.events, expected_events,
+        "Should parse Unicode escapes without InvalidSliceBounds errors"
+    );
 }
 
 #[test]
@@ -77,7 +80,9 @@ fn test_reproduce_invalidslicebounds_chunked() {
     // Write in small chunks to stress boundary handling
     let chunk_size = 8;
     for chunk in json_content.chunks(chunk_size) {
-        parser.write(chunk).expect("Each chunk should parse successfully");
+        parser
+            .write(chunk)
+            .expect("Each chunk should parse successfully");
     }
 
     parser.finish().expect("Finish should succeed");
@@ -92,7 +97,10 @@ fn test_reproduce_invalidslicebounds_chunked() {
         "EndDocument".to_string(),
     ];
 
-    assert_eq!(handler.events, expected_events, "Should parse Unicode escapes in chunks without InvalidSliceBounds errors");
+    assert_eq!(
+        handler.events, expected_events,
+        "Should parse Unicode escapes in chunks without InvalidSliceBounds errors"
+    );
 }
 
 #[test]
@@ -111,11 +119,17 @@ fn test_reproduce_invalidslicebounds_complex_key() {
     let handler = parser.destroy();
 
     // Verify we got the expected structure (key with complex escapes + value)
-    assert_eq!(handler.events.len(), 5, "Should have 5 events: StartObject, Key, String, EndObject, EndDocument");
+    assert_eq!(
+        handler.events.len(),
+        5,
+        "Should have 5 events: StartObject, Key, String, EndObject, EndDocument"
+    );
     assert_eq!(handler.events[0], "StartObject");
-    assert!(handler.events[1].starts_with("Key("), "Second event should be a key");
+    assert!(
+        handler.events[1].starts_with("Key("),
+        "Second event should be a key"
+    );
     assert_eq!(handler.events[2], "String(value)");
     assert_eq!(handler.events[3], "EndObject");
     assert_eq!(handler.events[4], "EndDocument");
 }
-

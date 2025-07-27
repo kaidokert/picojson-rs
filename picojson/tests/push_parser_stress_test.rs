@@ -220,14 +220,14 @@ fn get_push_parser_test_scenarios() -> Vec<TestScenario> {
         },
         TestScenario {
             name: "Unicode Escapes",
-            json: br#"["\\u0041\\u0042\\u0043"]"#,
+            json: b"[\"\\u0041\\u0042\\u0043\"]",
             expected_events: vec![
                 Event::StartArray,
                 Event::String("ABC".into()),
                 Event::EndArray,
                 Event::EndDocument,
             ],
-            min_buffer_size: 18, // TODO: CRITICAL - Unicode processing is broken, test will fail until fixed
+            min_buffer_size: 3, // Unicode processing needs buffer space for escape processing
         },
         TestScenario {
             name: "Mixed Escapes",
@@ -313,7 +313,11 @@ fn test_push_parsing_with_config(
 }
 
 /// Determine if a given buffer size should succeed or fail based on chunk pattern
-fn should_succeed_push_parser(buffer_size: usize, scenario: &TestScenario, chunk_pattern: &[usize]) -> bool {
+fn should_succeed_push_parser(
+    buffer_size: usize,
+    scenario: &TestScenario,
+    chunk_pattern: &[usize],
+) -> bool {
     let min_buffer_size = get_min_buffer_size_for_scenario(scenario, chunk_pattern);
     buffer_size >= min_buffer_size
 }
@@ -321,31 +325,66 @@ fn should_succeed_push_parser(buffer_size: usize, scenario: &TestScenario, chunk
 /// Calculate minimum buffer size based on scenario and chunk pattern
 fn get_min_buffer_size_for_scenario(scenario: &TestScenario, chunk_pattern: &[usize]) -> usize {
     // Some scenarios always need larger buffers due to escape processing
-    let needs_escape_buffer = matches!(scenario.name, 
-        "Unicode Escapes" | "Mixed Escapes" | "String ending with escape" |
-        "Consecutive Unicode" | "Unicode at Chunk Boundary" | "Empty Key with Unicode Value"
+    let needs_escape_buffer = matches!(
+        scenario.name,
+        "Unicode Escapes"
+            | "Mixed Escapes"
+            | "String ending with escape"
+            | "Consecutive Unicode"
+            | "Unicode at Chunk Boundary"
+            | "Empty Key with Unicode Value"
     );
-    
-    // If chunk pattern is empty (single write) or all chunks are large, 
+
+    // If chunk pattern is empty (single write) or all chunks are large,
     // copy-on-escape optimization allows minimal buffers - unless escape processing is needed
     let has_small_chunks = chunk_pattern.iter().any(|&size| size <= 20);
-    
+
     if !has_small_chunks && !needs_escape_buffer {
         return 1; // Copy-on-escape optimization works well
     }
-    
+
     // For small chunks that force buffer boundaries or escape processing, need actual content size
     match scenario.name {
-        "Basic Object" => if has_small_chunks { 8 } else { 1 },  // Longest content: "hello", "world", "count" 
+        "Basic Object" => {
+            if has_small_chunks {
+                8
+            } else {
+                1
+            }
+        } // Longest content: "hello", "world", "count"
         "Empty Strings" => 1, // Empty strings need minimal buffer
-        "Long String (No Escapes)" => if has_small_chunks { 26 } else { 1 }, // "abcdefghijklmnopqrstuvwxyz"
-        "Long Number" => if has_small_chunks { 30 } else { 1 }, // "123456789012345678901234567890"
-        "Deeply Nested Arrays" => if has_small_chunks { 2 } else { 1 }, // Number "42"
-        "Unicode Escapes" => 18, // Unicode processing always needs buffer space
+        "Long String (No Escapes)" => {
+            if has_small_chunks {
+                26
+            } else {
+                1
+            }
+        } // "abcdefghijklmnopqrstuvwxyz"
+        "Long Number" => {
+            if has_small_chunks {
+                30
+            } else {
+                1
+            }
+        } // "123456789012345678901234567890"
+        "Deeply Nested Arrays" => {
+            if has_small_chunks {
+                2
+            } else {
+                1
+            }
+        } // Number "42"
+        "Unicode Escapes" => 3, // Unicode processing needs minimal buffer space
         "Mixed Escapes" => 11, // Mixed escape processing buffer including Unicode
         "String ending with escape" => 7, // Escape at end processing
-        "Complex Nested Structure" => if has_small_chunks { 5 } else { 1 }, // "Alice"/"users"
-        "Consecutive Unicode" => 25, // Unicode processing buffer for consecutive escapes  
+        "Complex Nested Structure" => {
+            if has_small_chunks {
+                5
+            } else {
+                1
+            }
+        } // "Alice"/"users"
+        "Consecutive Unicode" => 25, // Unicode processing buffer for consecutive escapes
         "Unicode at Chunk Boundary" => 15, // Unicode + normal text processing
         "Empty Key with Unicode Value" => 12, // Empty key + unicode value processing
         _ => scenario.min_buffer_size, // Use configured value for other scenarios
@@ -362,8 +401,7 @@ fn test_push_parser_stress_buffer_sizes() {
 
         for buffer_size in 1..=50 {
             let result = test_push_parsing_with_config(scenario, buffer_size, &[]);
-            let expected_success =
-                should_succeed_push_parser(buffer_size, scenario, &[]);
+            let expected_success = should_succeed_push_parser(buffer_size, scenario, &[]);
 
             match (result.is_ok(), expected_success) {
                 (true, true) => {
@@ -399,7 +437,7 @@ fn test_push_parser_stress_chunk_patterns() {
     // Test patterns: Various chunk sizes to stress boundary handling
     let chunk_patterns: &[&[usize]] = &[
         &[50],          // Large chunks
-        &[10],          // Medium chunks  
+        &[10],          // Medium chunks
         &[1],           // Byte-by-byte
         &[2],           // Two bytes at a time
         &[3, 1, 2],     // Variable small chunks
@@ -437,7 +475,7 @@ fn test_push_parser_stress_critical_matrix() {
 
     let chunk_patterns: &[&[usize]] = &[
         &[50],          // Large chunks
-        &[10],          // Medium chunks  
+        &[10],          // Medium chunks
         &[1],           // Byte-by-byte
         &[2],           // Two bytes at a time
         &[3, 1, 2],     // Variable small chunks
@@ -448,7 +486,8 @@ fn test_push_parser_stress_critical_matrix() {
     for scenario in &scenarios {
         println!("--- Testing Scenario: {} ---", scenario.name);
         // Use the max min_buffer_size across all chunk patterns for this scenario
-        let max_min_buffer = chunk_patterns.iter()
+        let max_min_buffer = chunk_patterns
+            .iter()
             .map(|&pattern| get_min_buffer_size_for_scenario(scenario, pattern))
             .max()
             .unwrap_or(scenario.min_buffer_size);
@@ -458,8 +497,7 @@ fn test_push_parser_stress_critical_matrix() {
         for &buffer_size in &critical_buffer_sizes {
             for &pattern in chunk_patterns {
                 let result = test_push_parsing_with_config(scenario, buffer_size, pattern);
-                let expected_success =
-                    should_succeed_push_parser(buffer_size, scenario, pattern);
+                let expected_success = should_succeed_push_parser(buffer_size, scenario, pattern);
 
                 match (result.is_ok(), expected_success) {
                     (true, true) => {
@@ -475,7 +513,10 @@ fn test_push_parser_stress_critical_matrix() {
                     (false, true) => {
                         panic!(
                             "❌ [B={}, P={:?}] Unexpected FAILURE for scenario '{}' - {}",
-                            buffer_size, pattern, scenario.name, result.unwrap_err()
+                            buffer_size,
+                            pattern,
+                            scenario.name,
+                            result.unwrap_err()
                         );
                     }
                 }

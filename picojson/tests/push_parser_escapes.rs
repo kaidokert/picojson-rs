@@ -84,7 +84,6 @@ fn test_quote_escape() {
     assert_eq!(handler.events, expected);
 }
 
-
 #[test]
 fn test_escaped_key_with_newline() {
     // Test key with literal backslash-n characters (not escape sequence)
@@ -113,7 +112,7 @@ fn test_escaped_key_with_newline() {
 #[test]
 fn test_actual_key_escape_sequence() {
     // Test key with ACTUAL escape sequence: \n becomes newline character
-    let json_string = r#"{"ke\ny": "value"}"#;  // JSON with actual \n escape sequence
+    let json_string = r#"{"ke\ny": "value"}"#; // JSON with actual \n escape sequence
     let json = json_string.as_bytes();
 
     let handler = EventCollector::new();
@@ -129,6 +128,29 @@ fn test_actual_key_escape_sequence() {
         "Key(ke\ny)".to_string(),
         "String(value)".to_string(),
         "EndObject".to_string(),
+        "EndDocument".to_string(),
+    ];
+
+    assert_eq!(handler.events, expected);
+}
+
+#[test]
+fn test_unicode_escapes() {
+    // Test that Unicode escape sequences are properly decoded
+    let json = br#"["\u0041\u0042\u0043"]"#;
+
+    let mut buffer = [0u8; 64];
+    let handler = EventCollector::new();
+    let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
+
+    parser.write(json).unwrap();
+    parser.finish::<()>().unwrap();
+    let handler = parser.destroy();
+
+    let expected = vec![
+        "StartArray".to_string(),
+        "String(ABC)".to_string(), // \u0041\u0042\u0043 should decode to ABC
+        "EndArray".to_string(),
         "EndDocument".to_string(),
     ];
 
