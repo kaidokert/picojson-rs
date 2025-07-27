@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use picojson::{DefaultConfig, Event, PullParser, PushParser, PushParserHandler};
+use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
 
 /// Simple test handler that collects events as debug strings
 struct EventCollector {
@@ -55,7 +55,6 @@ fn test_string_with_actual_escapes() {
         "EndDocument".to_string(),
     ];
 
-    println!("Actual events: {:?}", handler.events);
     assert_eq!(handler.events, expected);
 }
 
@@ -82,25 +81,9 @@ fn test_quote_escape() {
         "EndDocument".to_string(),
     ];
 
-    println!("Quote escape events: {:?}", handler.events);
     assert_eq!(handler.events, expected);
 }
 
-#[test]
-fn test_slice_parser_comparison() {
-    // Test the same JSON with SliceParser to see how it handles escapes
-    let json_string = r#"{"message": "Hello\\nWorld\\t!"}"#;
-    let mut scratch = [0u8; 256];
-    let mut parser = picojson::SliceParser::with_buffer(json_string, &mut scratch);
-
-    println!("SliceParser results:");
-    while let Ok(event) = parser.next_event() {
-        match event {
-            picojson::Event::EndDocument => break,
-            _ => println!("  {:?}", event),
-        }
-    }
-}
 
 #[test]
 fn test_escaped_key_with_newline() {
@@ -124,7 +107,6 @@ fn test_escaped_key_with_newline() {
         "EndDocument".to_string(),
     ];
 
-    println!("Escaped key test - actual events: {:?}", handler.events);
     assert_eq!(handler.events, expected);
 }
 
@@ -150,7 +132,6 @@ fn test_actual_key_escape_sequence() {
         "EndDocument".to_string(),
     ];
 
-    println!("Actual key escape test - events: {:?}", handler.events);
     assert_eq!(handler.events, expected);
 }
 
@@ -176,9 +157,5 @@ fn test_escaped_key_with_quote() {
         "EndDocument".to_string(),
     ];
 
-    println!(
-        "Escaped key quote test - actual events: {:?}",
-        handler.events
-    );
     assert_eq!(handler.events, expected);
 }

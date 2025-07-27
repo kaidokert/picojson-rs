@@ -32,6 +32,13 @@ pub trait PushParserHandler<'input, 'scratch, E> {
 }
 
 /// A SAX-style, `no_std` JSON push parser.
+/// 
+/// TODO: CRITICAL BUG - Unicode escape processing is completely broken!
+/// Unicode sequences like \u0041\u0042\u0043 are returned as literal strings
+/// instead of being decoded to ABC. This affects all Unicode escapes in
+/// strings and keys. The UnicodeEscapeCollector is present but the processing
+/// logic in append_escape_content() is not working correctly.
+/// MUST be fixed before any production use.
 pub struct PushParser<'scratch, H, C>
 where
     C: BitStackConfig,
@@ -161,21 +168,17 @@ where
         // Handle any remaining content in the buffer and check for incomplete parsing
         match self.state {
             ParserState::ParsingNumber => {
-                if self.using_unescaped_buffer {
-                    // Number was accumulated in stream buffer (crossed write boundaries)
-                    let s = self.stream_buffer.get_unescaped_slice()?;
-                    let num = JsonNumber::from_slice(s)?;
-                    self.handler
-                        .handle_event(Event::Number(num))
-                        .map_err(PushParseError::Handler)?;
-                } else {
-                    // Number is still in borrowed mode - need to extract from last write's data
-                    // At document end, we use full span (no delimiter to exclude)
-                    // But we need the data from the last write() call - this is a limitation
-                    // For now, force switch to unescaped mode if we reach here
-                    // This handles the case where a number is the last thing in the document
-                    return Err(PushParseError::Parse(ParseError::EndOfData));
+                // Numbers are automatically switched to unescaped mode at the end of each write() call,
+                // so by the time we reach finish(), they should always be in the stream buffer
+                if !self.using_unescaped_buffer {
+                    return Err(PushParseError::Parse(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch)));
                 }
+                
+                let s = self.stream_buffer.get_unescaped_slice()?;
+                let num = JsonNumber::from_slice(s)?;
+                self.handler
+                    .handle_event(Event::Number(num))
+                    .map_err(PushParseError::Handler)?;
                 self.stream_buffer.clear_unescaped();
             }
             ParserState::ParsingString => {

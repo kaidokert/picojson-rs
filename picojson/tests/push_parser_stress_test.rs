@@ -223,11 +223,11 @@ fn get_push_parser_test_scenarios() -> Vec<TestScenario> {
             json: br#"["\\u0041\\u0042\\u0043"]"#,
             expected_events: vec![
                 Event::StartArray,
-                Event::String("\\u0041\\u0042\\u0043".into()), // Unicode processing still has issues
+                Event::String("ABC".into()),
                 Event::EndArray,
                 Event::EndDocument,
             ],
-            min_buffer_size: 18, // Unicode processing needs buffer space
+            min_buffer_size: 18, // TODO: CRITICAL - Unicode processing is broken, test will fail until fixed
         },
         TestScenario {
             name: "Mixed Escapes",
