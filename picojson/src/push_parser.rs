@@ -89,7 +89,7 @@ where
             {
                 let mut callback =
                     create_tokenizer_callback(&mut event_storage, self.current_position);
-                self.core.tokenizer.parse_chunk(&[byte], &mut callback)?;
+                let _bytes_processed = self.core.tokenizer.parse_chunk(&[byte], &mut callback)?;
             }
 
             while let Some((event, event_pos)) = take_first_event(&mut event_storage) {
@@ -117,36 +117,14 @@ where
                         }
                     }
                     EscapeState::InUnicodeEscape => {
-                        // Feed hex digits to the unicode escape collector
+                        // Feed hex digits to the collector during Unicode escape processing
                         match self.state {
                             ParserState::ParsingString | ParserState::ParsingKey => {
-                                // Always feed hex digits to collector when in unicode escape state
+                                // Feed hex digits to collector - let the End event handle UTF-8 conversion
                                 match self.unicode_escape_collector.add_hex_digit(byte) {
-                                    Ok(is_complete) => {
-                                        if is_complete {
-                                            // We have all 4 hex digits, process immediately
-                                            // Ensure we're in unescaped mode since we have processed content
-                                            if !self.using_unescaped_buffer {
-                                                self.using_unescaped_buffer = true;
-                                                self.stream_buffer.clear_unescaped();
-                                            }
-
-                                            let mut utf8_buffer = [0u8; 4];
-                                            match self
-                                                .unicode_escape_collector
-                                                .process_to_utf8(&mut utf8_buffer)
-                                            {
-                                                Ok((utf8_bytes, _)) => {
-                                                    if let Some(bytes) = utf8_bytes {
-                                                        for &b in bytes {
-                                                            self.stream_buffer
-                                                                .append_unescaped_byte(b)?;
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => return Err(e.into()),
-                                            }
-                                        }
+                                    Ok(_is_complete) => {
+                                        // Don't process immediately - let the End event handle the UTF-8 conversion
+                                        // This avoids duplicate processing while still collecting hex digits
                                     }
                                     Err(e) => return Err(e.into()),
                                 }
@@ -202,7 +180,7 @@ where
         // Check that the JSON document is complete (all containers closed)
         // Use a no-op callback since we don't expect any more events
         let mut no_op_callback = |_event: ujson::Event, _pos: usize| {};
-        self.core.tokenizer.finish(&mut no_op_callback)?;
+        let _bytes_processed = self.core.tokenizer.finish(&mut no_op_callback)?;
 
         self.handler
             .handle_event(Event::EndDocument)
@@ -226,71 +204,7 @@ where
     {
         let mut should_append = true;
         let new_state = match self.state {
-            ParserState::Idle => match event {
-                ujson::Event::Begin(ujson::EventToken::String) => {
-                    should_append = false;
-                    self.token_start_pos = pos;
-                    self.using_unescaped_buffer = false;
-                    self.stream_buffer.clear_unescaped();
-                    ParserState::ParsingString
-                }
-                ujson::Event::Begin(ujson::EventToken::Key) => {
-                    should_append = false;
-                    self.token_start_pos = pos;
-                    self.using_unescaped_buffer = false;
-                    self.stream_buffer.clear_unescaped();
-                    ParserState::ParsingKey
-                }
-                ujson::Event::Begin(ujson::EventToken::Number) => {
-                    self.token_start_pos = pos;
-                    self.using_unescaped_buffer = false;
-                    self.stream_buffer.clear_unescaped();
-                    ParserState::ParsingNumber
-                }
-                ujson::Event::ObjectStart => {
-                    self.handler
-                        .handle_event(Event::StartObject)
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                ujson::Event::ObjectEnd => {
-                    self.handler
-                        .handle_event(Event::EndObject)
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                ujson::Event::ArrayStart => {
-                    self.handler
-                        .handle_event(Event::StartArray)
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                ujson::Event::ArrayEnd => {
-                    self.handler
-                        .handle_event(Event::EndArray)
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                ujson::Event::End(ujson::EventToken::True) => {
-                    self.handler
-                        .handle_event(Event::Bool(true))
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                ujson::Event::End(ujson::EventToken::False) => {
-                    self.handler
-                        .handle_event(Event::Bool(false))
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                ujson::Event::End(ujson::EventToken::Null) => {
-                    self.handler
-                        .handle_event(Event::Null)
-                        .map_err(PushParseError::Handler)?;
-                    ParserState::Idle
-                }
-                _ => ParserState::Idle,
-            },
+            ParserState::Idle => self.handle_idle_state_event(event, pos, &mut should_append)?,
             ParserState::ParsingString | ParserState::ParsingKey => {
                 let is_key = self.state == ParserState::ParsingKey;
                 let end_token = if is_key {
@@ -374,6 +288,83 @@ where
         Ok((new_state, should_append))
     }
 
+    /// Handle events when parser is in idle state
+    fn handle_idle_state_event<E>(
+        &mut self,
+        event: ujson::Event,
+        pos: usize,
+        should_append: &mut bool,
+    ) -> Result<ParserState, PushParseError<E>>
+    where
+        H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
+    {
+        match event {
+            ujson::Event::Begin(ujson::EventToken::String) => {
+                *should_append = false;
+                self.token_start_pos = pos;
+                self.using_unescaped_buffer = false;
+                self.stream_buffer.clear_unescaped();
+                Ok(ParserState::ParsingString)
+            }
+            ujson::Event::Begin(ujson::EventToken::Key) => {
+                *should_append = false;
+                self.token_start_pos = pos;
+                self.using_unescaped_buffer = false;
+                self.stream_buffer.clear_unescaped();
+                Ok(ParserState::ParsingKey)
+            }
+            ujson::Event::Begin(ujson::EventToken::Number) => {
+                self.token_start_pos = pos;
+                self.using_unescaped_buffer = false;
+                self.stream_buffer.clear_unescaped();
+                Ok(ParserState::ParsingNumber)
+            }
+            ujson::Event::ObjectStart => {
+                self.handler
+                    .handle_event(Event::StartObject)
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            ujson::Event::ObjectEnd => {
+                self.handler
+                    .handle_event(Event::EndObject)
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            ujson::Event::ArrayStart => {
+                self.handler
+                    .handle_event(Event::StartArray)
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            ujson::Event::ArrayEnd => {
+                self.handler
+                    .handle_event(Event::EndArray)
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            ujson::Event::End(ujson::EventToken::True) => {
+                self.handler
+                    .handle_event(Event::Bool(true))
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            ujson::Event::End(ujson::EventToken::False) => {
+                self.handler
+                    .handle_event(Event::Bool(false))
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            ujson::Event::End(ujson::EventToken::Null) => {
+                self.handler
+                    .handle_event(Event::Null)
+                    .map_err(PushParseError::Handler)?;
+                Ok(ParserState::Idle)
+            }
+            _ => Ok(ParserState::Idle),
+        }
+    }
+
     fn append_escape_content<'input, E>(
         &mut self,
         event: ujson::Event,
@@ -385,46 +376,10 @@ where
     {
         match event {
             ujson::Event::Begin(ujson::EventToken::EscapeSequence) => {
-                // This marks the beginning of an escape sequence - suppress raw byte appending
-                self.escape_state = EscapeState::InEscapeSequence;
-                // Switch to unescaped mode if not already, but don't include the backslash
-                if !self.using_unescaped_buffer {
-                    // Copy content up to (but not including) the backslash
-                    let start_pos = self.token_start_pos + 1;
-                    let end_pos = pos; // Don't include the backslash at 'pos'
-                    if end_pos > start_pos {
-                        self.using_unescaped_buffer = true;
-                        self.stream_buffer.clear_unescaped();
-                        let initial_part = &data
-                            [(start_pos - self.position_offset)..(end_pos - self.position_offset)];
-                        for &byte in initial_part {
-                            self.stream_buffer.append_unescaped_byte(byte)?;
-                        }
-                    } else {
-                        self.using_unescaped_buffer = true;
-                        self.stream_buffer.clear_unescaped();
-                    }
-                }
+                self.handle_begin_escape_sequence(pos, data)?;
             }
             ujson::Event::Begin(ujson::EventToken::UnicodeEscape) => {
-                // Start of unicode escape sequence - reset collector for new sequence
-                self.unicode_escape_collector.reset();
-                self.escape_state = EscapeState::InUnicodeEscape;
-                // Force switch to unescaped mode since we'll need to write processed unicode content
-                if !self.using_unescaped_buffer {
-                    self.using_unescaped_buffer = true;
-                    self.stream_buffer.clear_unescaped();
-                    // Copy any content that was accumulated before this unicode escape
-                    let start_pos = self.token_start_pos + 1;
-                    let end_pos = self.current_position;
-                    if end_pos > start_pos {
-                        let initial_part = &data
-                            [(start_pos - self.position_offset)..(end_pos - self.position_offset)];
-                        for &byte in initial_part {
-                            self.stream_buffer.append_unescaped_byte(byte)?;
-                        }
-                    }
-                }
+                self.handle_begin_unicode_escape(data)?;
             }
             ujson::Event::End(
                 token @ (ujson::EventToken::EscapeQuote
@@ -454,64 +409,101 @@ where
                 self.escape_state = EscapeState::None;
             }
             ujson::Event::End(ujson::EventToken::UnicodeEscape) => {
-                // Important: Don't append the current byte since it's the 4th hex digit
-                // that we'll process manually
+                // Switch to unescaped mode if not already active
+                if !self.using_unescaped_buffer {
+                    self.switch_to_unescaped_mode(data, pos)?;
+                }
 
-                // Special case: if we're processing the End event during a hex digit byte,
-                // we need to process that final hex digit first
+                // Ensure we have all 4 hex digits before processing
+                // The 4th hex digit might be the current byte being processed
                 let current_byte = data.get(pos - self.position_offset).copied();
                 if let Some(byte) = current_byte {
                     if byte.is_ascii_hexdigit() {
+                        // Feed the final hex digit if it hasn't been processed yet
                         match self.unicode_escape_collector.add_hex_digit(byte) {
-                            Ok(is_complete) => {
-                                if is_complete {
-                                    // Ensure we're in unescaped mode (but don't clear if already in unescaped mode)
-                                    if !self.using_unescaped_buffer {
-                                        self.using_unescaped_buffer = true;
-                                        self.stream_buffer.clear_unescaped();
-
-                                        // Copy any content that was accumulated before this unicode escape
-                                        let start_pos = self.token_start_pos + 1;
-                                        // \u0041 -> 5 chars back (\u + 4 hex digits), use saturating_sub to prevent underflow
-                                        let unicode_escape_start = pos.saturating_sub(5);
-                                        if unicode_escape_start > start_pos {
-                                            let initial_part = &data[(start_pos
-                                                - self.position_offset)
-                                                ..(unicode_escape_start - self.position_offset)];
-                                            for &byte in initial_part {
-                                                self.stream_buffer.append_unescaped_byte(byte)?;
-                                            }
-                                        }
-                                    }
-
-                                    let mut utf8_buffer = [0u8; 4];
-                                    match self
-                                        .unicode_escape_collector
-                                        .process_to_utf8(&mut utf8_buffer)
-                                    {
-                                        Ok((utf8_bytes, _)) => {
-                                            if let Some(bytes) = utf8_bytes {
-                                                for &b in bytes {
-                                                    self.stream_buffer.append_unescaped_byte(b)?;
-                                                }
-                                            }
-                                        }
-                                        Err(e) => return Err(e.into()),
-                                    }
-                                }
+                            Ok(_is_complete) => {
+                                // Continue to process the complete sequence
                             }
-                            Err(e) => return Err(e.into()),
+                            Err(_) => {
+                                // Hex digit was already processed or is invalid
+                                // Continue anyway to process what we have
+                            }
                         }
                     }
                 }
 
-                // Process the collected unicode escape (now this will just reset the collector)
-                self.process_collected_unicode_escape()?;
+                // Process the collected unicode escape to UTF-8
+                let mut utf8_buffer = [0u8; 4];
+                match self.unicode_escape_collector.process_to_utf8(&mut utf8_buffer) {
+                    Ok((utf8_bytes, _)) => {
+                        if let Some(bytes) = utf8_bytes {
+                            for &b in bytes {
+                                self.stream_buffer.append_unescaped_byte(b)?;
+                            }
+                        }
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+
+                // Reset for next escape sequence
+                self.unicode_escape_collector.reset();
                 self.escape_state = EscapeState::None;
             }
             _ => {}
         }
         Ok(self.state)
+    }
+
+    /// Handle the beginning of a regular escape sequence
+    fn handle_begin_escape_sequence<E>(
+        &mut self,
+        pos: usize,
+        data: &[u8],
+    ) -> Result<(), PushParseError<E>> {
+        // This marks the beginning of an escape sequence - suppress raw byte appending
+        self.escape_state = EscapeState::InEscapeSequence;
+        // Switch to unescaped mode if not already, but don't include the backslash
+        if !self.using_unescaped_buffer {
+            // Copy content up to (but not including) the backslash
+            let start_pos = self.token_start_pos + 1;
+            let end_pos = pos; // Don't include the backslash at 'pos'
+            if end_pos > start_pos {
+                self.using_unescaped_buffer = true;
+                self.stream_buffer.clear_unescaped();
+                let initial_part = &data
+                    [(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                for &byte in initial_part {
+                    self.stream_buffer.append_unescaped_byte(byte)?;
+                }
+            } else {
+                self.using_unescaped_buffer = true;
+                self.stream_buffer.clear_unescaped();
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle the beginning of a Unicode escape sequence
+    fn handle_begin_unicode_escape<E>(&mut self, data: &[u8]) -> Result<(), PushParseError<E>> {
+        // Start of unicode escape sequence - reset collector for new sequence
+        self.unicode_escape_collector.reset();
+        self.escape_state = EscapeState::InUnicodeEscape;
+        // Force switch to unescaped mode since we'll need to write processed unicode content
+        if !self.using_unescaped_buffer {
+            self.using_unescaped_buffer = true;
+            self.stream_buffer.clear_unescaped();
+            // Copy any content that was accumulated before this unicode escape
+            let start_pos = self.token_start_pos + 1;
+            let end_pos = self.current_position;
+            if end_pos > start_pos {
+                let initial_part = &data
+                    [(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                for &byte in initial_part {
+                    self.stream_buffer.append_unescaped_byte(byte)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn switch_to_unescaped_mode<E>(
@@ -552,13 +544,6 @@ where
         }
     }
 
-    /// Process the collected unicode escape using the collector's state
-    fn process_collected_unicode_escape<E>(&mut self) -> Result<(), PushParseError<E>> {
-        // Unicode processing is now handled in the byte loop when hex digits are processed
-        // This method just resets the collector for the next escape sequence
-        self.unicode_escape_collector.reset();
-        Ok(())
-    }
 }
 
 /// An error that can occur during push-based parsing.
