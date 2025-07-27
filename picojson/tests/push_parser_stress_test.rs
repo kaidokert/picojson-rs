@@ -67,24 +67,9 @@ impl StressTestHandler {
     }
 }
 
-impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String>
-    for StressTestHandler
-{
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String> for StressTestHandler {
     fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), String> {
-        // Convert to owned event for storage
-        let owned_event = match event {
-            Event::StartObject => OwnedEvent::StartObject,
-            Event::EndObject => OwnedEvent::EndObject,
-            Event::StartArray => OwnedEvent::StartArray,
-            Event::EndArray => OwnedEvent::EndArray,
-            Event::Key(k) => OwnedEvent::Key(k.as_ref().to_string()),
-            Event::String(s) => OwnedEvent::String(s.as_ref().to_string()),
-            Event::Number(n) => OwnedEvent::Number(n.as_str().to_string()),
-            Event::Bool(b) => OwnedEvent::Bool(b),
-            Event::Null => OwnedEvent::Null,
-            Event::EndDocument => OwnedEvent::EndDocument,
-        };
-
+        let owned_event = OwnedEvent::from_event(&event);
         self.events.push(owned_event);
         self.current_index += 1;
         Ok(())
@@ -307,7 +292,13 @@ fn test_push_parsing_with_config(
     chunk_pattern: &[usize],
 ) -> Result<(), String> {
     let mut buffer = vec![0u8; buffer_size];
-    let handler = StressTestHandler::new(scenario.expected_events.iter().map(OwnedEvent::from_event).collect());
+    let handler = StressTestHandler::new(
+        scenario
+            .expected_events
+            .iter()
+            .map(OwnedEvent::from_event)
+            .collect(),
+    );
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     let mut writer = ChunkedWriter::new(scenario.json, chunk_pattern);

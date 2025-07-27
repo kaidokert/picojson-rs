@@ -74,7 +74,7 @@ where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
     {
         // Event storage for tokenizer output. Fixed size of 2 events is by design:
-        // the tokenizer never returns more than 2 events per input byte. This is a 
+        // the tokenizer never returns more than 2 events per input byte. This is a
         // fundamental limit that all parsers in this codebase use.
         let mut event_storage: [Option<(ujson::Event, usize)>; 2] = [None, None];
 
@@ -291,54 +291,37 @@ where
                 }
                 _ => ParserState::Idle,
             },
-            ParserState::ParsingString => {
+            ParserState::ParsingString | ParserState::ParsingKey => {
+                let is_key = self.state == ParserState::ParsingKey;
+                let end_token = if is_key {
+                    ujson::EventToken::Key
+                } else {
+                    ujson::EventToken::String
+                };
+
                 match event {
-                    ujson::Event::End(ujson::EventToken::String) => {
+                    ujson::Event::End(token) if token == end_token => {
                         should_append = false;
                         if self.using_unescaped_buffer {
                             let s = self.stream_buffer.get_unescaped_slice()?;
                             let s_str = core::str::from_utf8(s)?;
+                            let event = if is_key {
+                                Event::Key(String::Unescaped(s_str))
+                            } else {
+                                Event::String(String::Unescaped(s_str))
+                            };
                             self.handler
-                                .handle_event(Event::String(String::Unescaped(s_str)))
+                                .handle_event(event)
                                 .map_err(PushParseError::Handler)?;
                         } else {
                             let s_str = self.extract_borrowed_content(data)?;
+                            let event = if is_key {
+                                Event::Key(String::Borrowed(s_str))
+                            } else {
+                                Event::String(String::Borrowed(s_str))
+                            };
                             self.handler
-                                .handle_event(Event::String(String::Borrowed(s_str)))
-                                .map_err(PushParseError::Handler)?;
-                        }
-                        self.stream_buffer.clear_unescaped();
-                        ParserState::Idle
-                    }
-                    ujson::Event::End(ujson::EventToken::EscapeQuote)
-                    | ujson::Event::End(ujson::EventToken::EscapeBackslash)
-                    | ujson::Event::End(ujson::EventToken::EscapeSlash)
-                    | ujson::Event::End(ujson::EventToken::EscapeBackspace)
-                    | ujson::Event::End(ujson::EventToken::EscapeFormFeed)
-                    | ujson::Event::End(ujson::EventToken::EscapeNewline)
-                    | ujson::Event::End(ujson::EventToken::EscapeCarriageReturn)
-                    | ujson::Event::End(ujson::EventToken::EscapeTab)
-                    | ujson::Event::End(ujson::EventToken::UnicodeEscape) => {
-                        should_append = false; // Don't append the escape trigger byte to buffer
-                        self.append_escape_content(event, pos, data)?
-                    }
-                    _ => self.append_escape_content(event, pos, data)?,
-                }
-            }
-            ParserState::ParsingKey => {
-                match event {
-                    ujson::Event::End(ujson::EventToken::Key) => {
-                        should_append = false;
-                        if self.using_unescaped_buffer {
-                            let s = self.stream_buffer.get_unescaped_slice()?;
-                            let s_str = core::str::from_utf8(s)?;
-                            self.handler
-                                .handle_event(Event::Key(String::Unescaped(s_str)))
-                                .map_err(PushParseError::Handler)?;
-                        } else {
-                            let s_str = self.extract_borrowed_content(data)?;
-                            self.handler
-                                .handle_event(Event::Key(String::Borrowed(s_str)))
+                                .handle_event(event)
                                 .map_err(PushParseError::Handler)?;
                         }
                         self.stream_buffer.clear_unescaped();
@@ -443,61 +426,31 @@ where
                     }
                 }
             }
-            ujson::Event::End(ujson::EventToken::EscapeQuote) => {
-                // Switch to unescaped mode and append the escaped quote
+            ujson::Event::End(
+                token @ (ujson::EventToken::EscapeQuote
+                | ujson::EventToken::EscapeBackslash
+                | ujson::EventToken::EscapeSlash
+                | ujson::EventToken::EscapeBackspace
+                | ujson::EventToken::EscapeFormFeed
+                | ujson::EventToken::EscapeNewline
+                | ujson::EventToken::EscapeCarriageReturn
+                | ujson::EventToken::EscapeTab),
+            ) => {
                 if !self.using_unescaped_buffer {
                     self.switch_to_unescaped_mode(data, pos)?;
                 }
-                self.stream_buffer.append_unescaped_byte(b'"')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeBackslash) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'\\')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeSlash) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'/')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeBackspace) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'\x08')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeFormFeed) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'\x0C')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeNewline) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'\n')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeCarriageReturn) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'\r')?;
-                self.escape_state = EscapeState::None;
-            }
-            ujson::Event::End(ujson::EventToken::EscapeTab) => {
-                if !self.using_unescaped_buffer {
-                    self.switch_to_unescaped_mode(data, pos)?;
-                }
-                self.stream_buffer.append_unescaped_byte(b'\t')?;
+                let unescaped_char = match token {
+                    ujson::EventToken::EscapeQuote => b'"',
+                    ujson::EventToken::EscapeBackslash => b'\\',
+                    ujson::EventToken::EscapeSlash => b'/',
+                    ujson::EventToken::EscapeBackspace => b'\x08',
+                    ujson::EventToken::EscapeFormFeed => b'\x0C',
+                    ujson::EventToken::EscapeNewline => b'\n',
+                    ujson::EventToken::EscapeCarriageReturn => b'\r',
+                    ujson::EventToken::EscapeTab => b'\t',
+                    _ => unreachable!(), // Covered by the outer match arm guard
+                };
+                self.stream_buffer.append_unescaped_byte(unescaped_char)?;
                 self.escape_state = EscapeState::None;
             }
             ujson::Event::End(ujson::EventToken::UnicodeEscape) => {
@@ -519,7 +472,8 @@ where
 
                                         // Copy any content that was accumulated before this unicode escape
                                         let start_pos = self.token_start_pos + 1;
-                                        let unicode_escape_start = pos - 5; // \u0041 -> 5 chars back (\u + 4 hex digits)
+                                        // \u0041 -> 5 chars back (\u + 4 hex digits), use saturating_sub to prevent underflow
+                                        let unicode_escape_start = pos.saturating_sub(5);
                                         if unicode_escape_start > start_pos {
                                             let initial_part = &data[(start_pos
                                                 - self.position_offset)

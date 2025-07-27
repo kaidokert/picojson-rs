@@ -756,7 +756,7 @@ mod tests {
                     #[cfg(feature = "float")]
                     NumberResult::Float(f) => {
                         // This is expected in float-enabled build
-                        assert!((f - core::f64::consts::PI).abs() < 0.01);
+                        assert!((f - 3.14).abs() < f64::EPSILON);
                     }
                     #[cfg(feature = "float-skip")]
                     NumberResult::FloatSkipped => {

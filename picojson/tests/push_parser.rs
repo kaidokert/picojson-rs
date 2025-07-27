@@ -138,7 +138,10 @@ mod tests {
         let handler = parser.destroy();
 
         // Should see String and EndDocument events
-        assert_eq!(handler.events, vec!["String(hello)".to_string(), "EndDocument".to_string()]);
+        assert_eq!(
+            handler.events,
+            vec!["String(hello)".to_string(), "EndDocument".to_string()]
+        );
 
         // Now test array
         let mut buffer2 = [0u8; 256];
@@ -150,12 +153,15 @@ mod tests {
         let handler2 = parser2.destroy();
 
         // Should see StartArray, String, EndArray, EndDocument events
-        assert_eq!(handler2.events, vec![
-            "StartArray".to_string(),
-            "String(hello)".to_string(), 
-            "EndArray".to_string(),
-            "EndDocument".to_string()
-        ]);
+        assert_eq!(
+            handler2.events,
+            vec![
+                "StartArray".to_string(),
+                "String(hello)".to_string(),
+                "EndArray".to_string(),
+                "EndDocument".to_string()
+            ]
+        );
 
         // Verify we get at least some events
         assert!(!handler2.events.is_empty(), "Should receive some events");
@@ -371,8 +377,20 @@ mod tests {
 
         // Test the problematic line 45 from pass1.json exactly as it appears
         let result = parser.write(br#"        "\/\\\"\uCAFE\uBABE\uAB98\uFCDE\ubcda\uef4A\b\f\n\r\t`1~!@#$%^&*()_+-=[]{}|;:',./<>?""#);
-        
+
         assert_eq!(result, Ok(()));
+        parser.finish::<()>().unwrap();
+        let handler = parser.destroy();
+
+        // Verify at least one event was captured
+        assert!(
+            !handler.events.is_empty(),
+            "Should have captured string event"
+        );
+        // Verify the string contains expected Unicode characters
+        if let Some(event) = handler.events.first() {
+            assert!(event.contains('\u{CAFE}'), "Should contain decoded Unicode");
+        }
     }
 
     // Debug test for tracing PushParser with pass1.json problematic lines
@@ -589,7 +607,6 @@ mod tests {
         assert_eq!(parser.finish::<()>(), Ok(()));
     }
 
-
     #[test]
     fn test_numbers() {
         // Debug handler that captures numbers to test number processing
@@ -685,7 +702,10 @@ mod tests {
         struct Handler;
 
         impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
-            fn handle_event(&mut self, _event: picojson::Event<'input, 'scratch>) -> Result<(), ()> {
+            fn handle_event(
+                &mut self,
+                _event: picojson::Event<'input, 'scratch>,
+            ) -> Result<(), ()> {
                 Ok(())
             }
         }
@@ -696,10 +716,7 @@ mod tests {
 
         // Test incomplete Unicode escape (missing hex digits)
         let result = parser.write(br#""\u004""#);
-        assert!(
-            result.is_err(),
-            "Incomplete Unicode escape should fail"
-        );
+        assert!(result.is_err(), "Incomplete Unicode escape should fail");
     }
 
     #[test]
@@ -709,7 +726,10 @@ mod tests {
         struct Handler;
 
         impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
-            fn handle_event(&mut self, _event: picojson::Event<'input, 'scratch>) -> Result<(), ()> {
+            fn handle_event(
+                &mut self,
+                _event: picojson::Event<'input, 'scratch>,
+            ) -> Result<(), ()> {
                 Ok(())
             }
         }
@@ -718,7 +738,7 @@ mod tests {
         let handler = Handler;
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
-        // Test invalid hex character in Unicode escape 
+        // Test invalid hex character in Unicode escape
         let result = parser.write(br#""\u004G""#);
         assert!(
             result.is_err(),
@@ -733,7 +753,10 @@ mod tests {
         struct Handler;
 
         impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
-            fn handle_event(&mut self, _event: picojson::Event<'input, 'scratch>) -> Result<(), ()> {
+            fn handle_event(
+                &mut self,
+                _event: picojson::Event<'input, 'scratch>,
+            ) -> Result<(), ()> {
                 Ok(())
             }
         }
@@ -744,10 +767,7 @@ mod tests {
 
         // Test invalid Unicode escape in object key
         let result = parser.write(br#"{"\u004Z": "value"}"#);
-        assert!(
-            result.is_err(),
-            "Invalid Unicode escape in key should fail"
-        );
+        assert!(result.is_err(), "Invalid Unicode escape in key should fail");
     }
 
     #[test]
@@ -788,14 +808,16 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         // Test object with both borrowed (simple) and unescaped (with escapes) strings
-        parser.write(br#"{"simple": "value", "escaped": "hello\nworld"}"#).unwrap();
+        parser
+            .write(br#"{"simple": "value", "escaped": "hello\nworld"}"#)
+            .unwrap();
         parser.finish::<()>().unwrap();
         let handler = parser.destroy();
 
         // Verify we have both borrowed and unescaped string types
         let has_borrowed = handler.events.iter().any(|e| e.starts_with("Borrowed"));
         let has_unescaped = handler.events.iter().any(|e| e.starts_with("Unescaped"));
-        
+
         assert!(has_borrowed, "Should have at least one borrowed string");
         assert!(has_unescaped, "Should have at least one unescaped string");
     }
@@ -807,7 +829,10 @@ mod tests {
         struct Handler;
 
         impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
-            fn handle_event(&mut self, _event: picojson::Event<'input, 'scratch>) -> Result<(), ()> {
+            fn handle_event(
+                &mut self,
+                _event: picojson::Event<'input, 'scratch>,
+            ) -> Result<(), ()> {
                 Ok(())
             }
         }
