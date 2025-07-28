@@ -3,7 +3,7 @@
 //! Minimal reproduction test for InvalidSliceBounds buffer boundary tracking issue
 //! This test aims to reproduce the exact same error that occurs in pass1.json parsing
 
-use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
+use picojson::{DefaultConfig, Event, ParseError, PushParser, PushParserHandler};
 
 /// Simple handler that collects events for verification
 struct ReproHandler {
