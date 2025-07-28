@@ -266,6 +266,11 @@ impl UnicodeEscapeCollector {
     pub fn has_pending_high_surrogate(&self) -> bool {
         self.pending_high_surrogate.is_some()
     }
+
+    /// Check if the collector is in the middle of collecting hex digits or has pending state
+    pub fn is_in_progress(&self) -> bool {
+        self.hex_pos > 0 || self.has_pending_high_surrogate()
+    }
 }
 
 impl Default for UnicodeEscapeCollector {

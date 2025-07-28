@@ -420,12 +420,12 @@ mod tests {
 
         match slice_parser.next_event() {
             Ok(Event::StartObject) => {}
-            _ => {}
+            other => panic!("Expected StartObject event, got {:?}", other),
         }
 
         match slice_parser.next_event() {
-            Ok(Event::Key(_)) => {}
-            _ => {}
+            Ok(Event::Key(k)) => assert_eq!(k.as_ref(), "", "Empty key should be empty string"),
+            other => panic!("Expected Key event, got {:?}", other),
         }
 
         // Test PushParser
@@ -455,6 +455,13 @@ mod tests {
 
         assert_eq!(push_parser.write(empty_key_json.as_bytes()), Ok(()));
         assert_eq!(push_parser.finish::<()>(), Ok(()));
+
+        let handler = push_parser.destroy();
+        assert_eq!(
+            handler.events,
+            vec!["Key()".to_string(), "Number(123)".to_string()],
+            "PushParser should capture empty key and number value"
+        );
     }
 
     #[test]

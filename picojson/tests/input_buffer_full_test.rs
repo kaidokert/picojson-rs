@@ -121,17 +121,8 @@ fn test_input_buffer_full_with_extremely_long_token() {
         }
         Err(e) => {
             match e {
-                ParseError::ScratchBufferFull => {
-                    assert!(
-                    matches!(e, ParseError::ScratchBufferFull),
-                    "Expected ScratchBufferFull on first event for extremely long token, got: {:?}", e
-                );
-                }
-                ParseError::InputBufferFull => {
-                    assert!(
-                    matches!(e, ParseError::InputBufferFull),
-                    "Expected InputBufferFull on first event for extremely long token, got: {:?}", e
-                );
+                ParseError::ScratchBufferFull | ParseError::InputBufferFull => {
+                    // This is an expected error for extremely long tokens.
                 }
                 _ => {
                     panic!(

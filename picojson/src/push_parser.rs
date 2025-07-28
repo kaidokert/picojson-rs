@@ -192,9 +192,15 @@ where
                 self.stream_buffer.clear_unescaped();
             }
             ParserState::ParsingString => {
+                if self.unicode_escape_collector.is_in_progress() {
+                    return Err(PushParseError::Parse(ParseError::InvalidUnicodeHex));
+                }
                 return Err(PushParseError::Parse(ParseError::EndOfData));
             }
             ParserState::ParsingKey => {
+                if self.unicode_escape_collector.is_in_progress() {
+                    return Err(PushParseError::Parse(ParseError::InvalidUnicodeHex));
+                }
                 return Err(PushParseError::Parse(ParseError::EndOfData));
             }
             ParserState::Idle => {}

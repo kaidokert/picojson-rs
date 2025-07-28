@@ -449,9 +449,8 @@ fn test_push_parser_stress_chunk_patterns() {
                     println!("✅ [P={:?}] SUCCESS", pattern);
                 }
                 Err(e) => {
-                    // Some failures are still expected due to buffer limitations, not number processing bugs
-                    println!(
-                        "⚠️ [P={:?}] EXPECTED FAILURE for scenario '{}' - {} (buffer/memory constraints)",
+                    panic!(
+                        "❌ [P={:?}] UNEXPECTED FAILURE for scenario '{}' - {}",
                         pattern, scenario.name, e
                     );
                 }

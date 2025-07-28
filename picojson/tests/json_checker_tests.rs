@@ -56,8 +56,9 @@ mod json_checker_tests {
         let to_parse_error = |e: PushParseError<String>| match e {
             PushParseError::Parse(parse_err) => parse_err,
             PushParseError::Handler(_handler_err) => {
-                // Handler error - represents logic error in callback, not I/O issue
-                ParseError::EndOfData // Generic parsing failure, not specific to I/O
+                // Handler error - represents logic error in callback, not parsing issue
+                // Using InvalidNumber as a placeholder for handler errors since UnexpectedState is not exported
+                ParseError::InvalidNumber
             }
         };
 
