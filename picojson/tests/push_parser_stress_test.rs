@@ -327,12 +327,7 @@ fn get_min_buffer_size_for_scenario(scenario: &TestScenario, chunk_pattern: &[us
     // Some scenarios always need larger buffers due to escape processing
     let needs_escape_buffer = matches!(
         scenario.name,
-        "Unicode Escapes"
-            | "Mixed Escapes"
-            | "String ending with escape"
-            | "Consecutive Unicode"
-            | "Unicode at Chunk Boundary"
-            | "Empty Key with Unicode Value"
+        "Unicode Escapes" | "Mixed Escapes" | "String ending with escape"
     );
 
     // If chunk pattern is empty (single write) or all chunks are large,
@@ -384,9 +379,6 @@ fn get_min_buffer_size_for_scenario(scenario: &TestScenario, chunk_pattern: &[us
                 1
             }
         } // "Alice"/"users"
-        "Consecutive Unicode" => 25, // Unicode processing buffer for consecutive escapes
-        "Unicode at Chunk Boundary" => 15, // Unicode + normal text processing
-        "Empty Key with Unicode Value" => 12, // Empty key + unicode value processing
         _ => scenario.min_buffer_size, // Use configured value for other scenarios
     }
 }
