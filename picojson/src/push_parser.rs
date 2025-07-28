@@ -482,7 +482,12 @@ where
                 self.unicode_escape_collector.reset();
                 self.escape_state = EscapeState::None;
             }
-            _ => {}
+            _ => {
+                // Other events during string/key parsing (e.g., Begin(String), Begin(Key), byte content)
+                // are handled by the normal parsing flow and don't require special escape processing.
+                // This is expected behavior during normal tokenization - we only process escape-specific
+                // events in this function, while other events are handled elsewhere in the state machine.
+            }
         }
         Ok(self.state)
     }

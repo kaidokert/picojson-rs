@@ -63,29 +63,14 @@ fn test_input_buffer_full_scenario() {
             }
             Err(e) => {
                 // InputBufferFull is now properly implemented as of stream_content_builder.rs fix
-                match e {
-                    ParseError::ScratchBufferFull => {
-                        // Legacy case: ScratchBufferFull for escape processing issues
-                        assert!(
-                            matches!(e, ParseError::ScratchBufferFull),
-                            "Expected ScratchBufferFull, got: {:?}",
-                            e
-                        );
-                        return;
-                    }
-                    ParseError::InputBufferFull => {
-                        // InputBufferFull for tokens too large for buffer capacity
-                        assert!(
-                            matches!(e, ParseError::InputBufferFull),
-                            "Expected InputBufferFull, got: {:?}",
-                            e
-                        );
-                        return;
-                    }
-                    _ => {
-                        panic!("Unexpected error: {:?}", e);
-                    }
+                if matches!(
+                    e,
+                    ParseError::InputBufferFull | ParseError::ScratchBufferFull
+                ) {
+                    // This is an expected error for oversized tokens.
+                    return;
                 }
+                panic!("Unexpected error: {:?}", e);
             }
         }
     }
@@ -121,27 +106,16 @@ fn test_input_buffer_full_with_extremely_long_token() {
                             break;
                         }
                     }
-                    Err(e) => match e {
-                        ParseError::ScratchBufferFull => {
-                            assert!(
-                                matches!(e, ParseError::ScratchBufferFull),
-                                "Expected ScratchBufferFull for extremely long token, got: {:?}",
-                                e
-                            );
+                    Err(e) => {
+                        if matches!(
+                            e,
+                            ParseError::InputBufferFull | ParseError::ScratchBufferFull
+                        ) {
+                            // This is an expected error for extremely long tokens.
                             return;
                         }
-                        ParseError::InputBufferFull => {
-                            assert!(
-                                matches!(e, ParseError::InputBufferFull),
-                                "Expected InputBufferFull for extremely long token, got: {:?}",
-                                e
-                            );
-                            return;
-                        }
-                        _ => {
-                            panic!("Unexpected error for extremely long token: {:?}", e);
-                        }
-                    },
+                        panic!("Unexpected error for extremely long token: {:?}", e);
+                    }
                 }
             }
         }

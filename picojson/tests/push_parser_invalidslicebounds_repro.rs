@@ -40,7 +40,7 @@ impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String> for ReproHand
 #[test]
 fn test_reproduce_invalidslicebounds_minimal() {
     // Test parsing JSON with Unicode escapes to ensure no InvalidSliceBounds errors
-    let json_content = br#"{"hex": "\\u0123\\u4567\\u89AB\\uCDEF\\uabcd\\uef4A"}"#;
+    let json_content = br#"{"hex": "\u0123\u4567\u89AB\uCDEF\uabcd\uef4A"}"#;
 
     // Use a small buffer that might trigger boundary issues
     let mut buffer = [0u8; 128];
@@ -56,7 +56,7 @@ fn test_reproduce_invalidslicebounds_minimal() {
     let expected_events = vec![
         "StartObject".to_string(),
         "Key(hex)".to_string(),
-        "String(\\u0123\\u4567\\u89AB\\uCDEF\\uabcd\\uef4A)".to_string(), // Unicode processing still has issues
+        "String(ģ䕧覫췯ꯍ\u{ef4a})".to_string(), // Unicode escapes properly decoded to characters
         "EndObject".to_string(),
         "EndDocument".to_string(),
     ];
@@ -70,7 +70,7 @@ fn test_reproduce_invalidslicebounds_minimal() {
 #[test]
 fn test_reproduce_invalidslicebounds_chunked() {
     // Test the same content in small chunks to trigger buffer boundary issues
-    let json_content = br#"{"hex": "\\u0123\\u4567\\u89AB\\uCDEF\\uabcd\\uef4A"}"#;
+    let json_content = br#"{"hex": "\u0123\u4567\u89AB\uCDEF\uabcd\uef4A"}"#;
 
     // Use a buffer large enough for the content but small enough to test chunking
     let mut buffer = [0u8; 128];
@@ -92,7 +92,7 @@ fn test_reproduce_invalidslicebounds_chunked() {
     let expected_events = vec![
         "StartObject".to_string(),
         "Key(hex)".to_string(),
-        "String(\\u0123\\u4567\\u89AB\\uCDEF\\uabcd\\uef4A)".to_string(),
+        "String(ģ䕧覫췯ꯍ\u{ef4a})".to_string(),
         "EndObject".to_string(),
         "EndDocument".to_string(),
     ];
@@ -106,7 +106,7 @@ fn test_reproduce_invalidslicebounds_chunked() {
 #[test]
 fn test_reproduce_invalidslicebounds_complex_key() {
     // Test complex key with mixed escapes from pass1.json
-    let json_content = br#"{"\\\\\/\\\\\\\\\\\\\"\\\\uCAFE\\\\uBABE\\\\uAB98\\\\uFCDE\\\\ubcda\\\\uef4A\\\\b\\\\f\\\\n\\\\r\\\\t": "value"}"#;
+    let json_content = br#"{"\\\/\\\\\"\uCAFE\uBABE\uAB98\uFCDE\ubcda\uef4A\b\f\n\r\t": "value"}"#;
 
     // Use a small buffer to stress boundary handling
     let mut buffer = [0u8; 128];
@@ -118,18 +118,17 @@ fn test_reproduce_invalidslicebounds_complex_key() {
     parser.finish().expect("Finish should succeed");
     let handler = parser.destroy();
 
-    // Verify we got the expected structure (key with complex escapes + value)
+    // Verify we got the expected structure with properly decoded escape sequences
+    let expected_events = vec![
+        "StartObject".to_string(),
+        "Key(\\/\\\\\"쫾몾ꮘﳞ볚\u{ef4a}\u{8}\u{c}\n\r\t)".to_string(), // Complex key with decoded escapes
+        "String(value)".to_string(),
+        "EndObject".to_string(),
+        "EndDocument".to_string(),
+    ];
+
     assert_eq!(
-        handler.events.len(),
-        5,
-        "Should have 5 events: StartObject, Key, String, EndObject, EndDocument"
+        handler.events, expected_events,
+        "Should parse complex key with mixed escape sequences correctly"
     );
-    assert_eq!(handler.events[0], "StartObject");
-    assert!(
-        handler.events[1].starts_with("Key("),
-        "Second event should be a key"
-    );
-    assert_eq!(handler.events[2], "String(value)");
-    assert_eq!(handler.events[3], "EndObject");
-    assert_eq!(handler.events[4], "EndDocument");
 }
