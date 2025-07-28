@@ -56,8 +56,8 @@ impl<'b, R: Reader> StreamContentBuilder<'b, R> {
                 .map_err(ParseError::from)?;
 
             if compaction_offset == 0 {
-                // SOL: Buffer too small for current token
-                return Err(ParseError::ScratchBufferFull);
+                // Buffer too small for current token - this is an input buffer size issue
+                return Err(ParseError::InputBufferFull);
             }
 
             // Update parser state positions after compaction (original logic)
