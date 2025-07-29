@@ -369,6 +369,7 @@ impl<H> PushContentBuilder<'_, H> {
     }
 
     /// Clear the unescaped buffer
+    #[allow(dead_code)]
     pub fn clear_unescaped(&mut self) {
         self.stream_buffer.clear_unescaped();
     }
