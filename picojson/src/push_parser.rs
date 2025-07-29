@@ -188,7 +188,7 @@ where
                 // Numbers are automatically switched to unescaped mode at the end of each write() call,
                 // so by the time we reach finish(), they should always be in the content builder
                 self.content_builder
-                    .handle_unfinished_number()
+                    .validate_and_extract_unfinished_number()
                     .map_err(PushParseError::Handler)?;
             }
             ParserState::ParsingString => {
@@ -254,9 +254,18 @@ where
                 match event {
                     ujson::Event::End(token) if token == end_token => {
                         should_append = false;
-                        self.content_builder
-                            .handle_string_key_end(data, is_key)
-                            .map_err(PushParseError::Handler)?;
+                        if is_key {
+                            // For now, fall back to the existing method until we can resolve
+                            // the borrowing conflicts with DataSource. This demonstrates the concept
+                            // but needs architectural changes to fully work.
+                            self.content_builder
+                                .validate_and_extract_key_content_with_data(data)
+                                .map_err(PushParseError::Handler)?;
+                        } else {
+                            self.content_builder
+                                .validate_and_extract_string_content_with_data(data)
+                                .map_err(PushParseError::Handler)?;
+                        }
                         self.content_builder.apply_unescaped_reset_if_queued();
                         ParserState::Idle
                     }
@@ -280,7 +289,7 @@ where
                 | ujson::Event::End(ujson::EventToken::NumberAndArray)
                 | ujson::Event::End(ujson::EventToken::NumberAndObject) => {
                     self.content_builder
-                        .handle_number_end(data)
+                        .validate_and_extract_number_with_data(data)
                         .map_err(PushParseError::Handler)?;
                     self.content_builder.apply_unescaped_reset_if_queued();
                     should_append = false;
@@ -306,16 +315,19 @@ where
         match event {
             ujson::Event::Begin(ujson::EventToken::String) => {
                 *should_append = false;
-                self.content_builder.start_content_token(pos);
+                self.content_builder.begin_string_content(pos);
+                *self.content_builder.parser_state_mut() = crate::shared::State::String(pos);
                 Ok(ParserState::ParsingString)
             }
             ujson::Event::Begin(ujson::EventToken::Key) => {
                 *should_append = false;
-                self.content_builder.start_content_token(pos);
+                self.content_builder.begin_string_content(pos);
+                *self.content_builder.parser_state_mut() = crate::shared::State::Key(pos);
                 Ok(ParserState::ParsingKey)
             }
             ujson::Event::Begin(ujson::EventToken::Number) => {
-                self.content_builder.start_content_token(pos);
+                self.content_builder.begin_string_content(pos);
+                *self.content_builder.parser_state_mut() = crate::shared::State::Number(pos);
                 Ok(ParserState::ParsingNumber)
             }
             ujson::Event::ObjectStart => {

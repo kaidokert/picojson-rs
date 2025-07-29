@@ -3,7 +3,7 @@
 //! ContentBuilder implementation for StreamParser using StreamBuffer.
 
 use crate::escape_processor::UnicodeEscapeCollector;
-use crate::event_processor::ContentExtractor;
+use crate::event_processor::{ContentExtractor, DataSource};
 use crate::shared::{ContentRange, State};
 use crate::stream_buffer::StreamBuffer;
 use crate::stream_parser::Reader;
@@ -237,6 +237,29 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         Ok(Event::Key(key))
     }
 
+    fn extract_key_content_new<'input, 'scratch>(
+        &mut self,
+        source: &impl DataSource<'input, 'scratch>,
+        start_pos: usize,
+    ) -> Result<Event<'input, 'scratch>, ParseError> {
+        // Use the DataSource to get content based on whether we have unescaped content
+        if source.has_unescaped_content() {
+            // Get unescaped content from scratch buffer
+            let content_bytes = source.get_unescaped_slice()?;
+            let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Unescaped(content_str)))
+        } else {
+            // Get borrowed content from input
+            let current_pos = self.stream_buffer.current_position();
+            let (content_start, content_end) =
+                ContentRange::string_content_bounds_from_content_start(start_pos, current_pos);
+            
+            let content_bytes = source.get_borrowed_slice(content_start, content_end)?;
+            let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Borrowed(content_str)))
+        }
+    }
+
     fn extract_number(
         &mut self,
         start_pos: usize,
@@ -317,6 +340,36 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         self.start_escape_processing()
+    }
+}
+
+// Note: DataSource implementation for StreamContentBuilder has lifetime challenges
+// because the StreamBuffer methods return references with lifetime tied to &self,
+// not the buffer lifetime 'b. This is a design issue that would need to be resolved
+// in the actual StreamBuffer implementation for a full DataSource integration.
+
+impl<'b, R: Reader> DataSource<'b, 'b> for StreamContentBuilder<'b, R> {
+    fn get_borrowed_slice(&self, start: usize, end: usize) -> Result<&'b [u8], ParseError> {
+        // This is a design limitation - StreamBuffer's get_string_slice returns a reference
+        // with lifetime tied to &self, not the buffer lifetime 'b. In a full implementation,
+        // we'd need to modify StreamBuffer to properly handle these lifetimes.
+        // For now, this is a placeholder that shows the intended interface.
+        let _ = (start, end);
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
+    }
+
+    fn get_unescaped_slice(&self) -> Result<&'b [u8], ParseError> {
+        // Same lifetime issue as above - this would need StreamBuffer API changes
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        // This method works fine as it doesn't involve lifetimes
+        self.stream_buffer.has_unescaped_content()
     }
 }
 

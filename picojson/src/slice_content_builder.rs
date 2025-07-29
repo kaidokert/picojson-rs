@@ -4,7 +4,7 @@
 
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{self, UnicodeEscapeCollector};
-use crate::event_processor::ContentExtractor;
+use crate::event_processor::{ContentExtractor, DataSource};
 use crate::shared::{ContentRange, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::{Event, JsonNumber, ParseError};
@@ -78,6 +78,30 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
         let key_result = self.copy_on_escape.end_string(end_pos)?;
         Ok(Event::Key(key_result))
+    }
+
+    fn extract_key_content_new<'input, 'scratch>(
+        &mut self,
+        source: &impl DataSource<'input, 'scratch>,
+        start_pos: usize,
+    ) -> Result<Event<'input, 'scratch>, ParseError> {
+        // Use the DataSource to get content based on whether we have unescaped content
+        if source.has_unescaped_content() {
+            // Get unescaped content from scratch buffer
+            let content_bytes = source.get_unescaped_slice()?;
+            let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Unescaped(content_str)))
+        } else {
+            // Get borrowed content from input
+            let current_pos = self.buffer.current_pos();
+            let end_pos = ContentRange::end_position_excluding_delimiter(current_pos);
+            let (content_start, content_end) =
+                ContentRange::string_content_bounds_from_content_start(start_pos, end_pos);
+            
+            let content_bytes = source.get_borrowed_slice(content_start, content_end)?;
+            let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Borrowed(content_str)))
+        }
     }
 
     fn extract_number(
@@ -160,5 +184,32 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         Ok(())
+    }
+}
+
+impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
+    fn get_borrowed_slice(&self, start: usize, end: usize) -> Result<&'a [u8], ParseError> {
+        // SliceParser can directly slice from the input using SliceInputBuffer
+        self.buffer
+            .slice(start, end)
+            .map_err(|_| ParseError::Unexpected(
+                crate::shared::UnexpectedState::InvalidSliceBounds,
+            ))
+    }
+
+    fn get_unescaped_slice(&self) -> Result<&'b [u8], ParseError> {
+        // Note: CopyOnEscape doesn't have a direct method to get unescaped slice
+        // without consuming the processor. This is a design limitation that would
+        // need to be addressed in a full implementation of the DataSource approach.
+        // For now, return an error indicating this isn't supported.
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        // CopyOnEscape doesn't expose this information directly
+        // In a full implementation, we'd need to add this capability
+        false
     }
 }
