@@ -97,27 +97,16 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
     fn extract_number(
         &mut self,
         start_pos: usize,
-        from_container_end: bool,
+        _from_container_end: bool,
         _finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // For SliceParser, use buffer-based document end detection
-        // The finished parameter should always be true for complete slices, but we don't rely on it
-        let at_document_end = self.buffer.current_pos() >= self.buffer.data_len();
-        let current_pos = self.buffer.current_pos();
-        let use_full_span = !from_container_end && at_document_end;
+        // The delimiter has already been consumed by the time this is called,
+        // so current_position is one byte past the end of the number.
+        let end_pos = ContentRange::end_position_excluding_delimiter(self.current_position());
 
-        let end_pos = if use_full_span {
-            // Standalone number: clamp to buffer length to prevent slice bounds errors
-            core::cmp::min(current_pos, self.buffer.data_len())
-        } else {
-            // Container number: exclude delimiter
-            current_pos.saturating_sub(1)
-        };
+        // Use the DataSource trait method to get the number bytes
+        let number_bytes = self.get_borrowed_slice(start_pos, end_pos)?;
 
-        let number_bytes = self
-            .buffer
-            .slice(start_pos, end_pos)
-            .map_err(|_| ParseError::InvalidNumber)?;
         let json_number = JsonNumber::from_slice(number_bytes)?;
         Ok(Event::Number(json_number))
     }
