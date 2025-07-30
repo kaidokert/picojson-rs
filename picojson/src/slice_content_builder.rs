@@ -4,7 +4,7 @@
 
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{self, UnicodeEscapeCollector};
-use crate::event_processor::ContentExtractor;
+use crate::event_processor::{ContentExtractor, DataSource};
 use crate::shared::{ContentRange, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::{Event, JsonNumber, ParseError};
@@ -78,6 +78,30 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
         let key_result = self.copy_on_escape.end_string(end_pos)?;
         Ok(Event::Key(key_result))
+    }
+
+    fn extract_key_content_new<'input, 'scratch>(
+        &mut self,
+        source: &impl DataSource<'input, 'scratch>,
+        start_pos: usize,
+    ) -> Result<Event<'input, 'scratch>, ParseError> {
+        // For SliceParser, we can only use borrowed content due to lifetime constraints
+        // In a full implementation, this would be resolved by architectural changes
+        if source.has_unescaped_content() {
+            // This demonstrates the intent but currently returns an error due to lifetime issues
+            return Err(ParseError::Unexpected(
+                crate::shared::UnexpectedState::StateMismatch,
+            ));
+        }
+
+        // Get borrowed content from input (this works)
+        let current_pos = self.buffer.current_pos();
+        let (content_start, content_end) =
+            ContentRange::string_content_bounds_from_content_start(start_pos, current_pos);
+
+        let content_bytes = source.get_borrowed_slice(content_start, content_end)?;
+        let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+        Ok(Event::Key(crate::String::Borrowed(content_str)))
     }
 
     fn extract_number(
@@ -160,5 +184,93 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         Ok(())
+    }
+
+    /// Override the standard validation method to use DataSource internally
+    fn validate_and_extract_key(&mut self) -> Result<Event<'_, '_>, ParseError> {
+        let start_pos = match *self.parser_state() {
+            State::Key(pos) => pos,
+            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
+        };
+
+        // Check for incomplete surrogate pairs before ending the key
+        if self
+            .unicode_escape_collector_mut()
+            .has_pending_high_surrogate()
+        {
+            return Err(ParseError::InvalidUnicodeCodepoint);
+        }
+
+        *self.parser_state_mut() = State::None;
+
+        // Use DataSource pattern manually to avoid borrowing conflicts
+        if self.copy_on_escape.has_unescaped_content() {
+            // Get unescaped content from scratch buffer
+            let content_bytes = self.copy_on_escape.get_unescaped_slice()?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Unescaped(content_str)))
+        } else {
+            // Get borrowed content from input
+            let current_pos = self.buffer.current_pos();
+            let (content_start, content_end) =
+                ContentRange::string_content_bounds_from_content_start(start_pos, current_pos);
+
+            let content_bytes = self.buffer.slice(content_start, content_end).map_err(|_| {
+                ParseError::Unexpected(crate::shared::UnexpectedState::InvalidSliceBounds)
+            })?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Borrowed(content_str)))
+        }
+    }
+
+    /// Override the new DataSource-based validation method for SliceParser
+    fn validate_and_extract_key_with_source<'input, 'scratch>(
+        &mut self,
+        source: &impl crate::event_processor::DataSource<'input, 'scratch>,
+    ) -> Result<crate::Event<'input, 'scratch>, ParseError> {
+        let start_pos = match *self.parser_state() {
+            State::Key(pos) => pos,
+            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
+        };
+
+        // Check for incomplete surrogate pairs before ending the key
+        if self
+            .unicode_escape_collector_mut()
+            .has_pending_high_surrogate()
+        {
+            return Err(ParseError::InvalidUnicodeCodepoint);
+        }
+
+        *self.parser_state_mut() = State::None;
+
+        // Use the new DataSource-based extraction
+        self.extract_key_content_new(source, start_pos)
+    }
+}
+
+// DataSource implementation for SliceContentBuilder demonstrates the pattern
+// but has fundamental lifetime challenges due to the current architecture
+impl<'a, 'b> DataSource<'a, 'a> for SliceContentBuilder<'a, 'b> {
+    fn get_borrowed_slice(&self, start: usize, end: usize) -> Result<&'a [u8], ParseError> {
+        // SliceParser can directly slice from the input using SliceInputBuffer
+        self.buffer
+            .slice(start, end)
+            .map_err(|_| ParseError::Unexpected(crate::shared::UnexpectedState::InvalidSliceBounds))
+    }
+
+    fn get_unescaped_slice(&self) -> Result<&'a [u8], ParseError> {
+        // This is a fundamental limitation: CopyOnEscape returns &'b references
+        // but DataSource expects &'a references. In a full implementation,
+        // this would require architectural changes to align the lifetimes.
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        // This method works fine as it doesn't involve lifetimes
+        self.copy_on_escape.has_unescaped_content()
     }
 }

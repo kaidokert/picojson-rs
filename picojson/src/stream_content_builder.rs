@@ -3,7 +3,7 @@
 //! ContentBuilder implementation for StreamParser using StreamBuffer.
 
 use crate::escape_processor::UnicodeEscapeCollector;
-use crate::event_processor::ContentExtractor;
+use crate::event_processor::{ContentExtractor, DataSource};
 use crate::shared::{ContentRange, State};
 use crate::stream_buffer::StreamBuffer;
 use crate::stream_parser::Reader;
@@ -237,6 +237,26 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         Ok(Event::Key(key))
     }
 
+    fn extract_key_content_new<'input, 'scratch>(
+        &mut self,
+        _source: &impl DataSource<'input, 'scratch>,
+        _start_pos: usize,
+    ) -> Result<Event<'input, 'scratch>, ParseError> {
+        // For StreamParser, the DataSource has lifetime limitations
+        // In a full implementation, this would be resolved by architectural changes
+        if _source.has_unescaped_content() {
+            // This demonstrates the intent but currently returns an error due to lifetime issues
+            return Err(ParseError::Unexpected(
+                crate::shared::UnexpectedState::StateMismatch,
+            ));
+        }
+
+        // Get borrowed content from input (this would also have lifetime issues in full implementation)
+        return Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ));
+    }
+
     fn extract_number(
         &mut self,
         start_pos: usize,
@@ -317,6 +337,101 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         self.start_escape_processing()
+    }
+
+    /// Override the standard validation method to use DataSource internally
+    fn validate_and_extract_key(&mut self) -> Result<Event<'_, '_>, ParseError> {
+        let start_pos = match *self.parser_state() {
+            crate::shared::State::Key(pos) => pos,
+            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
+        };
+
+        // Check for incomplete surrogate pairs before ending the key
+        if self
+            .unicode_escape_collector_mut()
+            .has_pending_high_surrogate()
+        {
+            return Err(ParseError::InvalidUnicodeCodepoint);
+        }
+
+        *self.parser_state_mut() = crate::shared::State::None;
+
+        // Use DataSource pattern manually to avoid borrowing conflicts
+        if self.stream_buffer.has_unescaped_content() {
+            // Get unescaped content from scratch buffer
+            self.queue_unescaped_reset(); // Important: queue reset like original implementation
+            let content_bytes = self.stream_buffer.get_unescaped_slice()?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Unescaped(content_str)))
+        } else {
+            // Get borrowed content from input
+            let current_pos = self.stream_buffer.current_position();
+            let (content_start, content_end) =
+                crate::shared::ContentRange::string_content_bounds_from_content_start(
+                    start_pos,
+                    current_pos,
+                );
+
+            let content_bytes = self
+                .stream_buffer
+                .get_string_slice(content_start, content_end)
+                .map_err(ParseError::from)?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Ok(Event::Key(crate::String::Borrowed(content_str)))
+        }
+    }
+
+    /// Override the new DataSource-based validation method for StreamParser
+    fn validate_and_extract_key_with_source<'input, 'scratch>(
+        &mut self,
+        source: &impl crate::event_processor::DataSource<'input, 'scratch>,
+    ) -> Result<crate::Event<'input, 'scratch>, ParseError> {
+        let start_pos = match *self.parser_state() {
+            crate::shared::State::Key(pos) => pos,
+            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
+        };
+
+        // Check for incomplete surrogate pairs before ending the key
+        if self
+            .unicode_escape_collector_mut()
+            .has_pending_high_surrogate()
+        {
+            return Err(ParseError::InvalidUnicodeCodepoint);
+        }
+
+        *self.parser_state_mut() = crate::shared::State::None;
+
+        // Use the new DataSource-based extraction
+        self.extract_key_content_new(source, start_pos)
+    }
+}
+
+// DataSource implementation for StreamContentBuilder demonstrates the pattern
+// but has fundamental lifetime challenges due to the current architecture
+impl<'b, R: Reader> DataSource<'b, 'b> for StreamContentBuilder<'b, R> {
+    fn get_borrowed_slice(&self, start: usize, end: usize) -> Result<&'b [u8], ParseError> {
+        // This is a fundamental limitation: StreamBuffer's get_string_slice returns a reference
+        // with lifetime tied to &self, not the buffer lifetime 'b. In a full implementation,
+        // this would require architectural changes to align the lifetimes.
+        // For now, this is a placeholder that shows the intended interface.
+        let _ = (start, end);
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
+    }
+
+    fn get_unescaped_slice(&self) -> Result<&'b [u8], ParseError> {
+        // Same lifetime limitation as above - this would need StreamBuffer API changes
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        // This method works fine as it doesn't involve lifetimes
+        self.stream_buffer.has_unescaped_content()
     }
 }
 

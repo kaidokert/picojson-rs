@@ -6,7 +6,8 @@
 //! robustness under different memory and data delivery constraints.
 
 use picojson::{
-    DefaultConfig, Event, JsonNumber, NumberResult, PushParseError, PushParser, PushParserHandler,
+    DefaultConfig, Event, JsonNumber, NumberResult, ParseError, PushParseError, PushParser,
+    PushParserHandler,
 };
 
 /// Owned event representation for comparison
@@ -118,6 +119,7 @@ impl<'a> ChunkedWriter<'a> {
     ) -> Result<(), PushParseError<E>>
     where
         H: for<'i, 's> PushParserHandler<'i, 's, E>,
+        E: From<ParseError>,
     {
         while self.pos < self.data.len() {
             let chunk_size = if self.chunk_pattern.is_empty() {
