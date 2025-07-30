@@ -5,7 +5,7 @@
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{self, UnicodeEscapeCollector};
 use crate::event_processor::ContentExtractor;
-use crate::shared::{ContentRange, State};
+use crate::shared::{ContentRange, DataSource, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::{Event, JsonNumber, ParseError};
 
@@ -68,16 +68,30 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         &mut self.unicode_escape_collector
     }
 
-    fn extract_string_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
-        let value_result = self.copy_on_escape.end_string(end_pos)?;
-        Ok(Event::String(value_result))
+    fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        // SliceParser-specific: Complete CopyOnEscape processing for unescaped content
+        let current_pos = self.current_position();
+        if self.has_unescaped_content() {
+            let end_pos = ContentRange::end_position_excluding_delimiter(current_pos);
+            self.copy_on_escape.end_string(end_pos)?; // Complete the CopyOnEscape processing
+        }
+
+        // Use the unified helper function to get the content
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::String(content_piece.to_string()?))
     }
 
-    fn extract_key_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
-        let key_result = self.copy_on_escape.end_string(end_pos)?;
-        Ok(Event::Key(key_result))
+    fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        // SliceParser-specific: Complete CopyOnEscape processing for unescaped content
+        let current_pos = self.current_position();
+        if self.has_unescaped_content() {
+            let end_pos = ContentRange::end_position_excluding_delimiter(current_pos);
+            self.copy_on_escape.end_string(end_pos)?; // Complete the CopyOnEscape processing
+        }
+
+        // Use the unified helper function to get the content
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::Key(content_piece.to_string()?))
     }
 
     fn extract_number(
@@ -162,3 +176,29 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         Ok(())
     }
 }
+
+/// DataSource implementation for SliceContentBuilder
+/// 
+/// This implementation provides access to both borrowed content from the original
+/// input slice and unescaped content from the CopyOnEscape scratch buffer.
+impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
+    fn get_borrowed_slice(&'a self, start: usize, end: usize) -> Result<&'a [u8], ParseError> {
+        self.buffer.slice(start, end).map_err(Into::into)
+    }
+
+    fn get_unescaped_slice(&'b self) -> Result<&'b [u8], ParseError> {
+        // Access the scratch buffer directly with the correct lifetime
+        if !self.copy_on_escape.has_unescaped_content() {
+            return Err(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch));
+        }
+        
+        // Use the new method with proper lifetime annotation
+        let (start, end) = self.copy_on_escape.get_scratch_range();
+        self.copy_on_escape.get_scratch_buffer_slice(start, end)
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        self.copy_on_escape.has_unescaped_content()
+    }
+}
+

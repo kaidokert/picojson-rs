@@ -4,10 +4,10 @@
 
 use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ContentExtractor;
-use crate::shared::{ContentRange, State};
+use crate::shared::{ContentRange, DataSource, State};
 use crate::stream_buffer::StreamBuffer;
 use crate::stream_parser::Reader;
-use crate::{Event, JsonNumber, ParseError, String};
+use crate::{Event, JsonNumber, ParseError};
 
 /// ContentBuilder implementation for StreamParser that uses StreamBuffer for streaming and escape processing
 pub struct StreamContentBuilder<'b, R: Reader> {
@@ -118,29 +118,6 @@ impl<'b, R: Reader> StreamContentBuilder<'b, R> {
         self.unescaped_reset_queued = true;
     }
 
-    /// Helper to create an unescaped string from StreamBuffer
-    fn create_unescaped_string(&mut self) -> Result<String<'_, '_>, ParseError> {
-        self.queue_unescaped_reset();
-        let unescaped_slice = self.stream_buffer.get_unescaped_slice()?;
-        let str_content = crate::shared::from_utf8(unescaped_slice)?;
-        Ok(String::Unescaped(str_content))
-    }
-
-    /// Helper to create a borrowed string from StreamBuffer
-    fn create_borrowed_string(
-        &mut self,
-        content_start: usize,
-    ) -> Result<String<'_, '_>, ParseError> {
-        let current_pos = self.stream_buffer.current_position();
-        let (content_start, content_end) =
-            ContentRange::string_content_bounds_from_content_start(content_start, current_pos);
-
-        let bytes = self
-            .stream_buffer
-            .get_string_slice(content_start, content_end)?;
-        let str_content = crate::shared::from_utf8(bytes)?;
-        Ok(String::Borrowed(str_content))
-    }
 
     /// Start escape processing using StreamBuffer
     fn start_escape_processing(&mut self) -> Result<(), ParseError> {
@@ -220,21 +197,23 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
     }
 
     fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let string = if self.stream_buffer.has_unescaped_content() {
-            self.create_unescaped_string()?
-        } else {
-            self.create_borrowed_string(start_pos)?
-        };
-        Ok(Event::String(string))
+        // StreamParser-specific: Queue reset to prevent content contamination
+        if self.has_unescaped_content() {
+            self.queue_unescaped_reset();
+        }
+        let current_pos = self.current_position();
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::String(content_piece.to_string()?))
     }
 
     fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let key = if self.stream_buffer.has_unescaped_content() {
-            self.create_unescaped_string()?
-        } else {
-            self.create_borrowed_string(start_pos)?
-        };
-        Ok(Event::Key(key))
+        // StreamParser-specific: Queue reset to prevent content contamination
+        if self.has_unescaped_content() {
+            self.queue_unescaped_reset();
+        }
+        let current_pos = self.current_position();
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::Key(content_piece.to_string()?))
     }
 
     fn extract_number(
@@ -338,5 +317,25 @@ impl<R: Reader> StreamContentBuilder<'_, R> {
             }
         }
         Ok(())
+    }
+}
+
+/// DataSource implementation for StreamContentBuilder
+/// 
+/// This implementation provides access to both borrowed content from the StreamBuffer's
+/// internal buffer and unescaped content from the StreamBuffer's scratch space.
+/// Note: StreamParser doesn't have a distinct 'input lifetime since it reads from a stream,
+/// so we use the buffer lifetime 'b for both borrowed and unescaped content.
+impl<'b, R: Reader> DataSource<'b, 'b> for StreamContentBuilder<'b, R> {
+    fn get_borrowed_slice(&'b self, start: usize, end: usize) -> Result<&'b [u8], ParseError> {
+        self.stream_buffer.get_string_slice(start, end).map_err(Into::into)
+    }
+
+    fn get_unescaped_slice(&'b self) -> Result<&'b [u8], ParseError> {
+        self.stream_buffer.get_unescaped_slice().map_err(Into::into)
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        self.stream_buffer.has_unescaped_content()
     }
 }
