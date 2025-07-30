@@ -173,6 +173,21 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
         Ok(())
     }
 
+    /// Check if unescaped content is being used (DataSource support)
+    pub fn has_unescaped_content(&self) -> bool {
+        self.using_scratch
+    }
+
+    /// Get the current unescaped slice without consuming the processor (DataSource support)
+    pub fn get_unescaped_slice(&self) -> Result<&[u8], ParseError> {
+        if !self.using_scratch {
+            return Err(ParseError::Unexpected(UnexpectedState::StateMismatch));
+        }
+        self.scratch
+            .get(self.scratch_start..self.scratch_pos)
+            .ok_or_else(|| ParseError::Unexpected(UnexpectedState::InvalidSliceBounds))
+    }
+
     /// Completes string processing and returns the final String.
     /// Updates the global scratch position for the next string.
     ///

@@ -11,39 +11,39 @@ use crate::ujson::{EventToken, Tokenizer};
 use crate::{ujson, ParseError};
 
 /// A trait that abstracts the source of JSON data for content extraction.
-/// 
-/// This trait provides a unified API for accessing both raw (borrowed) and processed (unescaped) 
-/// content, regardless of the underlying parser implementation. It enables the ContentExtractor 
+///
+/// This trait provides a unified API for accessing both raw (borrowed) and processed (unescaped)
+/// content, regardless of the underlying parser implementation. It enables the ContentExtractor
 /// trait to work with different data storage models:
-/// 
+///
 /// - StreamParser: Single continuous internal buffer that can be sliced backwards
 /// - PushParser: Discrete external data chunks with separate scratch buffer
 /// - SliceParser: Static input slice with separate scratch buffer
 pub trait DataSource<'input, 'scratch> {
     /// Returns a slice of the raw, unprocessed input data from a specific range.
-    /// 
+    ///
     /// This is used for zero-copy extraction of content that contains no escape sequences.
     /// The start and end positions are absolute positions within the input stream.
-    /// 
+    ///
     /// # Arguments
     /// * `start` - Starting position (inclusive) in the input
     /// * `end` - Ending position (exclusive) in the input
-    /// 
+    ///
     /// # Returns
     /// A borrowed slice of the input data, or an error if the range is invalid
     fn get_borrowed_slice(&self, start: usize, end: usize) -> Result<&'input [u8], ParseError>;
 
     /// Returns the full slice of the processed, unescaped content from the scratch buffer.
-    /// 
+    ///
     /// This is used when escape sequences have been processed and the content has been
     /// written to a temporary buffer. The entire scratch buffer content is returned.
-    /// 
+    ///
     /// # Returns
     /// A borrowed slice of the unescaped content, or an error if no unescaped content exists
     fn get_unescaped_slice(&self) -> Result<&'scratch [u8], ParseError>;
-    
+
     /// Check if unescaped content is available in the scratch buffer.
-    /// 
+    ///
     /// This allows callers to determine whether to use borrowed or unescaped content
     /// without attempting to access the buffer.
     fn has_unescaped_content(&self) -> bool;
@@ -313,6 +313,29 @@ pub trait ContentExtractor {
 
         *self.parser_state_mut() = State::None;
         self.extract_key_content(start_pos)
+    }
+
+    /// Shared validation and extraction for key content using DataSource approach
+    ///
+    /// This is the new unified interface that uses DataSource to abstract
+    /// access to both borrowed and unescaped content, enabling true parser-agnostic
+    /// content extraction. This method provides a parallel path for the gradual
+    /// refactoring to the DataSource architecture.
+    ///
+    /// # Arguments
+    /// * `source` - DataSource implementation providing access to content
+    ///
+    /// # Returns
+    /// A Key event containing either borrowed or unescaped content
+    fn validate_and_extract_key_with_source<'input, 'scratch>(
+        &mut self,
+        _source: &impl DataSource<'input, 'scratch>,
+    ) -> Result<Event<'input, 'scratch>, ParseError> {
+        // Default implementation: not supported, always fails
+        // Individual parsers will override this to use extract_key_content_new
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
     }
 
     /// Shared validation and extraction for number content
@@ -608,10 +631,10 @@ mod tests {
             unimplemented!("Mock doesn't need extraction")
         }
         fn extract_key_content_new<'input, 'scratch>(
-                &mut self,
-                source: &impl DataSource<'input, 'scratch>,
-                start_pos: usize,
-            ) -> Result<Event<'input, 'scratch>, ParseError> {
+            &mut self,
+            _source: &impl DataSource<'input, 'scratch>,
+            _start_pos: usize,
+        ) -> Result<Event<'input, 'scratch>, ParseError> {
             unimplemented!("Mock doesn't need extraction")
         }
 

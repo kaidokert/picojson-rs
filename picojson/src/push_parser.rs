@@ -5,7 +5,7 @@
 //! Clean implementation based on handler_design pattern with proper HRTB lifetime management.
 
 use crate::event_processor::ContentExtractor;
-use crate::push_content_builder::{PushContentBuilder, PushParserHandler};
+use crate::push_content_builder::{PushContentBuilder, PushDataSource, PushParserHandler};
 use crate::stream_buffer::StreamBufferError;
 use crate::{ujson, BitStackConfig, Event, ParseError};
 
@@ -255,11 +255,12 @@ where
                     ujson::Event::End(token) if token == end_token => {
                         should_append = false;
                         if is_key {
-                            // For now, fall back to the existing method until we can resolve
-                            // the borrowing conflicts with DataSource. This demonstrates the concept
-                            // but needs architectural changes to fully work.
+                            // Use DataSource pattern internally - manual implementation to avoid borrowing conflicts
                             self.content_builder
-                                .validate_and_extract_key_content_with_data(data)
+                                .validate_and_extract_key_content_with_datasource_logic(
+                                    data,
+                                    self.position_offset,
+                                )
                                 .map_err(PushParseError::Handler)?;
                         } else {
                             self.content_builder

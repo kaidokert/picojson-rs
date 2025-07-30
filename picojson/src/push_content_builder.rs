@@ -200,13 +200,17 @@ impl<H> ContentExtractor for PushContentBuilder<'_, H> {
     fn extract_string_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         // PushParser handles content extraction through its own event emission pattern
         // This method is not used in the push parser flow - use extract_string_content_with_data instead
-        Err(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch))
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
     }
 
     fn extract_key_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         // PushParser handles content extraction through its own event emission pattern
         // This method is not used in the push parser flow - use extract_key_content_with_data instead
-        Err(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch))
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
     }
 
     fn extract_key_content_new<'input, 'scratch>(
@@ -218,16 +222,18 @@ impl<H> ContentExtractor for PushContentBuilder<'_, H> {
         if source.has_unescaped_content() {
             // Get unescaped content from scratch buffer
             let content_bytes = source.get_unescaped_slice()?;
-            let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
             Ok(Event::Key(crate::String::Unescaped(content_str)))
         } else {
             // Get borrowed content from input
             let current_pos = self.current_position;
             let end_pos = current_pos;
-            
+
             if end_pos >= start_pos {
                 let content_bytes = source.get_borrowed_slice(start_pos + 1, end_pos)?; // +1 to skip quote
-                let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+                let content_str =
+                    core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
                 Ok(Event::Key(crate::String::Borrowed(content_str)))
             } else {
                 // Empty key
@@ -244,7 +250,9 @@ impl<H> ContentExtractor for PushContentBuilder<'_, H> {
     ) -> Result<Event<'_, '_>, ParseError> {
         // PushParser handles content extraction through its own event emission pattern
         // This method is not used in the push parser flow - use extract_number_with_data instead
-        Err(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch))
+        Err(ParseError::Unexpected(
+            crate::shared::UnexpectedState::StateMismatch,
+        ))
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
@@ -289,7 +297,102 @@ impl<H> ContentExtractor for PushContentBuilder<'_, H> {
 }
 
 impl<H> PushContentBuilder<'_, H> {
+    /// Override the new DataSource-based validation method for PushParser
+    pub fn validate_and_extract_key_with_source<'input, 'scratch>(
+        &mut self,
+        source: &impl DataSource<'input, 'scratch>,
+    ) -> Result<Event<'input, 'scratch>, ParseError> {
+        let start_pos = match *self.parser_state() {
+            State::Key(pos) => pos,
+            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
+        };
 
+        // Check for incomplete surrogate pairs before ending the key
+        if self
+            .unicode_escape_collector_mut()
+            .has_pending_high_surrogate()
+        {
+            return Err(ParseError::InvalidUnicodeCodepoint);
+        }
+
+        *self.parser_state_mut() = State::None;
+
+        // Use the new DataSource-based extraction
+        self.extract_key_content_new(source, start_pos)
+    }
+
+    /// Validate and extract key content using DataSource logic internally
+    /// This avoids borrowing conflicts by implementing the DataSource pattern manually
+    pub fn validate_and_extract_key_content_with_datasource_logic<E>(
+        &mut self,
+        data: &[u8],
+        position_offset: usize,
+    ) -> Result<(), E>
+    where
+        H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
+        E: From<ParseError>,
+    {
+        let start_pos = match *self.parser_state() {
+            State::Key(pos) => pos,
+            _ => {
+                return Err(
+                    ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch).into(),
+                )
+            }
+        };
+
+        // Check for incomplete surrogate pairs before ending the key
+        if self
+            .unicode_escape_collector_mut()
+            .has_pending_high_surrogate()
+        {
+            return Err(ParseError::InvalidUnicodeCodepoint.into());
+        }
+
+        *self.parser_state_mut() = State::None;
+
+        // Use DataSource pattern manually to avoid borrowing conflicts
+        let event = if self.using_unescaped_buffer {
+            // Get unescaped content from scratch buffer
+            let content_bytes = self
+                .stream_buffer
+                .get_unescaped_slice()
+                .map_err(ParseError::from)?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            Event::Key(crate::String::Unescaped(content_str))
+        } else {
+            // Get borrowed content from input
+            let current_pos = self.current_position;
+            let end_pos = current_pos;
+
+            if end_pos >= start_pos {
+                // Convert absolute positions to chunk-relative positions
+                let chunk_start = (start_pos + 1).saturating_sub(position_offset); // +1 to skip quote
+                let chunk_end = end_pos.saturating_sub(position_offset);
+
+                // Validate bounds within the current chunk
+                if chunk_end > data.len() || chunk_start > chunk_end {
+                    return Err(ParseError::Unexpected(
+                        crate::shared::UnexpectedState::InvalidSliceBounds,
+                    )
+                    .into());
+                }
+
+                let content_bytes = &data[chunk_start..chunk_end];
+                let content_str =
+                    core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+                Event::Key(crate::String::Borrowed(content_str))
+            } else {
+                // Empty key
+                Event::Key(crate::String::Borrowed(""))
+            }
+        };
+
+        self.handler.handle_event(event)?;
+        self.queue_unescaped_reset();
+        Ok(())
+    }
 
     /// Get the handler and emit an event directly
     pub fn emit_event<E>(&mut self, event: Event<'_, '_>) -> Result<(), E>
@@ -313,14 +416,16 @@ impl<H> PushContentBuilder<'_, H> {
     {
         let start_pos = match *self.parser_state() {
             State::Number(pos) => pos,
-            _ => return Err(ParseError::Unexpected(
-                crate::shared::UnexpectedState::StateMismatch,
-            ).into()),
+            _ => {
+                return Err(
+                    ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch).into(),
+                )
+            }
         };
 
         // Set state to None first to avoid borrowing conflicts
         *self.parser_state_mut() = State::None;
-        
+
         // Extract and emit the number
         self.extract_number_with_data_impl(start_pos, data)
     }
@@ -333,32 +438,37 @@ impl<H> PushContentBuilder<'_, H> {
     {
         let json_number = if self.using_unescaped_buffer {
             // Number is in the unescaped buffer
-            let number_bytes = self.stream_buffer.get_unescaped_slice().map_err(ParseError::from)?;
+            let number_bytes = self
+                .stream_buffer
+                .get_unescaped_slice()
+                .map_err(ParseError::from)?;
             JsonNumber::from_slice(number_bytes).map_err(E::from)?
         } else {
-            // Number is in the input data, need to slice it  
+            // Number is in the input data, need to slice it
             let current_pos = self.current_position;
             let end_pos = current_pos;
-            
+
             if end_pos >= start_pos {
                 let slice_start = start_pos.saturating_sub(self.position_offset);
                 let slice_end = end_pos.saturating_sub(self.position_offset);
-                
+
                 if slice_end <= data.len() && slice_start <= slice_end {
                     let number_bytes = &data[slice_start..slice_end];
                     JsonNumber::from_slice(number_bytes).map_err(E::from)?
                 } else {
                     return Err(ParseError::Unexpected(
                         crate::shared::UnexpectedState::InvalidSliceBounds,
-                    ).into());
+                    )
+                    .into());
                 }
             } else {
                 return Err(ParseError::Unexpected(
                     crate::shared::UnexpectedState::InvalidSliceBounds,
-                ).into());
+                )
+                .into());
             }
         };
-        
+
         self.handler.handle_event(Event::Number(json_number))?;
         Ok(())
     }
@@ -372,23 +482,28 @@ impl<H> PushContentBuilder<'_, H> {
         // Validate parser state
         let _start_pos = match *self.parser_state() {
             State::Number(pos) => pos,
-            _ => return Err(ParseError::Unexpected(
-                crate::shared::UnexpectedState::StateMismatch,
-            ).into()),
+            _ => {
+                return Err(
+                    ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch).into(),
+                )
+            }
         };
 
         // For unfinished numbers, we should always be using the unescaped buffer
         if !self.using_unescaped_buffer {
-            return Err(ParseError::Unexpected(
-                crate::shared::UnexpectedState::StateMismatch,
-            ).into());
+            return Err(
+                ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch).into(),
+            );
         }
 
         // Set state to None first to avoid borrowing conflicts
         *self.parser_state_mut() = State::None;
 
         // Extract number from unescaped buffer and emit event
-        let number_bytes = self.stream_buffer.get_unescaped_slice().map_err(ParseError::from)?;
+        let number_bytes = self
+            .stream_buffer
+            .get_unescaped_slice()
+            .map_err(ParseError::from)?;
         let json_number = JsonNumber::from_slice(number_bytes).map_err(E::from)?;
         self.handler.handle_event(Event::Number(json_number))?;
         Ok(())
@@ -402,14 +517,16 @@ impl<H> PushContentBuilder<'_, H> {
     {
         let start_pos = match *self.parser_state() {
             State::String(pos) => pos,
-            _ => return Err(ParseError::Unexpected(
-                crate::shared::UnexpectedState::StateMismatch,
-            ).into()),
+            _ => {
+                return Err(
+                    ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch).into(),
+                )
+            }
         };
 
         // Set state to None first to avoid borrowing conflicts
         *self.parser_state_mut() = State::None;
-        
+
         // Extract and emit the string
         self.extract_string_content_with_data_impl(start_pos, data, false)
     }
@@ -422,28 +539,39 @@ impl<H> PushContentBuilder<'_, H> {
     {
         let start_pos = match *self.parser_state() {
             State::Key(pos) => pos,
-            _ => return Err(ParseError::Unexpected(
-                crate::shared::UnexpectedState::StateMismatch,
-            ).into()),
+            _ => {
+                return Err(
+                    ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch).into(),
+                )
+            }
         };
 
         // Set state to None first to avoid borrowing conflicts
         *self.parser_state_mut() = State::None;
-        
+
         // Extract and emit the key
         self.extract_string_content_with_data_impl(start_pos, data, true)
     }
 
     /// Extract string or key content with data context (push parser specific implementation)
-    fn extract_string_content_with_data_impl<E>(&mut self, _start_pos: usize, data: &[u8], is_key: bool) -> Result<(), E>
+    fn extract_string_content_with_data_impl<E>(
+        &mut self,
+        _start_pos: usize,
+        data: &[u8],
+        is_key: bool,
+    ) -> Result<(), E>
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
         E: From<ParseError>,
     {
         let event = if self.using_unescaped_buffer {
             // Content is in the unescaped buffer
-            let content_bytes = self.stream_buffer.get_unescaped_slice().map_err(ParseError::from)?;
-            let content_str = core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
+            let content_bytes = self
+                .stream_buffer
+                .get_unescaped_slice()
+                .map_err(ParseError::from)?;
+            let content_str =
+                core::str::from_utf8(content_bytes).map_err(ParseError::InvalidUtf8)?;
             if is_key {
                 Event::Key(crate::String::Unescaped(content_str))
             } else {
@@ -458,7 +586,7 @@ impl<H> PushContentBuilder<'_, H> {
                 Event::String(crate::String::Borrowed(content_str))
             }
         };
-        
+
         self.handler.handle_event(event)?;
         self.queue_unescaped_reset();
         Ok(())
@@ -499,32 +627,34 @@ impl<'a, 'input, 'scratch, H> PushDataSource<'a, 'input, 'scratch, H> {
     }
 }
 
-impl<'a, 'input, 'scratch, H> DataSource<'input, 'scratch> for PushDataSource<'a, 'input, 'scratch, H> {
+impl<'a, 'input, 'scratch, H> DataSource<'input, 'scratch>
+    for PushDataSource<'a, 'input, 'scratch, H>
+where
+    'a: 'scratch,
+{
     fn get_borrowed_slice(&self, start: usize, end: usize) -> Result<&'input [u8], ParseError> {
         // Convert absolute positions to chunk-relative positions
         let chunk_start = start.saturating_sub(self.position_offset);
         let chunk_end = end.saturating_sub(self.position_offset);
-        
+
         // Validate bounds within the current chunk
         if chunk_end > self.input_chunk.len() || chunk_start > chunk_end {
             return Err(ParseError::Unexpected(
                 crate::shared::UnexpectedState::InvalidSliceBounds,
             ));
         }
-        
+
         Ok(&self.input_chunk[chunk_start..chunk_end])
     }
 
     fn get_unescaped_slice(&self) -> Result<&'scratch [u8], ParseError> {
-        // Note: This has a similar lifetime issue as StreamContentBuilder
-        // The content_builder reference has lifetime 'a, but we need to return
-        // a reference with lifetime 'scratch. This would need careful lifetime
-        // management in the actual implementation.
-        // For now, this is a placeholder showing the intended interface.
-        let _ = self.content_builder;
-        Err(ParseError::Unexpected(
-            crate::shared::UnexpectedState::StateMismatch,
-        ))
+        // Get unescaped content from the content builder's scratch buffer
+        // Unlike StreamContentBuilder, PushContentBuilder can potentially provide
+        // the correct lifetime since it owns the scratch buffer with lifetime 'scratch
+        self.content_builder
+            .stream_buffer
+            .get_unescaped_slice()
+            .map_err(ParseError::from)
     }
 
     fn has_unescaped_content(&self) -> bool {
