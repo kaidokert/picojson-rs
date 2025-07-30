@@ -222,18 +222,15 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         from_container_end: bool,
         finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // Use shared number parsing with StreamParser-specific document end detection
-        // StreamParser uses state-based detection: finished flag indicates true document end
-        let current_pos = self.stream_buffer.current_position();
+        let current_pos = self.current_position();
 
         // A standalone number at the end of the document has no trailing delimiter, so we use the full span.
         let use_full_span = !from_container_end && finished;
         let end_pos = ContentRange::number_end_position(current_pos, use_full_span);
 
-        let number_bytes = self
-            .stream_buffer
-            .get_string_slice(start_pos, end_pos)
-            .map_err(ParseError::from)?;
+        // Use the DataSource trait method to get the number bytes
+        let number_bytes = self.get_borrowed_slice(start_pos, end_pos)?;
+
         let json_number = JsonNumber::from_slice(number_bytes)?;
         Ok(Event::Number(json_number))
     }
