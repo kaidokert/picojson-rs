@@ -191,7 +191,11 @@ pub trait DataSource<'input, 'scratch> {
     ///
     /// # Returns
     /// A slice of the input data with lifetime `'input`
-    fn get_borrowed_slice(&'input self, start: usize, end: usize) -> Result<&'input [u8], ParseError>;
+    fn get_borrowed_slice(
+        &'input self,
+        start: usize,
+        end: usize,
+    ) -> Result<&'input [u8], ParseError>;
 
     /// Returns the full slice of the processed, unescaped content from the scratch buffer.
     /// Used when escape sequences have been processed and content written to temporary buffer.
@@ -199,7 +203,7 @@ pub trait DataSource<'input, 'scratch> {
     /// # Returns
     /// A slice of unescaped content with lifetime `'scratch`
     fn get_unescaped_slice(&'scratch self) -> Result<&'scratch [u8], ParseError>;
-    
+
     /// Check if unescaped content is available in the scratch buffer.
     ///
     /// # Returns
@@ -219,7 +223,10 @@ pub enum ContentPiece<'input, 'scratch> {
     Scratch(&'scratch [u8]),
 }
 
-impl<'input, 'scratch> ContentPiece<'input, 'scratch> {
+impl<'input, 'scratch> ContentPiece<'input, 'scratch>
+where
+    'input: 'scratch,
+{
     /// Convert the content piece to a String enum
     pub fn to_string(self) -> Result<String<'input, 'scratch>, ParseError> {
         match self {
@@ -233,9 +240,15 @@ impl<'input, 'scratch> ContentPiece<'input, 'scratch> {
             }
         }
     }
+
+    /// Returns the underlying byte slice, whether from input or scratch.
+    pub fn as_bytes(&self) -> &'scratch [u8] {
+        match self {
+            ContentPiece::Input(bytes) => bytes,
+            ContentPiece::Scratch(bytes) => bytes,
+        }
+    }
 }
-
-
 
 pub fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     core::str::from_utf8(v).map_err(Into::into)

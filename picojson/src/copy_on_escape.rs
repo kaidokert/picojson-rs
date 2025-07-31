@@ -211,9 +211,12 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
         self.using_scratch
     }
 
-
     /// Direct access to scratch buffer with proper lifetime for DataSource implementation
-    pub fn get_scratch_buffer_slice(&'b self, start: usize, end: usize) -> Result<&'b [u8], ParseError> {
+    pub fn get_scratch_buffer_slice(
+        &'b self,
+        start: usize,
+        end: usize,
+    ) -> Result<&'b [u8], ParseError> {
         self.scratch
             .get(start..end)
             .ok_or_else(|| ParseError::Unexpected(UnexpectedState::InvalidSliceBounds))

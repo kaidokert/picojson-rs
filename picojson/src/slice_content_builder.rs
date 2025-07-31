@@ -121,17 +121,20 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         let current_pos = self.buffer.current_pos();
-        let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
         // Shared Unicode escape processing pattern
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
+        let pending_surrogate = self.unicode_escape_collector.get_pending_high_surrogate();
 
-        let (utf8_bytes_result, escape_start_pos) =
+        let (utf8_bytes_result, escape_start_pos, new_pending_surrogate) =
             escape_processor::process_unicode_escape_sequence(
                 current_pos,
-                &mut self.unicode_escape_collector,
-                hex_slice_provider,
+                pending_surrogate,
+                self, // Pass self as the DataSource
             )?;
+
+        self.unicode_escape_collector
+            .set_pending_high_surrogate(new_pending_surrogate);
 
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some((utf8_bytes, len)) = utf8_bytes_result {
@@ -167,7 +170,7 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 }
 
 /// DataSource implementation for SliceContentBuilder
-/// 
+///
 /// This implementation provides access to both borrowed content from the original
 /// input slice and unescaped content from the CopyOnEscape scratch buffer.
 impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
@@ -178,9 +181,11 @@ impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
     fn get_unescaped_slice(&'b self) -> Result<&'b [u8], ParseError> {
         // Access the scratch buffer directly with the correct lifetime
         if !self.copy_on_escape.has_unescaped_content() {
-            return Err(ParseError::Unexpected(crate::shared::UnexpectedState::StateMismatch));
+            return Err(ParseError::Unexpected(
+                crate::shared::UnexpectedState::StateMismatch,
+            ));
         }
-        
+
         // Use the new method with proper lifetime annotation
         let (start, end) = self.copy_on_escape.get_scratch_range();
         self.copy_on_escape.get_scratch_buffer_slice(start, end)
@@ -190,4 +195,3 @@ impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
         self.copy_on_escape.has_unescaped_content()
     }
 }
-

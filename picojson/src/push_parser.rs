@@ -6,8 +6,9 @@
 
 use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ParserCore;
+use crate::shared::DataSource;
 use crate::stream_buffer::{StreamBuffer, StreamBufferError};
-use crate::{ujson, BitStackConfig, Event, JsonNumber, ParseError, String};
+use crate::{ujson, BitStackConfig, Event, JsonNumber, ParseError};
 
 /// Manages the parser's state.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,6 +36,48 @@ enum EscapeState {
 pub trait PushParserHandler<'input, 'scratch, E> {
     /// Handles a single, complete JSON event.
     fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), E>;
+}
+
+/// Helper struct that implements DataSource for PushParser content extraction
+struct PushParserDataSource<'input, 'scratch> {
+    /// Current input data chunk being processed
+    input_data: &'input [u8],
+    /// Reference to the stream buffer for unescaped content
+    stream_buffer: &'scratch StreamBuffer<'scratch>,
+    /// Whether unescaped content is being used
+    using_unescaped_buffer: bool,
+    /// Position offset for converting absolute positions to slice positions
+    position_offset: usize,
+}
+
+impl<'input, 'scratch> DataSource<'input, 'scratch> for PushParserDataSource<'input, 'scratch> {
+    fn get_borrowed_slice(
+        &'input self,
+        start: usize,
+        end: usize,
+    ) -> Result<&'input [u8], ParseError> {
+        // Convert absolute positions to relative positions within the current data chunk
+        let slice_start = start.saturating_sub(self.position_offset);
+        let slice_end = end.saturating_sub(self.position_offset);
+
+        if slice_end > self.input_data.len() || slice_start > slice_end {
+            return Err(ParseError::Unexpected(
+                crate::shared::UnexpectedState::InvalidSliceBounds,
+            ));
+        }
+
+        Ok(&self.input_data[slice_start..slice_end])
+    }
+
+    fn get_unescaped_slice(&'scratch self) -> Result<&'scratch [u8], ParseError> {
+        self.stream_buffer
+            .get_unescaped_slice()
+            .map_err(ParseError::from)
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        self.using_unescaped_buffer && self.stream_buffer.has_unescaped_content()
+    }
 }
 
 /// A SAX-style JSON push parser.
@@ -184,7 +227,15 @@ where
                     )));
                 }
 
-                let s = self.stream_buffer.get_unescaped_slice()?;
+                // Use the DataSource pattern for consistency
+                let data_source = PushParserDataSource {
+                    input_data: &[], // Empty since we're using unescaped buffer
+                    stream_buffer: &self.stream_buffer,
+                    using_unescaped_buffer: self.using_unescaped_buffer,
+                    position_offset: self.position_offset,
+                };
+
+                let s = data_source.get_unescaped_slice()?;
                 let num = JsonNumber::from_slice(s)?;
                 self.handler
                     .handle_event(Event::Number(num))
@@ -245,28 +296,35 @@ where
                 match event {
                     ujson::Event::End(token) if token == end_token => {
                         should_append = false;
-                        if self.using_unescaped_buffer {
-                            let s = self.stream_buffer.get_unescaped_slice()?;
-                            let s_str = core::str::from_utf8(s)?;
-                            let event = if is_key {
-                                Event::Key(String::Unescaped(s_str))
-                            } else {
-                                Event::String(String::Unescaped(s_str))
-                            };
-                            self.handler
-                                .handle_event(event)
-                                .map_err(PushParseError::Handler)?;
+
+                        let data_source = PushParserDataSource {
+                            input_data: data,
+                            stream_buffer: &self.stream_buffer,
+                            using_unescaped_buffer: self.using_unescaped_buffer,
+                            position_offset: self.position_offset,
+                        };
+
+                        // The start position for string content is after the opening quote.
+                        let content_start_pos = self.token_start_pos + 1;
+
+                        // `get_content_piece` expects the end position to be *after* the delimiter,
+                        // but the tokenizer gives us the position *of* the delimiter (`pos`), so we add 1.
+                        let content_piece = crate::shared::get_content_piece(
+                            &data_source,
+                            content_start_pos,
+                            pos + 1,
+                        )?;
+                        let content_string = content_piece.to_string()?;
+
+                        let event = if is_key {
+                            Event::Key(content_string)
                         } else {
-                            let s_str = self.extract_borrowed_content(data)?;
-                            let event = if is_key {
-                                Event::Key(String::Borrowed(s_str))
-                            } else {
-                                Event::String(String::Borrowed(s_str))
-                            };
-                            self.handler
-                                .handle_event(event)
-                                .map_err(PushParseError::Handler)?;
-                        }
+                            Event::String(content_string)
+                        };
+
+                        self.handler
+                            .handle_event(event)
+                            .map_err(PushParseError::Handler)?;
                         self.stream_buffer.clear_unescaped();
                         ParserState::Idle
                     }
@@ -289,36 +347,31 @@ where
                 ujson::Event::End(ujson::EventToken::Number)
                 | ujson::Event::End(ujson::EventToken::NumberAndArray)
                 | ujson::Event::End(ujson::EventToken::NumberAndObject) => {
-                    if self.using_unescaped_buffer {
-                        let s = self.stream_buffer.get_unescaped_slice()?;
-                        let num = JsonNumber::from_slice(s)?;
-                        self.handler
-                            .handle_event(Event::Number(num))
-                            .map_err(PushParseError::Handler)?;
-                    } else {
-                        let current_pos = self.current_position;
-                        // The end position for slicing - current_pos points to the delimiter
-                        // For slice [start..end), we want to exclude the delimiter
-                        // So end_pos = current_pos (delimiter position) is correct for slicing
-                        let end_pos = current_pos;
-
-                        let start_pos = self.token_start_pos;
-
-                        if end_pos >= start_pos {
-                            let slice_start = start_pos.saturating_sub(self.position_offset);
-                            let slice_end = end_pos.saturating_sub(self.position_offset);
-
-                            if slice_end <= data.len() && slice_start <= slice_end {
-                                let s_bytes = &data[slice_start..slice_end];
-                                let num = JsonNumber::from_slice(s_bytes)?;
-                                self.handler
-                                    .handle_event(Event::Number(num))
-                                    .map_err(PushParseError::Handler)?;
-                            }
-                        }
-                    }
-                    self.stream_buffer.clear_unescaped();
                     should_append = false;
+
+                    // Use the unified DataSource pattern for number extraction
+                    let data_source = PushParserDataSource {
+                        input_data: data,
+                        stream_buffer: &self.stream_buffer,
+                        using_unescaped_buffer: self.using_unescaped_buffer,
+                        position_offset: self.position_offset,
+                    };
+
+                    let number_bytes = {
+                        let content_piece = crate::shared::get_content_piece(
+                            &data_source,
+                            self.token_start_pos,
+                            pos + 1,
+                        )?;
+                        content_piece.as_bytes()
+                    };
+
+                    let num = JsonNumber::from_slice(number_bytes)?;
+                    self.handler
+                        .handle_event(Event::Number(num))
+                        .map_err(PushParseError::Handler)?;
+
+                    self.stream_buffer.clear_unescaped();
                     ParserState::Idle
                 }
                 _ => ParserState::ParsingNumber,
@@ -581,21 +634,6 @@ where
             // need to write escaped content to the buffer
         }
         Ok(())
-    }
-
-    fn extract_borrowed_content<'a, E>(
-        &self,
-        data: &'a [u8],
-    ) -> Result<&'a str, PushParseError<E>> {
-        let start_pos = self.token_start_pos + 1;
-        let end_pos = self.current_position;
-        if end_pos >= start_pos {
-            let s_bytes =
-                &data[(start_pos - self.position_offset)..(end_pos - self.position_offset)];
-            Ok(core::str::from_utf8(s_bytes)?)
-        } else {
-            Ok("")
-        }
     }
 }
 
