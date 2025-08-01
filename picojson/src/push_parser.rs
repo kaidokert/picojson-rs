@@ -4,11 +4,10 @@
 //!
 //! Clean implementation based on handler_design pattern with proper HRTB lifetime management.
 
-use crate::escape_processor::UnicodeEscapeCollector;
-use crate::event_processor::ParserCore;
+use crate::push_content_builder::{PushContentBuilder, PushParserHandler};
 use crate::shared::DataSource;
 use crate::stream_buffer::{StreamBuffer, StreamBufferError};
-use crate::{ujson, BitStackConfig, Event, JsonNumber, ParseError};
+use crate::{ujson, BitStackConfig, Event, ParseError};
 
 /// Manages the parser's state.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,28 +25,16 @@ enum EscapeState {
     InUnicodeEscape,
 }
 
-/// A trait for handling events from a SAX-style push parser.
-///
-/// # Generic Parameters
-///
-/// * `'input` - Lifetime for the input data being parsed
-/// * `'scratch` - Lifetime for the scratch buffer used for temporary storage
-/// * `E` - The error type that can be returned by the handler
-pub trait PushParserHandler<'input, 'scratch, E> {
-    /// Handles a single, complete JSON event.
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), E>;
-}
-
 /// Helper struct that implements DataSource for PushParser content extraction
-struct PushParserDataSource<'input, 'scratch> {
+pub struct PushParserDataSource<'input, 'scratch> {
     /// Current input data chunk being processed
-    input_data: &'input [u8],
+    pub input_data: &'input [u8],
     /// Reference to the stream buffer for unescaped content
-    stream_buffer: &'scratch StreamBuffer<'scratch>,
+    pub stream_buffer: &'scratch StreamBuffer<'scratch>,
     /// Whether unescaped content is being used
-    using_unescaped_buffer: bool,
+    pub using_unescaped_buffer: bool,
     /// Position offset for converting absolute positions to slice positions
-    position_offset: usize,
+    pub position_offset: usize,
 }
 
 impl<'input, 'scratch> DataSource<'input, 'scratch> for PushParserDataSource<'input, 'scratch> {
@@ -94,16 +81,16 @@ pub struct PushParser<'scratch, H, C>
 where
     C: BitStackConfig,
 {
-    handler: H,
-    stream_buffer: StreamBuffer<'scratch>,
-    core: ParserCore<C::Bucket, C::Counter>,
-    unicode_escape_collector: UnicodeEscapeCollector,
-    state: ParserState,
-    escape_state: EscapeState,
-    position_offset: usize,
+    /// Content builder that handles content extraction and event emission
+    content_builder: PushContentBuilder<'scratch, H>,
+    /// Core tokenizer for JSON processing
+    tokenizer: ujson::Tokenizer<C::Bucket, C::Counter>,
+    /// Current position within the current chunk
     current_position: usize,
-    token_start_pos: usize,
-    using_unescaped_buffer: bool,
+    /// Parser state tracking
+    state: ParserState,
+    /// Escape state tracking
+    escape_state: EscapeState,
 }
 
 impl<'scratch, H, C> PushParser<'scratch, H, C>
@@ -113,16 +100,11 @@ where
     /// Creates a new `PushParser`.
     pub fn new(handler: H, buffer: &'scratch mut [u8]) -> Self {
         Self {
-            handler,
-            stream_buffer: StreamBuffer::new(buffer),
-            core: ParserCore::new(),
-            unicode_escape_collector: UnicodeEscapeCollector::new(),
+            content_builder: PushContentBuilder::new(handler, buffer),
+            tokenizer: ujson::Tokenizer::new(),
+            current_position: 0,
             state: ParserState::Idle,
             escape_state: EscapeState::None,
-            position_offset: 0,
-            current_position: 0,
-            token_start_pos: 0,
-            using_unescaped_buffer: false,
         }
     }
 
@@ -140,14 +122,16 @@ where
         // Currently processes one byte at a time which may be suboptimal for large inputs
         for (local_pos, &byte) in data.iter().enumerate() {
             // Update current position to absolute position
-            self.current_position = self.position_offset + local_pos;
+            self.current_position = self.content_builder.position_offset() + local_pos;
+            self.content_builder
+                .set_current_position(self.current_position);
             let mut append_byte = true;
 
             // Tokenizer generates events that drive state transitions.
             {
                 let mut callback =
                     create_tokenizer_callback(&mut event_storage, self.current_position);
-                let _bytes_processed = self.core.tokenizer.parse_chunk(&[byte], &mut callback)?;
+                let _bytes_processed = self.tokenizer.parse_chunk(&[byte], &mut callback)?;
             }
 
             while let Some((event, event_pos)) = take_first_event(&mut event_storage) {
@@ -167,8 +151,8 @@ where
                             ParserState::ParsingString
                             | ParserState::ParsingKey
                             | ParserState::ParsingNumber => {
-                                if self.using_unescaped_buffer {
-                                    self.stream_buffer.append_unescaped_byte(byte)?;
+                                if self.content_builder.using_unescaped_buffer() {
+                                    self.content_builder.append_unescaped_byte(byte)?;
                                 }
                             }
                             ParserState::Idle => {}
@@ -179,7 +163,11 @@ where
                         match self.state {
                             ParserState::ParsingString | ParserState::ParsingKey => {
                                 // Feed hex digits to collector - let the End event handle UTF-8 conversion
-                                match self.unicode_escape_collector.add_hex_digit(byte) {
+                                match self
+                                    .content_builder
+                                    .unicode_escape_collector_mut()
+                                    .add_hex_digit(byte)
+                                {
                                     Ok(_is_complete) => {
                                         // Don't process immediately - let the End event handle the UTF-8 conversion
                                         // This avoids duplicate processing while still collecting hex digits
@@ -200,13 +188,13 @@ where
         if let ParserState::ParsingString | ParserState::ParsingKey | ParserState::ParsingNumber =
             self.state
         {
-            if !self.using_unescaped_buffer {
+            if !self.content_builder.using_unescaped_buffer() {
                 self.switch_to_unescaped_mode(data, data.len())?;
             }
         }
 
         // Update position offset for next call
-        self.position_offset += data.len();
+        self.content_builder.add_position_offset(data.len());
 
         Ok(())
     }
@@ -221,35 +209,31 @@ where
             ParserState::ParsingNumber => {
                 // Numbers are automatically switched to unescaped mode at the end of each write() call,
                 // so by the time we reach finish(), they should always be in the stream buffer
-                if !self.using_unescaped_buffer {
+                if !self.content_builder.using_unescaped_buffer() {
                     return Err(PushParseError::Parse(ParseError::Unexpected(
                         crate::shared::UnexpectedState::StateMismatch,
                     )));
                 }
 
-                // Use the DataSource pattern for consistency
-                let data_source = PushParserDataSource {
-                    input_data: &[], // Empty since we're using unescaped buffer
-                    stream_buffer: &self.stream_buffer,
-                    using_unescaped_buffer: self.using_unescaped_buffer,
-                    position_offset: self.position_offset,
-                };
-
-                let s = data_source.get_unescaped_slice()?;
-                let num = JsonNumber::from_slice(s)?;
-                self.handler
-                    .handle_event(Event::Number(num))
-                    .map_err(PushParseError::Handler)?;
-                self.stream_buffer.clear_unescaped();
+                // Emit number from unescaped buffer atomically
+                self.content_builder.emit_number_from_unescaped_buffer()?;
             }
             ParserState::ParsingString => {
-                if self.unicode_escape_collector.is_in_progress() {
+                if self
+                    .content_builder
+                    .unicode_escape_collector_mut()
+                    .is_in_progress()
+                {
                     return Err(PushParseError::Parse(ParseError::InvalidUnicodeHex));
                 }
                 return Err(PushParseError::Parse(ParseError::EndOfData));
             }
             ParserState::ParsingKey => {
-                if self.unicode_escape_collector.is_in_progress() {
+                if self
+                    .content_builder
+                    .unicode_escape_collector_mut()
+                    .is_in_progress()
+                {
                     return Err(PushParseError::Parse(ParseError::InvalidUnicodeHex));
                 }
                 return Err(PushParseError::Parse(ParseError::EndOfData));
@@ -260,16 +244,16 @@ where
         // Check that the JSON document is complete (all containers closed)
         // Use a no-op callback since we don't expect any more events
         let mut no_op_callback = |_event: ujson::Event, _pos: usize| {};
-        let _bytes_processed = self.core.tokenizer.finish(&mut no_op_callback)?;
+        let _bytes_processed = self.tokenizer.finish(&mut no_op_callback)?;
 
-        self.handler
-            .handle_event(Event::EndDocument)
+        self.content_builder
+            .emit_event(Event::EndDocument)
             .map_err(PushParseError::Handler)
     }
 
     /// Destroys the parser and returns the handler.
     pub fn destroy(self) -> H {
-        self.handler
+        self.content_builder.into_handler()
     }
 
     /// Returns (new_state, should_append_byte)
@@ -297,35 +281,17 @@ where
                     ujson::Event::End(token) if token == end_token => {
                         should_append = false;
 
-                        let data_source = PushParserDataSource {
-                            input_data: data,
-                            stream_buffer: &self.stream_buffer,
-                            using_unescaped_buffer: self.using_unescaped_buffer,
-                            position_offset: self.position_offset,
-                        };
-
                         // The start position for string content is after the opening quote.
-                        let content_start_pos = self.token_start_pos + 1;
+                        let content_start_pos = self.content_builder.token_start_pos() + 1;
 
                         // `get_content_piece` expects the end position to be *after* the delimiter,
                         // but the tokenizer gives us the position *of* the delimiter (`pos`), so we add 1.
-                        let content_piece = crate::shared::get_content_piece(
-                            &data_source,
+                        self.content_builder.emit_string_or_key_event(
+                            is_key,
+                            data,
                             content_start_pos,
                             pos + 1,
                         )?;
-                        let content_string = content_piece.to_string()?;
-
-                        let event = if is_key {
-                            Event::Key(content_string)
-                        } else {
-                            Event::String(content_string)
-                        };
-
-                        self.handler
-                            .handle_event(event)
-                            .map_err(PushParseError::Handler)?;
-                        self.stream_buffer.clear_unescaped();
                         ParserState::Idle
                     }
                     ujson::Event::End(ujson::EventToken::EscapeQuote)
@@ -349,29 +315,11 @@ where
                 | ujson::Event::End(ujson::EventToken::NumberAndObject) => {
                     should_append = false;
 
-                    // Use the unified DataSource pattern for number extraction
-                    let data_source = PushParserDataSource {
-                        input_data: data,
-                        stream_buffer: &self.stream_buffer,
-                        using_unescaped_buffer: self.using_unescaped_buffer,
-                        position_offset: self.position_offset,
-                    };
-
-                    let number_bytes = {
-                        let content_piece = crate::shared::get_content_piece(
-                            &data_source,
-                            self.token_start_pos,
-                            pos + 1,
-                        )?;
-                        content_piece.as_bytes()
-                    };
-
-                    let num = JsonNumber::from_slice(number_bytes)?;
-                    self.handler
-                        .handle_event(Event::Number(num))
-                        .map_err(PushParseError::Handler)?;
-
-                    self.stream_buffer.clear_unescaped();
+                    self.content_builder.emit_number_event(
+                        data,
+                        self.content_builder.token_start_pos(),
+                        pos + 1,
+                    )?;
                     ParserState::Idle
                 }
                 _ => ParserState::ParsingNumber,
@@ -393,63 +341,63 @@ where
         match event {
             ujson::Event::Begin(ujson::EventToken::String) => {
                 *should_append = false;
-                self.token_start_pos = pos;
-                self.using_unescaped_buffer = false;
-                self.stream_buffer.clear_unescaped();
+                self.content_builder.set_token_start_pos(pos);
+                self.content_builder.set_using_unescaped_buffer(false);
+                self.content_builder.clear_unescaped();
                 Ok(ParserState::ParsingString)
             }
             ujson::Event::Begin(ujson::EventToken::Key) => {
                 *should_append = false;
-                self.token_start_pos = pos;
-                self.using_unescaped_buffer = false;
-                self.stream_buffer.clear_unescaped();
+                self.content_builder.set_token_start_pos(pos);
+                self.content_builder.set_using_unescaped_buffer(false);
+                self.content_builder.clear_unescaped();
                 Ok(ParserState::ParsingKey)
             }
             ujson::Event::Begin(ujson::EventToken::Number) => {
-                self.token_start_pos = pos;
-                self.using_unescaped_buffer = false;
-                self.stream_buffer.clear_unescaped();
+                self.content_builder.set_token_start_pos(pos);
+                self.content_builder.set_using_unescaped_buffer(false);
+                self.content_builder.clear_unescaped();
                 Ok(ParserState::ParsingNumber)
             }
             ujson::Event::ObjectStart => {
-                self.handler
-                    .handle_event(Event::StartObject)
+                self.content_builder
+                    .emit_event(Event::StartObject)
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
             ujson::Event::ObjectEnd => {
-                self.handler
-                    .handle_event(Event::EndObject)
+                self.content_builder
+                    .emit_event(Event::EndObject)
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
             ujson::Event::ArrayStart => {
-                self.handler
-                    .handle_event(Event::StartArray)
+                self.content_builder
+                    .emit_event(Event::StartArray)
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
             ujson::Event::ArrayEnd => {
-                self.handler
-                    .handle_event(Event::EndArray)
+                self.content_builder
+                    .emit_event(Event::EndArray)
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
             ujson::Event::End(ujson::EventToken::True) => {
-                self.handler
-                    .handle_event(Event::Bool(true))
+                self.content_builder
+                    .emit_event(Event::Bool(true))
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
             ujson::Event::End(ujson::EventToken::False) => {
-                self.handler
-                    .handle_event(Event::Bool(false))
+                self.content_builder
+                    .emit_event(Event::Bool(false))
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
             ujson::Event::End(ujson::EventToken::Null) => {
-                self.handler
-                    .handle_event(Event::Null)
+                self.content_builder
+                    .emit_event(Event::Null)
                     .map_err(PushParseError::Handler)?;
                 Ok(ParserState::Idle)
             }
@@ -483,7 +431,7 @@ where
                 | ujson::EventToken::EscapeCarriageReturn
                 | ujson::EventToken::EscapeTab),
             ) => {
-                if !self.using_unescaped_buffer {
+                if !self.content_builder.using_unescaped_buffer() {
                     self.switch_to_unescaped_mode(data, pos)?;
                 }
                 let unescaped_char = match token {
@@ -497,22 +445,28 @@ where
                     ujson::EventToken::EscapeTab => b'\t',
                     _ => unreachable!(), // Covered by the outer match arm guard
                 };
-                self.stream_buffer.append_unescaped_byte(unescaped_char)?;
+                self.content_builder.append_unescaped_byte(unescaped_char)?;
                 self.escape_state = EscapeState::None;
             }
             ujson::Event::End(ujson::EventToken::UnicodeEscape) => {
                 // Switch to unescaped mode if not already active
-                if !self.using_unescaped_buffer {
+                if !self.content_builder.using_unescaped_buffer() {
                     self.switch_to_unescaped_mode(data, pos)?;
                 }
 
                 // Ensure we have all 4 hex digits before processing
                 // The 4th hex digit might be the current byte being processed
-                let current_byte = data.get(pos - self.position_offset).copied();
+                let current_byte = data
+                    .get(pos - self.content_builder.position_offset())
+                    .copied();
                 if let Some(byte) = current_byte {
                     if byte.is_ascii_hexdigit() {
                         // Feed the final hex digit if it hasn't been processed yet
-                        match self.unicode_escape_collector.add_hex_digit(byte) {
+                        match self
+                            .content_builder
+                            .unicode_escape_collector_mut()
+                            .add_hex_digit(byte)
+                        {
                             Ok(_is_complete) => {
                                 // Continue to process the complete sequence
                             }
@@ -524,13 +478,14 @@ where
                 // Process the collected unicode escape to UTF-8
                 let mut utf8_buffer = [0u8; 4];
                 match self
-                    .unicode_escape_collector
+                    .content_builder
+                    .unicode_escape_collector_mut()
                     .process_to_utf8(&mut utf8_buffer)
                 {
                     Ok((utf8_bytes, _)) => {
                         if let Some(bytes) = utf8_bytes {
                             for &b in bytes {
-                                self.stream_buffer.append_unescaped_byte(b)?;
+                                self.content_builder.append_unescaped_byte(b)?;
                             }
                         }
                     }
@@ -538,7 +493,7 @@ where
                 }
 
                 // Reset for next escape sequence
-                self.unicode_escape_collector.reset();
+                self.content_builder.unicode_escape_collector_mut().reset();
                 self.escape_state = EscapeState::None;
             }
             _ => {
@@ -560,21 +515,21 @@ where
         // This marks the beginning of an escape sequence - suppress raw byte appending
         self.escape_state = EscapeState::InEscapeSequence;
         // Switch to unescaped mode if not already, but don't include the backslash
-        if !self.using_unescaped_buffer {
+        if !self.content_builder.using_unescaped_buffer() {
             // Copy content up to (but not including) the backslash
-            let start_pos = self.token_start_pos + 1;
+            let start_pos = self.content_builder.token_start_pos() + 1;
             let end_pos = pos; // Don't include the backslash at 'pos'
             if end_pos > start_pos {
-                self.using_unescaped_buffer = true;
-                self.stream_buffer.clear_unescaped();
-                let initial_part =
-                    &data[(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                self.content_builder.set_using_unescaped_buffer(true);
+                self.content_builder.clear_unescaped();
+                let initial_part = &data[(start_pos - self.content_builder.position_offset())
+                    ..(end_pos - self.content_builder.position_offset())];
                 for &byte in initial_part {
-                    self.stream_buffer.append_unescaped_byte(byte)?;
+                    self.content_builder.append_unescaped_byte(byte)?;
                 }
             } else {
-                self.using_unescaped_buffer = true;
-                self.stream_buffer.clear_unescaped();
+                self.content_builder.set_using_unescaped_buffer(true);
+                self.content_builder.clear_unescaped();
             }
         }
         Ok(())
@@ -583,20 +538,20 @@ where
     /// Handle the beginning of a Unicode escape sequence
     fn handle_begin_unicode_escape<E>(&mut self, data: &[u8]) -> Result<(), PushParseError<E>> {
         // Start of unicode escape sequence - reset collector for new sequence
-        self.unicode_escape_collector.reset();
+        self.content_builder.unicode_escape_collector_mut().reset();
         self.escape_state = EscapeState::InUnicodeEscape;
         // Force switch to unescaped mode since we'll need to write processed unicode content
-        if !self.using_unescaped_buffer {
-            self.using_unescaped_buffer = true;
-            self.stream_buffer.clear_unescaped();
+        if !self.content_builder.using_unescaped_buffer() {
+            self.content_builder.set_using_unescaped_buffer(true);
+            self.content_builder.clear_unescaped();
             // Copy any content that was accumulated before this unicode escape
-            let start_pos = self.token_start_pos + 1;
+            let start_pos = self.content_builder.token_start_pos() + 1;
             let end_pos = self.current_position;
             if end_pos > start_pos {
-                let initial_part =
-                    &data[(start_pos - self.position_offset)..(end_pos - self.position_offset)];
+                let initial_part = &data[(start_pos - self.content_builder.position_offset())
+                    ..(end_pos - self.content_builder.position_offset())];
                 for &byte in initial_part {
-                    self.stream_buffer.append_unescaped_byte(byte)?;
+                    self.content_builder.append_unescaped_byte(byte)?;
                 }
             }
         }
@@ -608,7 +563,7 @@ where
         data: &[u8],
         current_local_pos: usize,
     ) -> Result<(), PushParseError<E>> {
-        if !self.using_unescaped_buffer {
+        if !self.content_builder.using_unescaped_buffer() {
             // For strings/keys: skip opening quote (+1)
             // For numbers: start from first digit (+0)
             let start_offset = match self.state {
@@ -616,18 +571,18 @@ where
                 ParserState::ParsingNumber => 0,                           // Include first digit
                 ParserState::Idle => 0,
             };
-            let start_pos = self.token_start_pos + start_offset;
-            let end_pos = self.position_offset + current_local_pos;
+            let start_pos = self.content_builder.token_start_pos() + start_offset;
+            let end_pos = self.content_builder.position_offset() + current_local_pos;
 
             if end_pos > start_pos {
                 // Only switch to unescaped mode if there's actually content to copy
-                self.using_unescaped_buffer = true;
-                let slice_start = start_pos.saturating_sub(self.position_offset);
-                let slice_end = end_pos.saturating_sub(self.position_offset);
+                self.content_builder.set_using_unescaped_buffer(true);
+                let slice_start = start_pos.saturating_sub(self.content_builder.position_offset());
+                let slice_end = end_pos.saturating_sub(self.content_builder.position_offset());
 
                 let initial_part = &data[slice_start..slice_end];
                 for &byte in initial_part {
-                    self.stream_buffer.append_unescaped_byte(byte)?;
+                    self.content_builder.append_unescaped_byte(byte)?;
                 }
             }
             // Note: If there's no initial content, we stay in borrowed mode until we actually
