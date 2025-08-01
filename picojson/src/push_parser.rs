@@ -9,6 +9,9 @@ use crate::shared::DataSource;
 use crate::stream_buffer::{StreamBuffer, StreamBufferError};
 use crate::{ujson, BitStackConfig, Event, ParseError};
 
+#[cfg(any(test, debug_assertions))]
+extern crate std;
+
 /// Manages the parser's state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ParserState {
@@ -112,6 +115,7 @@ where
     pub fn write<'input, E>(&mut self, data: &'input [u8]) -> Result<(), PushParseError<E>>
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
+        E: From<ParseError>,
     {
         // Event storage for tokenizer output. Fixed size of 2 events is by design:
         // the tokenizer never returns more than 2 events per input byte. This is a
@@ -265,6 +269,7 @@ where
     ) -> Result<(ParserState, bool), PushParseError<E>>
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
+        E: From<ParseError>,
     {
         let mut should_append = true;
         let new_state = match self.state {
@@ -281,17 +286,10 @@ where
                     ujson::Event::End(token) if token == end_token => {
                         should_append = false;
 
-                        // The start position for string content is after the opening quote.
-                        let content_start_pos = self.content_builder.token_start_pos() + 1;
+                        self.content_builder
+                            .extract_string_or_key_content(is_key, data)?;
+                        self.content_builder.apply_unescaped_reset_if_queued();
 
-                        // `get_content_piece` expects the end position to be *after* the delimiter,
-                        // but the tokenizer gives us the position *of* the delimiter (`pos`), so we add 1.
-                        self.content_builder.emit_string_or_key_event(
-                            is_key,
-                            data,
-                            content_start_pos,
-                            pos + 1,
-                        )?;
                         ParserState::Idle
                     }
                     ujson::Event::End(ujson::EventToken::EscapeQuote)
@@ -646,4 +644,20 @@ fn take_first_event(
     event_storage: &mut [Option<(ujson::Event, usize)>; 2],
 ) -> Option<(ujson::Event, usize)> {
     event_storage.iter_mut().find_map(|e| e.take())
+}
+
+// Implement From<ParseError> for common error types used in tests
+// This needs to be globally accessible for integration tests, not just unit tests
+#[cfg(any(test, debug_assertions))]
+impl From<ParseError> for std::string::String {
+    fn from(_: ParseError) -> Self {
+        std::string::String::new()
+    }
+}
+
+#[cfg(any(test, debug_assertions))]
+impl From<ParseError> for () {
+    fn from(_: ParseError) -> Self {
+        ()
+    }
 }

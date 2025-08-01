@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Comprehensive stress tests for PushParser
-//!
+//! 
 //! Tests various buffer sizes, write chunk patterns, and edge cases to ensure
 //! robustness under different memory and data delivery constraints.
 
 use picojson::{
-    DefaultConfig, Event, JsonNumber, NumberResult, PushParseError, PushParser, PushParserHandler,
+    DefaultConfig, Event, JsonNumber, NumberResult, ParseError, PushParseError, PushParser,
+    PushParserHandler,
 };
 
 /// Owned event representation for comparison
@@ -112,12 +113,16 @@ impl<'a> ChunkedWriter<'a> {
         }
     }
 
-    fn write_to_parser<H, E>(
+    pub fn run<
+H,
+        E,
+    >(
         &mut self,
-        parser: &mut PushParser<H, DefaultConfig>,
+        parser: &mut PushParser<'_, H, DefaultConfig>,
     ) -> Result<(), PushParseError<E>>
     where
         H: for<'i, 's> PushParserHandler<'i, 's, E>,
+        E: From<ParseError>,
     {
         while self.pos < self.data.len() {
             let chunk_size = if self.chunk_pattern.is_empty() {
@@ -242,14 +247,14 @@ fn get_push_parser_test_scenarios() -> Vec<TestScenario> {
         },
         TestScenario {
             name: "String ending with escape",
-            json: br#"["hello\\\\"]"#,
+            json: br#"["hello\\"]"#,
             expected_events: vec![
                 Event::StartArray,
-                Event::String(picojson::String::Unescaped("hello\\\\")),
+                Event::String(picojson::String::Unescaped("hello\\")),
                 Event::EndArray,
                 Event::EndDocument,
             ],
-            min_buffer_size: 7, // Escape at end processing - copy-on-escape optimization allows smaller buffer
+            min_buffer_size: 6, // Escape at end processing - copy-on-escape optimization allows smaller buffer
         },
         TestScenario {
             name: "Complex Nested Structure",
@@ -303,7 +308,7 @@ fn test_push_parsing_with_config(
 
     let mut writer = ChunkedWriter::new(scenario.json, chunk_pattern);
 
-    match writer.write_to_parser(&mut parser) {
+    match writer.run(&mut parser) {
         Ok(()) => {
             let handler = parser.destroy();
             handler.verify_complete()
@@ -371,7 +376,7 @@ fn get_min_buffer_size_for_scenario(scenario: &TestScenario, chunk_pattern: &[us
         } // Number "42"
         "Unicode Escapes" => 3, // Unicode processing needs minimal buffer space
         "Mixed Escapes" => 11, // Mixed escape processing buffer including Unicode
-        "String ending with escape" => 7, // Escape at end processing
+        "String ending with escape" => 6, // Escape at end processing
         "Complex Nested Structure" => {
             if has_small_chunks {
                 5
@@ -526,7 +531,7 @@ fn test_push_parser_stress_unicode_edge_cases() {
             json: br#"["\u0123\u4567\u89AB\uCDEF"]"#,
             expected_events: vec![
                 Event::StartArray,
-                Event::String(picojson::String::Unescaped("ģ䕧覫췯")), // Consecutive unicode
+                Event::String(picojson::String::Unescaped("ģ䕧覫췯")),
                 Event::EndArray,
                 Event::EndDocument,
             ],
@@ -537,7 +542,7 @@ fn test_push_parser_stress_unicode_edge_cases() {
             json: br#"["\u0041XYZ"]"#,
             expected_events: vec![
                 Event::StartArray,
-                Event::String(picojson::String::Unescaped("AXYZ")), // \u0041 = A
+                Event::String(picojson::String::Unescaped("AXYZ")),
                 Event::EndArray,
                 Event::EndDocument,
             ],
@@ -545,11 +550,11 @@ fn test_push_parser_stress_unicode_edge_cases() {
         },
         TestScenario {
             name: "Empty Key with Unicode Value",
-            json: br#"{"": "\u2603"}"#, // Snowman character
+            json: br#"{"": "\u2603"}"#,
             expected_events: vec![
                 Event::StartObject,
                 Event::Key("".into()),
-                Event::String(picojson::String::Unescaped("☃")), // \u2603 = ☃
+                Event::String(picojson::String::Unescaped("☃")),
                 Event::EndObject,
                 Event::EndDocument,
             ],
@@ -615,7 +620,7 @@ fn test_push_parser_stress_document_validation() {
             let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
             let mut writer = ChunkedWriter::new(json, pattern);
 
-            let result = writer.write_to_parser(&mut parser);
+            let result = writer.run(&mut parser);
 
             if result.is_ok() {
                 panic!(

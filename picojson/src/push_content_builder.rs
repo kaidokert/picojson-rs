@@ -156,18 +156,19 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
         Ok(result)
     }
 
-    /// Emit a string or key event using DataSource pattern and clear buffer atomically
-    pub fn emit_string_or_key_event<'input, E>(
+    /// Extracts string or key content, emits the corresponding event, and queues a buffer reset.
+    /// This method delegates the core extraction logic to `get_content_piece` to avoid
+    /// logic duplication, while providing a clean API for the `PushParser`.
+    pub fn extract_string_or_key_content<'input, E>(
         &mut self,
         is_key: bool,
         data: &'input [u8],
-        content_start_pos: usize,
-        content_end_pos: usize,
     ) -> Result<(), crate::push_parser::PushParseError<E>>
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
+        E: From<ParseError>,
     {
-        // Create DataSource for content extraction
+        // Create a DataSource on the fly to pass to the shared content extraction logic.
         let data_source = crate::push_parser::PushParserDataSource {
             input_data: data,
             stream_buffer: &self.stream_buffer,
@@ -175,6 +176,12 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
             position_offset: self.position_offset,
         };
 
+        // The start position for the content is after the opening quote.
+        let content_start_pos = self.token_start_pos + 1;
+        // The end position for get_content_piece is one *after* the closing quote.
+        let content_end_pos = self.current_position + 1;
+
+        // Delegate the core if/else logic to the shared function.
         let content_piece =
             crate::shared::get_content_piece(&data_source, content_start_pos, content_end_pos)?;
         let content_string = content_piece.to_string()?;
@@ -185,16 +192,12 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
             Event::String(content_string)
         };
 
-        // Emit the event first while we still have the borrow
-        let result = self
-            .handler
+        // Emit the event and queue the buffer to be reset.
+        self.handler
             .handle_event(event)
             .map_err(crate::push_parser::PushParseError::Handler)?;
-
-        // Clear buffer after event is handled
-        self.stream_buffer.clear_unescaped();
-
-        Ok(result)
+        self.queue_unescaped_reset();
+        Ok(())
     }
 
     /// Emit a number event using DataSource pattern and clear buffer atomically
@@ -233,6 +236,19 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
         self.stream_buffer.clear_unescaped();
 
         Ok(result)
+    }
+
+    /// Apply queued unescaped content reset if needed
+    pub fn apply_unescaped_reset_if_queued(&mut self) {
+        if self.unescaped_reset_queued {
+            self.stream_buffer.clear_unescaped();
+            self.unescaped_reset_queued = false;
+        }
+    }
+
+    /// Queue a reset of unescaped content for the next operation
+    fn queue_unescaped_reset(&mut self) {
+        self.unescaped_reset_queued = true;
     }
 }
 
