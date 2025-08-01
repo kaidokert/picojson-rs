@@ -22,8 +22,7 @@ mod tests {
 
         // This should compile without lifetime issues using HRTB + tokenizer + event array
         parser.write(b"true").unwrap(); // Valid JSON
-        parser.finish::<()>().unwrap();
-        let _handler = parser.destroy();
+        let _handler = parser.finish::<()>().unwrap();
     }
 
     #[test]
@@ -56,8 +55,7 @@ mod tests {
 
         // Test tokenizer + HRTB integration with real JSON
         parser.write(b"\"hello\"").unwrap(); // This should trigger String Begin event -> Unescaped processing
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify events were processed
         assert_eq!(handler.event_count, 2); // String + EndDocument
@@ -92,8 +90,7 @@ mod tests {
 
         // Test simple string extraction - this should extract "test" from the input
         parser.write(br#""test""#).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // SUCCESS: Verify we extracted the actual string content!
         assert_eq!(
@@ -132,8 +129,7 @@ mod tests {
 
         // Test object with key-value pair
         parser.write(br#"{"name": "value"}"#).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify we captured all object events correctly
 
@@ -178,8 +174,7 @@ mod tests {
 
         // Test string with actual escape sequence (\n should become newline)
         parser.write(b"{\"key\": \"hello\\nworld\"}").unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify escape sequence was processed correctly
 
@@ -224,8 +219,7 @@ mod tests {
 
         // Test string with Unicode escape sequence (\u0041 should become 'A')
         parser.write(br#"{"key": "\u0041"}"#).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify Unicode escape sequence was processed correctly
 
@@ -269,8 +263,7 @@ mod tests {
 
         // Test string with mixed escapes like in pass1.json line 45
         parser.write(br#"{"key": "\uCAFE\uBABE"}"#).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify consecutive Unicode escapes were processed correctly
 
@@ -317,7 +310,7 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         assert_eq!(parser.write(line_28.as_bytes()), Ok(()));
-        assert_eq!(parser.finish::<()>(), Ok(()));
+        assert!(parser.finish::<()>().is_ok());
 
         // Test line 45 from pass1.json (the longer one we tested before)
         let line_45 = r#""\\/\\\\\\\"\\uCAFE\\uBABE\\uAB98\\uFCDE\\ubcda\\uef4A\\b\\f\\n\\r\\t`1~!@#$%^&*()_+-=[]{}|;:',./<>?""#;
@@ -327,7 +320,7 @@ mod tests {
         let mut parser2 = PushParser::<_, DefaultConfig>::new(handler2, &mut buffer2);
 
         assert_eq!(parser2.write(line_45.as_bytes()), Ok(()));
-        assert_eq!(parser2.finish::<()>(), Ok(()));
+        assert!(parser2.finish::<()>().is_ok());
     }
 
     // Test larger section of pass1.json to find what causes InvalidSliceBounds
@@ -405,7 +398,7 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         assert_eq!(parser.write(larger_section.as_bytes()), Ok(()));
-        assert_eq!(parser.finish::<()>(), Ok(()));
+        assert!(parser.finish::<()>().is_ok());
     }
 
     // Test how parsers handle empty keys like in pass1.json
@@ -454,9 +447,8 @@ mod tests {
         let mut push_parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer2);
 
         assert_eq!(push_parser.write(empty_key_json.as_bytes()), Ok(()));
-        assert_eq!(push_parser.finish::<()>(), Ok(()));
 
-        let handler = push_parser.destroy();
+        let handler = push_parser.finish::<()>().unwrap();
         assert_eq!(
             handler.events,
             vec!["Key()".to_string(), "Number(123)".to_string()],
@@ -501,8 +493,7 @@ mod tests {
         let json_input = br#"{"int": 42, "negative": -123}"#;
 
         parser.write(json_input).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify number events were captured correctly
 
@@ -558,8 +549,7 @@ mod tests {
 
         // Test just \/
         parser.write(br#""\/""#).unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify single slash escape was processed correctly
         // Should be: ["String(/)"]
@@ -695,8 +685,7 @@ mod tests {
         parser
             .write(br#"{"simple": "value", "escaped": "hello\\nworld"}"#)
             .unwrap();
-        parser.finish::<()>().unwrap();
-        let handler = parser.destroy();
+        let handler = parser.finish::<()>().unwrap();
 
         // Verify we have both borrowed and unescaped string types
         let has_borrowed = handler.events.iter().any(|e| e.starts_with("Borrowed"));

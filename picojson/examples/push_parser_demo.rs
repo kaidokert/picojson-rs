@@ -110,12 +110,9 @@ fn main() -> Result<(), PushParseError<String>> {
         println!();
     }
 
-    // Signal end of input
+    // Signal end of input and retrieve the handler
     println!("🔚 Finishing parsing...");
-    parser.finish()?;
-
-    // Retrieve the handler to get final statistics
-    let handler = parser.destroy();
+    let handler = parser.finish()?;
 
     println!();
     println!(

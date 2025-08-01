@@ -49,8 +49,7 @@ fn test_reproduce_invalidslicebounds_minimal() {
 
     // Should parse successfully without InvalidSliceBounds error
     parser.write(json_content).expect("Write should succeed");
-    parser.finish().expect("Finish should succeed");
-    let handler = parser.destroy();
+    let handler = parser.finish().expect("Finish should succeed");
 
     // Verify we got the expected events
     let expected_events = vec![
@@ -85,8 +84,7 @@ fn test_reproduce_invalidslicebounds_chunked() {
             .expect("Each chunk should parse successfully");
     }
 
-    parser.finish().expect("Finish should succeed");
-    let handler = parser.destroy();
+    let handler = parser.finish().expect("Finish should succeed");
 
     // Verify we got the expected events
     let expected_events = vec![
@@ -115,8 +113,7 @@ fn test_reproduce_invalidslicebounds_complex_key() {
 
     // Should parse successfully without InvalidSliceBounds error
     parser.write(json_content).expect("Write should succeed");
-    parser.finish().expect("Finish should succeed");
-    let handler = parser.destroy();
+    let handler = parser.finish().expect("Finish should succeed");
 
     // Verify we got the expected structure with properly decoded escape sequences
     let expected_events = vec![

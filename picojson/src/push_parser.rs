@@ -5,8 +5,7 @@
 //! Clean implementation based on handler_design pattern with proper HRTB lifetime management.
 
 use crate::push_content_builder::{PushContentBuilder, PushParserHandler};
-use crate::shared::DataSource;
-use crate::stream_buffer::{StreamBuffer, StreamBufferError};
+use crate::stream_buffer::StreamBufferError;
 use crate::{ujson, BitStackConfig, Event, ParseError};
 
 #[cfg(any(test, debug_assertions))]
@@ -26,48 +25,6 @@ enum EscapeState {
     None,
     InEscapeSequence,
     InUnicodeEscape,
-}
-
-/// Helper struct that implements DataSource for PushParser content extraction
-pub struct PushParserDataSource<'input, 'scratch> {
-    /// Current input data chunk being processed
-    pub input_data: &'input [u8],
-    /// Reference to the stream buffer for unescaped content
-    pub stream_buffer: &'scratch StreamBuffer<'scratch>,
-    /// Whether unescaped content is being used
-    pub using_unescaped_buffer: bool,
-    /// Position offset for converting absolute positions to slice positions
-    pub position_offset: usize,
-}
-
-impl<'input, 'scratch> DataSource<'input, 'scratch> for PushParserDataSource<'input, 'scratch> {
-    fn get_borrowed_slice(
-        &'input self,
-        start: usize,
-        end: usize,
-    ) -> Result<&'input [u8], ParseError> {
-        // Convert absolute positions to relative positions within the current data chunk
-        let slice_start = start.saturating_sub(self.position_offset);
-        let slice_end = end.saturating_sub(self.position_offset);
-
-        if slice_end > self.input_data.len() || slice_start > slice_end {
-            return Err(ParseError::Unexpected(
-                crate::shared::UnexpectedState::InvalidSliceBounds,
-            ));
-        }
-
-        Ok(&self.input_data[slice_start..slice_end])
-    }
-
-    fn get_unescaped_slice(&'scratch self) -> Result<&'scratch [u8], ParseError> {
-        self.stream_buffer
-            .get_unescaped_slice()
-            .map_err(ParseError::from)
-    }
-
-    fn has_unescaped_content(&self) -> bool {
-        self.using_unescaped_buffer && self.stream_buffer.has_unescaped_content()
-    }
 }
 
 /// A SAX-style JSON push parser.
@@ -203,8 +160,9 @@ where
         Ok(())
     }
 
-    /// Finishes parsing and flushes any remaining events.
-    pub fn finish<E>(&mut self) -> Result<(), PushParseError<E>>
+    /// Finishes parsing, flushes any remaining events, and returns the handler.
+    /// This method consumes the parser.
+    pub fn finish<E>(mut self) -> Result<H, PushParseError<E>>
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
     {
@@ -252,12 +210,9 @@ where
 
         self.content_builder
             .emit_event(Event::EndDocument)
-            .map_err(PushParseError::Handler)
-    }
+            .map_err(PushParseError::Handler)?;
 
-    /// Destroys the parser and returns the handler.
-    pub fn destroy(self) -> H {
-        self.content_builder.into_handler()
+        Ok(self.content_builder.into_handler())
     }
 
     /// Returns (new_state, should_append_byte)

@@ -4,7 +4,7 @@
 
 use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ContentExtractor;
-use crate::shared::State;
+use crate::shared::{DataSource, State};
 use crate::stream_buffer::StreamBuffer;
 use crate::{Event, JsonNumber, ParseError};
 
@@ -169,7 +169,7 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
         E: From<ParseError>,
     {
         // Create a DataSource on the fly to pass to the shared content extraction logic.
-        let data_source = crate::push_parser::PushParserDataSource {
+        let data_source = PushParserDataSource {
             input_data: data,
             stream_buffer: &self.stream_buffer,
             using_unescaped_buffer: self.using_unescaped_buffer,
@@ -211,7 +211,7 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
     {
         // Create DataSource for content extraction
-        let data_source = crate::push_parser::PushParserDataSource {
+        let data_source = PushParserDataSource {
             input_data: data,
             stream_buffer: &self.stream_buffer,
             using_unescaped_buffer: self.using_unescaped_buffer,
@@ -377,5 +377,47 @@ impl<H> ContentExtractor for PushContentBuilder<'_, H> {
         // Start of unicode escape sequence - reset collector for new sequence
         self.unicode_escape_collector.reset();
         Ok(())
+    }
+}
+
+/// Helper struct that implements DataSource for PushParser content extraction
+pub struct PushParserDataSource<'input, 'scratch> {
+    /// Current input data chunk being processed
+    pub input_data: &'input [u8],
+    /// Reference to the stream buffer for unescaped content
+    pub stream_buffer: &'scratch StreamBuffer<'scratch>,
+    /// Whether unescaped content is being used
+    pub using_unescaped_buffer: bool,
+    /// Position offset for converting absolute positions to slice positions
+    pub position_offset: usize,
+}
+
+impl<'input, 'scratch> DataSource<'input, 'scratch> for PushParserDataSource<'input, 'scratch> {
+    fn get_borrowed_slice(
+        &'input self,
+        start: usize,
+        end: usize,
+    ) -> Result<&'input [u8], ParseError> {
+        // Convert absolute positions to relative positions within the current data chunk
+        let slice_start = start.saturating_sub(self.position_offset);
+        let slice_end = end.saturating_sub(self.position_offset);
+
+        if slice_end > self.input_data.len() || slice_start > slice_end {
+            return Err(ParseError::Unexpected(
+                crate::shared::UnexpectedState::InvalidSliceBounds,
+            ));
+        }
+
+        Ok(&self.input_data[slice_start..slice_end])
+    }
+
+    fn get_unescaped_slice(&'scratch self) -> Result<&'scratch [u8], ParseError> {
+        self.stream_buffer
+            .get_unescaped_slice()
+            .map_err(ParseError::from)
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        self.using_unescaped_buffer && self.stream_buffer.has_unescaped_content()
     }
 }

@@ -35,9 +35,8 @@ fn test_borrowed_vs_unescaped_simple() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(br#"{"foo": "bar"}"#).unwrap();
-    parser.finish().unwrap();
 
-    let handler = parser.destroy();
+    let handler = parser.finish().unwrap();
 
     // Both should be borrowed since no escapes
     assert_eq!(
@@ -83,9 +82,7 @@ fn test_borrowed_vs_unescaped_with_escapes() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(br#"{"key\\n": "val\\t"}"#).unwrap();
-    parser.finish().unwrap();
-
-    let handler = parser.destroy();
+    let handler = parser.finish().unwrap();
 
     // Both should be unescaped since they have escape sequences
     assert_eq!(
@@ -151,9 +148,7 @@ fn test_buffer_isolation() {
 
     // Test: simple string followed by escaped string
     parser.write(br#"{"simple": "esc\\n"}"#).unwrap();
-    parser.finish().unwrap();
-
-    let handler = parser.destroy();
+    let handler = parser.finish().unwrap();
 
     // Verify first string is "simple"
     assert!(handler.first_string.is_some());

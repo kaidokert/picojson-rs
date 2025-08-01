@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Comprehensive stress tests for PushParser
-//! 
+//!
 //! Tests various buffer sizes, write chunk patterns, and edge cases to ensure
 //! robustness under different memory and data delivery constraints.
 
@@ -113,13 +113,10 @@ impl<'a> ChunkedWriter<'a> {
         }
     }
 
-    pub fn run<
-H,
-        E,
-    >(
+    pub fn run<H, E>(
         &mut self,
-        parser: &mut PushParser<'_, H, DefaultConfig>,
-    ) -> Result<(), PushParseError<E>>
+        mut parser: PushParser<'_, H, DefaultConfig>,
+    ) -> Result<H, PushParseError<E>>
     where
         H: for<'i, 's> PushParserHandler<'i, 's, E>,
         E: From<ParseError>,
@@ -225,7 +222,7 @@ fn get_push_parser_test_scenarios() -> Vec<TestScenario> {
         },
         TestScenario {
             name: "Unicode Escapes",
-            json: b"[\"\\u0041\\u0042\\u0043\"]",
+            json: br#"["\u0041\u0042\u0043"]"#,
             expected_events: vec![
                 Event::StartArray,
                 Event::String("ABC".into()),
@@ -304,15 +301,12 @@ fn test_push_parsing_with_config(
             .map(OwnedEvent::from_event)
             .collect(),
     );
-    let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
+    let parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     let mut writer = ChunkedWriter::new(scenario.json, chunk_pattern);
 
-    match writer.run(&mut parser) {
-        Ok(()) => {
-            let handler = parser.destroy();
-            handler.verify_complete()
-        }
+    match writer.run(parser) {
+        Ok(handler) => handler.verify_complete(),
         Err(e) => Err(format!("Parser error: {:?}", e)),
     }
 }
@@ -617,10 +611,10 @@ fn test_push_parser_stress_document_validation() {
         for &pattern in chunk_patterns {
             let mut buffer = vec![0u8; buffer_size];
             let handler = StressTestHandler::new(vec![]);
-            let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
+            let parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
             let mut writer = ChunkedWriter::new(json, pattern);
 
-            let result = writer.run(&mut parser);
+            let result = writer.run(parser);
 
             if result.is_ok() {
                 panic!(
