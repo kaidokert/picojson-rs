@@ -80,7 +80,7 @@ fn main() -> Result<(), PushParseError<String>> {
     ];
 
     let full_json = json_chunks.concat();
-let json_str = std::str::from_utf8(&full_json)?;
+    let json_str = std::str::from_utf8(&full_json)?;
 
     println!("📄 Input JSON: {}", json_str);
     println!("📏 Total size: {} bytes", full_json.len());
@@ -103,19 +103,16 @@ let json_str = std::str::from_utf8(&full_json)?;
     // Feed data chunk by chunk to demonstrate streaming capability
     for (i, chunk) in json_chunks.iter().enumerate() {
         println!("📨 Processing chunk {} ({} bytes):", i + 1, chunk.len());
-println!("   Chunk data: {:?}", std::str::from_utf8(chunk)?);
+        println!("   Chunk data: {:?}", std::str::from_utf8(chunk)?);
 
         // Write chunk to parser - events are handled immediately
         parser.write(chunk)?;
         println!();
     }
 
-    // Signal end of input
+    // Signal end of input and retrieve the handler
     println!("🔚 Finishing parsing...");
-    parser.finish()?;
-
-    // Retrieve the handler to get final statistics
-    let handler = parser.destroy();
+    let handler = parser.finish()?;
 
     println!();
     println!(

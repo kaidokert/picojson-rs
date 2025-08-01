@@ -43,8 +43,7 @@ fn test_string_with_actual_escapes() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(json).unwrap();
-    parser.finish::<()>().unwrap();
-    let handler = parser.destroy();
+    let handler = parser.finish::<()>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -69,8 +68,7 @@ fn test_quote_escape() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(json).unwrap();
-    parser.finish::<()>().unwrap();
-    let handler = parser.destroy();
+    let handler = parser.finish::<()>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -94,8 +92,7 @@ fn test_escaped_key_with_newline() {
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
     parser.write(json).unwrap();
-    parser.finish::<()>().unwrap();
-    let handler = parser.destroy();
+    let handler = parser.finish::<()>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -119,8 +116,7 @@ fn test_actual_key_escape_sequence() {
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
     parser.write(json).unwrap();
-    parser.finish::<()>().unwrap();
-    let handler = parser.destroy();
+    let handler = parser.finish::<()>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -144,8 +140,7 @@ fn test_unicode_escapes() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(json).unwrap();
-    parser.finish::<()>().unwrap();
-    let handler = parser.destroy();
+    let handler = parser.finish::<()>().unwrap();
 
     let expected = vec![
         "StartArray".to_string(),
@@ -167,8 +162,7 @@ fn test_escaped_key_with_quote() {
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
     parser.write(json).unwrap();
-    parser.finish::<()>().unwrap();
-    let handler = parser.destroy();
+    let handler = parser.finish::<()>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),

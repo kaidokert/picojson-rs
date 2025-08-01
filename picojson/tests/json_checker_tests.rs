@@ -66,9 +66,7 @@ mod json_checker_tests {
             .write(json_content.as_bytes())
             .map_err(to_parse_error)?;
 
-        parser.finish::<String>().map_err(to_parse_error)?;
-
-        let handler = parser.destroy();
+        let handler = parser.finish::<String>().map_err(to_parse_error)?;
         Ok(handler.event_count)
     }
 
