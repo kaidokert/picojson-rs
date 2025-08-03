@@ -219,7 +219,7 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
     ) -> Result<&'b [u8], ParseError> {
         self.scratch
             .get(start..end)
-            .ok_or_else(|| ParseError::Unexpected(UnexpectedState::InvalidSliceBounds))
+            .ok_or(ParseError::Unexpected(UnexpectedState::InvalidSliceBounds))
     }
 
     /// Get scratch buffer range for current string

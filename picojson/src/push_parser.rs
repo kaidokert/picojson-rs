@@ -61,7 +61,6 @@ where
         self.extractor.set_chunk(data);
 
         // Use ParserCore to process all bytes in the chunk
-        let mut event_count = 0;
         loop {
             match self.core.next_event_impl_with_flags(
                 &mut self.extractor,
@@ -78,7 +77,6 @@ where
                     break;
                 }
                 Ok(event) => {
-                    event_count += 1;
                     // Handle all other events normally
                     self.handler
                         .handle_event(event)
@@ -203,7 +201,5 @@ impl From<ParseError> for std::string::String {
 
 #[cfg(any(test, debug_assertions))]
 impl From<ParseError> for () {
-    fn from(_: ParseError) -> Self {
-        ()
-    }
+    fn from(_: ParseError) -> Self {}
 }

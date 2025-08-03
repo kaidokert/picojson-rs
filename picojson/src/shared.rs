@@ -232,7 +232,7 @@ where
     'input: 'scratch,
 {
     /// Convert the content piece to a String enum
-    pub fn to_string(self) -> Result<String<'input, 'scratch>, ParseError> {
+    pub fn into_string(self) -> Result<String<'input, 'scratch>, ParseError> {
         match self {
             ContentPiece::Input(bytes) => {
                 let content_str = from_utf8(bytes)?;

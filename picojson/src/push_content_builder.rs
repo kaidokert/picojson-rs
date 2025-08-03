@@ -173,7 +173,7 @@ impl<'input, 'scratch> PushContentExtractor<'input, 'scratch> {
         // Check if we're currently processing any type of escape sequence
         if self.in_unicode_escape {
             // During Unicode escape processing, try to feed hex digits directly to the collector
-            if let Ok(_) = crate::escape_processor::EscapeProcessor::validate_hex_digit(byte) {
+            if crate::escape_processor::EscapeProcessor::validate_hex_digit(byte).is_ok() {
                 let is_complete = self.unicode_escape_collector.add_hex_digit(byte)?;
                 if is_complete {
                     // Process the complete escape sequence immediately
@@ -298,7 +298,7 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
             // position AFTER the closing quote, so add 1
             let content_piece =
                 crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
-            content_piece.to_string().map(Event::String)
+            content_piece.into_string().map(Event::String)
         }
     }
 
@@ -313,27 +313,25 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
             // The entire token was contained in the current chunk - use direct extraction
             let content_piece =
                 crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
-            content_piece.to_string().map(Event::Key)
+            content_piece.into_string().map(Event::Key)
         }
     }
 
     fn extract_number(
         &mut self,
         start_pos: usize,
-        from_container_end: bool,
-        finished: bool,
+        _from_container_end: bool,
+        _finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
         let number_bytes = if self.using_unescaped_buffer {
             // Content is in scratch buffer - get the complete token from there
             self.queue_unescaped_reset();
-            let scratch_bytes = self.get_unescaped_slice()?;
-            scratch_bytes
+            self.get_unescaped_slice()?
         } else {
             // The entire token was contained in the current chunk - use direct extraction
             let content_piece =
                 crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
-            let direct_bytes = content_piece.as_bytes();
-            direct_bytes
+            content_piece.as_bytes()
         };
 
         let json_number = JsonNumber::from_slice(number_bytes)?;
@@ -352,7 +350,6 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
             // The collector is still in progress, which means not all hex digits were processed
             // This can happen when the End UnicodeEscape event consumes the last hex digit before
             // the byte accumulator can process it. For now, we'll log this and not treat it as an error.
-        } else {
         }
 
         Ok(())
@@ -428,7 +425,7 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
         if self.using_unescaped_buffer {
             // Get current buffer content and check if it ends with a hex digit (the first one)
             if let Ok(current_content) = self.stream_buffer.get_unescaped_slice() {
-                if current_content.len() >= 1 {
+                if !current_content.is_empty() {
                     let hex_pos = current_content.len() - 1;
 
                     if crate::escape_processor::EscapeProcessor::validate_hex_digit(
@@ -446,21 +443,19 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
                             // String too long - this shouldn't happen for typical use cases
                             // Just clear everything and continue
                             self.stream_buffer.clear_unescaped();
-                        } else {
-                            if content_len_without_hex > 0 {
-                                temp_content[..content_len_without_hex]
-                                    .copy_from_slice(&current_content[..content_len_without_hex]);
-                                // Clear and rebuild buffer without the last hex digit
-                                self.stream_buffer.clear_unescaped();
-                                for &byte in &temp_content[..content_len_without_hex] {
-                                    self.stream_buffer
-                                        .append_unescaped_byte(byte)
-                                        .map_err(ParseError::from)?;
-                                }
-                            } else {
-                                // Just clear the buffer if there's nothing else
-                                self.stream_buffer.clear_unescaped();
+                        } else if content_len_without_hex > 0 {
+                            temp_content[..content_len_without_hex]
+                                .copy_from_slice(&current_content[..content_len_without_hex]);
+                            // Clear and rebuild buffer without the last hex digit
+                            self.stream_buffer.clear_unescaped();
+                            for &byte in &temp_content[..content_len_without_hex] {
+                                self.stream_buffer
+                                    .append_unescaped_byte(byte)
+                                    .map_err(ParseError::from)?;
                             }
+                        } else {
+                            // Just clear the buffer if there's nothing else
+                            self.stream_buffer.clear_unescaped();
                         }
 
                         // Now feed the first hex digit to the Unicode collector
@@ -470,9 +465,7 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
                         if is_complete {
                             // This shouldn't happen for the first hex digit, but handle it just in case
                         }
-                    } else {
                     }
-                } else {
                 }
             }
         }
@@ -517,7 +510,7 @@ impl<'input, 'scratch> DataSource<'input, 'scratch> for PushContentExtractor<'in
     }
 }
 
-impl<'input, 'scratch> PushContentExtractor<'input, 'scratch> {
+impl PushContentExtractor<'_, '_> {
     /// Copy partial content from current chunk to scratch buffer when chunk boundary reached
     pub fn copy_partial_content_to_scratch(&mut self) -> Result<(), ParseError> {
         // Determine the start of the current token content based on parser state
@@ -561,7 +554,6 @@ impl<'input, 'scratch> PushContentExtractor<'input, 'scratch> {
 
             // Activate scratch buffer mode so subsequent content is also appended
             self.using_unescaped_buffer = true;
-        } else {
         }
 
         Ok(())

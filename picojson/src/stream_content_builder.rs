@@ -202,7 +202,7 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         }
         let current_pos = self.current_position();
         let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
-        Ok(Event::String(content_piece.to_string()?))
+        Ok(Event::String(content_piece.into_string()?))
     }
 
     fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
@@ -212,7 +212,7 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         }
         let current_pos = self.current_position();
         let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
-        Ok(Event::Key(content_piece.to_string()?))
+        Ok(Event::Key(content_piece.into_string()?))
     }
 
     fn extract_number(

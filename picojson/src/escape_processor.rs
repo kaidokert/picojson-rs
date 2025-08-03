@@ -3,6 +3,14 @@
 use crate::parse_error::ParseError;
 use crate::shared::{ContentRange, UnexpectedState};
 
+/// Result type for Unicode escape sequence processing.
+///
+/// Tuple contains:
+/// - Optional UTF-8 byte array and its length
+/// - The start position of the escape sequence (\uXXXX)
+/// - The new pending high surrogate value, if any
+type UnicodeEscapeResult = (Option<([u8; 4], usize)>, usize, Option<u32>);
+
 /// Shared utilities for processing JSON escape sequences.
 /// This module contains pure functions for escape processing that can be used
 /// by both CopyOnEscape and StreamingBuffer components.
@@ -677,7 +685,7 @@ pub(crate) fn process_unicode_escape_sequence<'input, 'scratch, D>(
     current_pos: usize,
     pending_high_surrogate: Option<u32>,
     source: &'input D,
-) -> Result<(Option<([u8; 4], usize)>, usize, Option<u32>), ParseError>
+) -> Result<UnicodeEscapeResult, ParseError>
 where
     D: ?Sized + crate::shared::DataSource<'input, 'scratch>,
 {

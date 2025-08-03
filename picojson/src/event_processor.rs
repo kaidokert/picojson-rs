@@ -48,11 +48,6 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         }
     }
 
-    /// Check if currently in an escape sequence
-    pub fn in_escape_sequence(&self) -> bool {
-        self.in_escape_sequence
-    }
-
     /// Unified implementation with optional byte accumulation callback.
     /// This supports StreamParser-specific byte accumulation when no events are generated.
     /// SliceParser passes a no-op closure for byte_accumulator.
