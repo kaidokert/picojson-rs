@@ -5,7 +5,7 @@
 use crate::copy_on_escape::CopyOnEscape;
 use crate::escape_processor::{self, UnicodeEscapeCollector};
 use crate::event_processor::ContentExtractor;
-use crate::shared::{ContentRange, State};
+use crate::shared::{ContentRange, DataSource, State};
 use crate::slice_input_buffer::{InputBuffer, SliceInputBuffer};
 use crate::{Event, JsonNumber, ParseError};
 
@@ -68,42 +68,45 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         &mut self.unicode_escape_collector
     }
 
-    fn extract_string_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
-        let value_result = self.copy_on_escape.end_string(end_pos)?;
-        Ok(Event::String(value_result))
+    fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        // SliceParser-specific: Complete CopyOnEscape processing for unescaped content
+        let current_pos = self.current_position();
+        if self.has_unescaped_content() {
+            let end_pos = ContentRange::end_position_excluding_delimiter(current_pos);
+            self.copy_on_escape.end_string(end_pos)?; // Complete the CopyOnEscape processing
+        }
+
+        // Use the unified helper function to get the content
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::String(content_piece.into_string()?))
     }
 
-    fn extract_key_content(&mut self, _start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let end_pos = ContentRange::end_position_excluding_delimiter(self.buffer.current_pos());
-        let key_result = self.copy_on_escape.end_string(end_pos)?;
-        Ok(Event::Key(key_result))
+    fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
+        // SliceParser-specific: Complete CopyOnEscape processing for unescaped content
+        let current_pos = self.current_position();
+        if self.has_unescaped_content() {
+            let end_pos = ContentRange::end_position_excluding_delimiter(current_pos);
+            self.copy_on_escape.end_string(end_pos)?; // Complete the CopyOnEscape processing
+        }
+
+        // Use the unified helper function to get the content
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::Key(content_piece.into_string()?))
     }
 
     fn extract_number(
         &mut self,
         start_pos: usize,
-        from_container_end: bool,
+        _from_container_end: bool,
         _finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // For SliceParser, use buffer-based document end detection
-        // The finished parameter should always be true for complete slices, but we don't rely on it
-        let at_document_end = self.buffer.current_pos() >= self.buffer.data_len();
-        let current_pos = self.buffer.current_pos();
-        let use_full_span = !from_container_end && at_document_end;
+        // The delimiter has already been consumed by the time this is called,
+        // so current_position is one byte past the end of the number.
+        let end_pos = ContentRange::end_position_excluding_delimiter(self.current_position());
 
-        let end_pos = if use_full_span {
-            // Standalone number: clamp to buffer length to prevent slice bounds errors
-            core::cmp::min(current_pos, self.buffer.data_len())
-        } else {
-            // Container number: exclude delimiter
-            current_pos.saturating_sub(1)
-        };
+        // Use the DataSource trait method to get the number bytes
+        let number_bytes = self.get_borrowed_slice(start_pos, end_pos)?;
 
-        let number_bytes = self
-            .buffer
-            .slice(start_pos, end_pos)
-            .map_err(|_| ParseError::InvalidNumber)?;
         let json_number = JsonNumber::from_slice(number_bytes)?;
         Ok(Event::Number(json_number))
     }
@@ -118,29 +121,37 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
         let current_pos = self.buffer.current_pos();
-        let hex_slice_provider = |start, end| self.buffer.slice(start, end).map_err(Into::into);
 
         // Shared Unicode escape processing pattern
         let had_pending_high_surrogate = self.unicode_escape_collector.has_pending_high_surrogate();
+        let pending_surrogate = self.unicode_escape_collector.get_pending_high_surrogate();
 
-        let (utf8_bytes_result, escape_start_pos) =
+        let (utf8_bytes_result, escape_start_pos, new_pending_surrogate) =
             escape_processor::process_unicode_escape_sequence(
                 current_pos,
-                &mut self.unicode_escape_collector,
-                hex_slice_provider,
+                pending_surrogate,
+                self, // Pass self as the DataSource
             )?;
+
+        self.unicode_escape_collector
+            .set_pending_high_surrogate(new_pending_surrogate);
 
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some((utf8_bytes, len)) = utf8_bytes_result {
-            let utf8_slice = &utf8_bytes[..len];
+            // Ensure we don't exceed array bounds
+            let safe_len = len.min(utf8_bytes.len()).min(4);
+            let utf8_slice = &utf8_bytes[..safe_len];
             if had_pending_high_surrogate {
                 // This is completing a surrogate pair - need to consume both escapes
                 // First call: consume the high surrogate (6 bytes earlier)
                 self.copy_on_escape
                     .handle_unicode_escape(escape_start_pos, &[])?;
                 // Second call: consume the low surrogate and write UTF-8
+                let low_surrogate_pos = escape_start_pos
+                    .checked_add(6)
+                    .ok_or(ParseError::NumericOverflow)?;
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos + 6, utf8_slice)?;
+                    .handle_unicode_escape(low_surrogate_pos, utf8_slice)?;
             } else {
                 // Single Unicode escape - normal processing
                 self.copy_on_escape
@@ -160,5 +171,30 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         Ok(())
+    }
+}
+
+/// DataSource implementation for SliceContentBuilder
+///
+/// This implementation provides access to both borrowed content from the original
+/// input slice and unescaped content from the CopyOnEscape scratch buffer.
+impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
+    fn get_borrowed_slice(&'a self, start: usize, end: usize) -> Result<&'a [u8], ParseError> {
+        self.buffer.slice(start, end).map_err(Into::into)
+    }
+
+    fn get_unescaped_slice(&'b self) -> Result<&'b [u8], ParseError> {
+        // Access the scratch buffer directly with the correct lifetime
+        if !self.copy_on_escape.has_unescaped_content() {
+            return Err(ParseError::Unexpected(
+                crate::shared::UnexpectedState::StateMismatch,
+            ));
+        }
+
+        self.copy_on_escape.get_scratch_contents()
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        self.copy_on_escape.has_unescaped_content()
     }
 }

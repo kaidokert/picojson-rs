@@ -41,7 +41,22 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         &mut self,
         provider: &'a mut P,
         escape_timing: EscapeTiming,
+        byte_accumulator: F,
+    ) -> Result<Event<'a, 'a>, ParseError>
+    where
+        P: ContentExtractor,
+        F: FnMut(&mut P, u8) -> Result<(), ParseError>,
+    {
+        self.next_event_impl_with_flags(provider, escape_timing, byte_accumulator, false)
+    }
+
+    /// Extended version with flags for specialized behavior
+    pub fn next_event_impl_with_flags<'a, P, F>(
+        &mut self,
+        provider: &'a mut P,
+        escape_timing: EscapeTiming,
         mut byte_accumulator: F,
+        always_accumulate_during_escapes: bool,
     ) -> Result<Event<'a, 'a>, ParseError>
     where
         P: ContentExtractor,
@@ -58,20 +73,27 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                             .map_err(ParseError::TokenizerError)?;
                     }
 
-                    // Call byte accumulator if no events were generated AND we are not in an escape sequence
-                    if !have_events(&self.parser_state.evts) && !self.in_escape_sequence {
+                    let should_accumulate = if always_accumulate_during_escapes {
+                        if self.in_escape_sequence {
+                            true // Always accumulate during escape sequences
+                        } else {
+                            !have_events(&self.parser_state.evts) // Normal behavior outside escapes
+                        }
+                    } else {
+                        !have_events(&self.parser_state.evts) && !self.in_escape_sequence
+                    };
+
+                    if should_accumulate {
                         byte_accumulator(provider, byte)?;
                     }
                 } else {
-                    // Handle end of stream
                     {
-                        clear_events(&mut self.parser_state.evts);
-                        let mut callback = create_tokenizer_callback(&mut self.parser_state.evts);
-                        self.tokenizer
-                            .finish(&mut callback)
-                            .map_err(ParseError::TokenizerError)?;
-                    }
+                        let mut finish_callback =
+                            create_tokenizer_callback(&mut self.parser_state.evts);
+                        let _bytes_processed = self.tokenizer.finish(&mut finish_callback)?;
+                    } // Drop the callback to release the borrow
 
+                    // If finish() generated events, process them. Otherwise, return EndDocument.
                     if !have_events(&self.parser_state.evts) {
                         return Ok(Event::EndDocument);
                     }

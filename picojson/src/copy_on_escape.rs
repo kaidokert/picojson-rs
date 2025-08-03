@@ -205,6 +205,18 @@ impl<'a, 'b> CopyOnEscape<'a, 'b> {
             Ok(String::Borrowed(borrowed_str))
         }
     }
+
+    /// DataSource support methods - check if unescaped content is available
+    pub fn has_unescaped_content(&self) -> bool {
+        self.using_scratch
+    }
+
+    /// Direct access to scratch buffer with proper lifetime for DataSource implementation
+    pub fn get_scratch_contents(&'b self) -> Result<&'b [u8], ParseError> {
+        self.scratch
+            .get(self.scratch_start..self.scratch_pos)
+            .ok_or(ParseError::Unexpected(UnexpectedState::InvalidSliceBounds))
+    }
 }
 
 #[cfg(test)]
