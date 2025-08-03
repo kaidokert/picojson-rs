@@ -138,15 +138,20 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 
         // Handle UTF-8 bytes if we have them (not a high surrogate waiting for low surrogate)
         if let Some((utf8_bytes, len)) = utf8_bytes_result {
-            let utf8_slice = &utf8_bytes[..len];
+            // Ensure we don't exceed array bounds
+            let safe_len = len.min(utf8_bytes.len()).min(4);
+            let utf8_slice = &utf8_bytes[..safe_len];
             if had_pending_high_surrogate {
                 // This is completing a surrogate pair - need to consume both escapes
                 // First call: consume the high surrogate (6 bytes earlier)
                 self.copy_on_escape
                     .handle_unicode_escape(escape_start_pos, &[])?;
                 // Second call: consume the low surrogate and write UTF-8
+                let low_surrogate_pos = escape_start_pos
+                    .checked_add(6)
+                    .ok_or(ParseError::NumericOverflow)?;
                 self.copy_on_escape
-                    .handle_unicode_escape(escape_start_pos + 6, utf8_slice)?;
+                    .handle_unicode_escape(low_surrogate_pos, utf8_slice)?;
             } else {
                 // Single Unicode escape - normal processing
                 self.copy_on_escape
