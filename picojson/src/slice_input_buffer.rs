@@ -52,11 +52,6 @@ impl<'a> SliceInputBuffer<'a> {
     pub fn slice(&self, start: usize, end: usize) -> Result<&'a [u8], Error> {
         self.data.get(start..end).ok_or(Error::InvalidSliceBounds)
     }
-
-    /// Gets the length of the underlying data for bounds checking.
-    pub fn data_len(&self) -> usize {
-        self.data.len()
-    }
 }
 
 #[cfg(test)]

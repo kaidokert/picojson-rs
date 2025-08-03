@@ -3,6 +3,14 @@
 use crate::parse_error::ParseError;
 use crate::shared::{ContentRange, UnexpectedState};
 
+/// Result type for Unicode escape sequence processing.
+///
+/// Tuple contains:
+/// - Optional UTF-8 byte array and its length
+/// - The start position of the escape sequence (\uXXXX)
+/// - The new pending high surrogate value, if any
+type UnicodeEscapeResult = (Option<([u8; 4], usize)>, usize, Option<u32>);
+
 /// Shared utilities for processing JSON escape sequences.
 /// This module contains pure functions for escape processing that can be used
 /// by both CopyOnEscape and StreamingBuffer components.
@@ -265,6 +273,16 @@ impl UnicodeEscapeCollector {
     /// Check if there's a pending high surrogate waiting for a low surrogate
     pub fn has_pending_high_surrogate(&self) -> bool {
         self.pending_high_surrogate.is_some()
+    }
+
+    /// Get the pending high surrogate value
+    pub fn get_pending_high_surrogate(&self) -> Option<u32> {
+        self.pending_high_surrogate
+    }
+
+    /// Set the pending high surrogate value
+    pub fn set_pending_high_surrogate(&mut self, surrogate: Option<u32>) {
+        self.pending_high_surrogate = surrogate;
     }
 }
 
@@ -645,51 +663,58 @@ mod tests {
 /// Shared implementation for processing a Unicode escape sequence WITH surrogate pair support.
 ///
 /// This function centralizes the logic for handling `\uXXXX` escapes, which is
-/// common to both the pull-based and stream-based parsers. It uses a generic
-/// `hex_slice_provider` to remain independent of the underlying buffer implementation
-/// (`SliceInputBuffer` vs. `StreamBuffer`).
+/// common to all parsers. It uses the generic `DataSource` trait to remain
+/// independent of the underlying buffer implementation (`SliceInputBuffer` vs. `StreamBuffer`).
 ///
 /// # Arguments
-/// * `current_pos` - The parser's current position in the input buffer, right after the 4 hex digits.
-/// * `unicode_escape_collector` - A mutable reference to the shared `UnicodeEscapeCollector`.
-/// * `hex_slice_provider` - A closure that takes a start and end position and returns the hex digit slice.
-/// * `utf8_buf` - A buffer to write the UTF-8 encoded result into.
+/// * `current_pos` - The parser's current position, right after the 4 hex digits.
+/// * `pending_high_surrogate` - The optional high surrogate from a previous escape.
+/// * `source` - A `DataSource` implementation to provide the hex digit slice.
 ///
 /// # Returns
 /// A tuple containing:
-/// - Optional UTF-8 byte slice (None if this is a high surrogate waiting for low surrogate)
-/// - The start position of the escape sequence (`\uXXXX`)
-pub(crate) fn process_unicode_escape_sequence<'a, F>(
+/// - Optional UTF-8 byte array and its length.
+/// - The start position of the escape sequence (`\uXXXX`).
+/// - The new pending high surrogate value, if any.
+pub(crate) fn process_unicode_escape_sequence<'input, 'scratch, D>(
     current_pos: usize,
-    unicode_escape_collector: &mut UnicodeEscapeCollector,
-    mut hex_slice_provider: F,
-) -> Result<(Option<([u8; 4], usize)>, usize), ParseError>
+    pending_high_surrogate: Option<u32>,
+    source: &'input D,
+) -> Result<UnicodeEscapeResult, ParseError>
 where
-    F: FnMut(usize, usize) -> Result<&'a [u8], ParseError>,
+    D: ?Sized + crate::shared::DataSource<'input, 'scratch>,
 {
     let (hex_start, hex_end, escape_start_pos) = ContentRange::unicode_escape_bounds(current_pos);
 
-    // Extract the 4 hex digits from the buffer using the provider
-    let hex_slice = hex_slice_provider(hex_start, hex_end)?;
+    // Extract the 4 hex digits from the buffer using the DataSource
+    let hex_slice = source.get_borrowed_slice(hex_start, hex_end)?;
 
     if hex_slice.len() != 4 {
         return Err(UnexpectedState::InvalidUnicodeEscape.into());
     }
 
+    // Create a temporary collector to process the hex digits
+    let mut temp_collector = UnicodeEscapeCollector::new();
+    if let Some(surrogate) = pending_high_surrogate {
+        temp_collector.set_pending_high_surrogate(Some(surrogate));
+    }
+
     // Feed hex digits to the shared collector
     for &hex_digit in hex_slice {
-        unicode_escape_collector.add_hex_digit(hex_digit)?;
+        temp_collector.add_hex_digit(hex_digit)?;
     }
 
     // Check if we had a pending high surrogate before processing
-    let had_pending_high_surrogate = unicode_escape_collector.has_pending_high_surrogate();
+    let had_pending_high_surrogate = temp_collector.has_pending_high_surrogate();
 
     // Create a local buffer for the UTF-8 result
     let mut utf8_buf = [0u8; 4];
 
     // Process the complete sequence to UTF-8 with surrogate support
     let (utf8_bytes_opt, _surrogate_state_changed) =
-        unicode_escape_collector.process_to_utf8(&mut utf8_buf)?;
+        temp_collector.process_to_utf8(&mut utf8_buf)?;
+
+    let new_pending_high_surrogate = temp_collector.get_pending_high_surrogate();
 
     // If we have a result, copy it to a new array to return by value
     let result_by_value = utf8_bytes_opt.map(|bytes| {
@@ -708,5 +733,9 @@ where
         escape_start_pos
     };
 
-    Ok((result_by_value, final_escape_start_pos))
+    Ok((
+        result_by_value,
+        final_escape_start_pos,
+        new_pending_high_surrogate,
+    ))
 }
