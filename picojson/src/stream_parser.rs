@@ -1079,7 +1079,6 @@ mod tests {
     #[test]
     fn test_minimal_buffer_simple_escape_1() {
         // Buffer size 4 - token "hello\\" (8 bytes) too large for buffer (4 bytes)
-        // This should be InputBufferFull, not ScratchBufferFull
         assert!(matches!(
             test_simple_escape_with_buffer_size(4),
             Err(ParseError::InputBufferFull)

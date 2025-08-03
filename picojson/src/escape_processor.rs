@@ -695,9 +695,7 @@ where
 
     // Create a temporary collector to process the hex digits
     let mut temp_collector = UnicodeEscapeCollector::new();
-    if let Some(surrogate) = pending_high_surrogate {
-        temp_collector.set_pending_high_surrogate(Some(surrogate));
-    }
+    temp_collector.set_pending_high_surrogate(pending_high_surrogate);
 
     // Feed hex digits to the shared collector
     for &hex_digit in hex_slice {

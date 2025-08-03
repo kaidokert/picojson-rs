@@ -186,9 +186,7 @@ impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
             ));
         }
 
-        // Use the new method with proper lifetime annotation
-        let (start, end) = self.copy_on_escape.get_scratch_range();
-        self.copy_on_escape.get_scratch_buffer_slice(start, end)
+        self.copy_on_escape.get_scratch_contents()
     }
 
     fn has_unescaped_content(&self) -> bool {
