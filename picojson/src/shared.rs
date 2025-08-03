@@ -5,7 +5,7 @@ use crate::ParseError;
 use crate::{ujson, JsonNumber, String};
 
 /// Events produced by JSON parsers
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum Event<'a, 'b> {
     /// The start of an object (e.g., `{`).
     StartObject,

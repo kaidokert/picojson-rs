@@ -25,7 +25,7 @@ type ConfiguredInt = i64;
 /// Depending on crate configuration for float and integer support,
 /// variants like `FloatDisabled`, `FloatSkipped` and `FloatTruncated` are
 /// conditionally available.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum NumberResult {
     /// Integer that fits in the configured integer type
     Integer(ConfiguredInt),
@@ -47,7 +47,7 @@ pub enum NumberResult {
 /// convenient access to parsed representations based on compilation features.
 ///
 /// Lifetimes: 'a is the input slice lifetime, 'b is the scratch/copy buffer lifetime
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum JsonNumber<'a, 'b> {
     /// A raw slice from the original input, used when no copying is needed.
     Borrowed {
