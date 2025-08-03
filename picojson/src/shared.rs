@@ -120,7 +120,11 @@ impl ContentRange {
         current_pos: usize,
     ) -> (usize, usize) {
         let content_end = current_pos.saturating_sub(1); // Back up to exclude closing quote
-        (content_start, content_end)
+        if content_start > content_end {
+            (content_start, content_start)
+        } else {
+            (content_start, content_end)
+        }
     }
 
     /// Calculate Unicode escape sequence boundaries
@@ -171,6 +175,100 @@ impl ContentRange {
     }
 }
 
+/// A trait that abstracts the source of JSON data for content extraction.
+///
+/// This trait provides a unified interface for accessing both borrowed content from
+/// the original input data and unescaped content from temporary scratch buffers.
+/// It enables consistent content extraction patterns across different parser types.
+///
+/// # Generic Parameters
+///
+/// * `'input` - Lifetime for the input data being parsed
+/// * `'scratch` - Lifetime for the scratch buffer used for temporary storage
+pub trait DataSource<'input, 'scratch> {
+    /// Returns a slice of the raw, unprocessed input data from a specific range.
+    /// Used for zero-copy extraction of content that contains no escape sequences.
+    ///
+    /// # Arguments
+    /// * `start` - Start position in the input data
+    /// * `end` - End position in the input data (exclusive)
+    ///
+    /// # Returns
+    /// A slice of the input data with lifetime `'input`
+    fn get_borrowed_slice(
+        &'input self,
+        start: usize,
+        end: usize,
+    ) -> Result<&'input [u8], ParseError>;
+
+    /// Returns the full slice of the processed, unescaped content from the scratch buffer.
+    /// Used when escape sequences have been processed and content written to temporary buffer.
+    ///
+    /// # Returns
+    /// A slice of unescaped content with lifetime `'scratch`
+    fn get_unescaped_slice(&'scratch self) -> Result<&'scratch [u8], ParseError>;
+
+    /// Check if unescaped content is available in the scratch buffer.
+    ///
+    /// # Returns
+    /// `true` if unescaped content exists and should be accessed via `get_unescaped_slice()`,
+    /// `false` if content should be accessed via `get_borrowed_slice()`
+    fn has_unescaped_content(&self) -> bool;
+}
+
+/// Raw content piece from either input buffer or scratch buffer.
+/// This enum cleanly separates the two different content sources without
+/// coupling the DataSource trait to high-level JSON types.
+#[derive(Debug, PartialEq)]
+pub enum ContentPiece<'input, 'scratch> {
+    /// Content borrowed directly from the input buffer (zero-copy)
+    Input(&'input [u8]),
+    /// Content processed and stored in the scratch buffer (unescaped)
+    Scratch(&'scratch [u8]),
+}
+
+impl<'input, 'scratch> ContentPiece<'input, 'scratch>
+where
+    'input: 'scratch,
+{
+    /// Convert the content piece to a String enum
+    pub fn into_string(self) -> Result<String<'input, 'scratch>, ParseError> {
+        match self {
+            ContentPiece::Input(bytes) => {
+                let content_str = from_utf8(bytes)?;
+                Ok(String::Borrowed(content_str))
+            }
+            ContentPiece::Scratch(bytes) => {
+                let content_str = from_utf8(bytes)?;
+                Ok(String::Unescaped(content_str))
+            }
+        }
+    }
+}
+
 pub fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {
     core::str::from_utf8(v).map_err(Into::into)
+}
+
+/// A generic helper function that uses the DataSource trait to extract the correct
+/// content piece (either borrowed or from scratch). This consolidates the core
+/// extraction logic for all parsers.
+pub fn get_content_piece<'input, 'scratch, D>(
+    source: &'input D,
+    start_pos: usize,
+    current_pos: usize,
+) -> Result<ContentPiece<'input, 'scratch>, ParseError>
+where
+    'input: 'scratch,
+    D: ?Sized + DataSource<'input, 'scratch>,
+{
+    if source.has_unescaped_content() {
+        source.get_unescaped_slice().map(ContentPiece::Scratch)
+    } else {
+        let (content_start, content_end) =
+            ContentRange::string_content_bounds_from_content_start(start_pos, current_pos);
+        source
+            .get_borrowed_slice(content_start, content_end)
+            .map(ContentPiece::Input)
+    }
 }

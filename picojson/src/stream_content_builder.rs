@@ -4,10 +4,10 @@
 
 use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ContentExtractor;
-use crate::shared::{ContentRange, State};
+use crate::shared::{ContentRange, DataSource, State};
 use crate::stream_buffer::StreamBuffer;
 use crate::stream_parser::Reader;
-use crate::{Event, JsonNumber, ParseError, String};
+use crate::{Event, JsonNumber, ParseError};
 
 /// ContentBuilder implementation for StreamParser that uses StreamBuffer for streaming and escape processing
 pub struct StreamContentBuilder<'b, R: Reader> {
@@ -56,8 +56,8 @@ impl<'b, R: Reader> StreamContentBuilder<'b, R> {
                 .map_err(ParseError::from)?;
 
             if compaction_offset == 0 {
-                // SOL: Buffer too small for current token
-                return Err(ParseError::ScratchBufferFull);
+                // Buffer too small for current token - this is an input buffer size issue
+                return Err(ParseError::InputBufferFull);
             }
 
             // Update parser state positions after compaction (original logic)
@@ -116,30 +116,6 @@ impl<'b, R: Reader> StreamContentBuilder<'b, R> {
     /// Queue a reset of unescaped content for the next operation
     fn queue_unescaped_reset(&mut self) {
         self.unescaped_reset_queued = true;
-    }
-
-    /// Helper to create an unescaped string from StreamBuffer
-    fn create_unescaped_string(&mut self) -> Result<String<'_, '_>, ParseError> {
-        self.queue_unescaped_reset();
-        let unescaped_slice = self.stream_buffer.get_unescaped_slice()?;
-        let str_content = crate::shared::from_utf8(unescaped_slice)?;
-        Ok(String::Unescaped(str_content))
-    }
-
-    /// Helper to create a borrowed string from StreamBuffer
-    fn create_borrowed_string(
-        &mut self,
-        content_start: usize,
-    ) -> Result<String<'_, '_>, ParseError> {
-        let current_pos = self.stream_buffer.current_position();
-        let (content_start, content_end) =
-            ContentRange::string_content_bounds_from_content_start(content_start, current_pos);
-
-        let bytes = self
-            .stream_buffer
-            .get_string_slice(content_start, content_end)?;
-        let str_content = crate::shared::from_utf8(bytes)?;
-        Ok(String::Borrowed(str_content))
     }
 
     /// Start escape processing using StreamBuffer
@@ -220,21 +196,23 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
     }
 
     fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let string = if self.stream_buffer.has_unescaped_content() {
-            self.create_unescaped_string()?
-        } else {
-            self.create_borrowed_string(start_pos)?
-        };
-        Ok(Event::String(string))
+        // StreamParser-specific: Queue reset to prevent content contamination
+        if self.has_unescaped_content() {
+            self.queue_unescaped_reset();
+        }
+        let current_pos = self.current_position();
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::String(content_piece.into_string()?))
     }
 
     fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        let key = if self.stream_buffer.has_unescaped_content() {
-            self.create_unescaped_string()?
-        } else {
-            self.create_borrowed_string(start_pos)?
-        };
-        Ok(Event::Key(key))
+        // StreamParser-specific: Queue reset to prevent content contamination
+        if self.has_unescaped_content() {
+            self.queue_unescaped_reset();
+        }
+        let current_pos = self.current_position();
+        let content_piece = crate::shared::get_content_piece(self, start_pos, current_pos)?;
+        Ok(Event::Key(content_piece.into_string()?))
     }
 
     fn extract_number(
@@ -243,18 +221,15 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         from_container_end: bool,
         finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // Use shared number parsing with StreamParser-specific document end detection
-        // StreamParser uses state-based detection: finished flag indicates true document end
-        let current_pos = self.stream_buffer.current_position();
+        let current_pos = self.current_position();
 
         // A standalone number at the end of the document has no trailing delimiter, so we use the full span.
         let use_full_span = !from_container_end && finished;
         let end_pos = ContentRange::number_end_position(current_pos, use_full_span);
 
-        let number_bytes = self
-            .stream_buffer
-            .get_string_slice(start_pos, end_pos)
-            .map_err(ParseError::from)?;
+        // Use the DataSource trait method to get the number bytes
+        let number_bytes = self.get_borrowed_slice(start_pos, end_pos)?;
+
         let json_number = JsonNumber::from_slice(number_bytes)?;
         Ok(Event::Number(json_number))
     }
@@ -282,19 +257,20 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        // Define the provider for getting hex digits from the stream buffer
-        let hex_slice_provider = |start, end| {
-            self.stream_buffer
-                .get_string_slice(start, end)
-                .map_err(Into::into)
-        };
+        // Get pending surrogate before borrowing self
+        let pending_surrogate = self.unicode_escape_collector.get_pending_high_surrogate();
 
         // Call the shared processor, which now returns the result by value
-        let (utf8_bytes_result, _) = crate::escape_processor::process_unicode_escape_sequence(
-            self.stream_buffer.current_position(),
-            &mut self.unicode_escape_collector,
-            hex_slice_provider,
-        )?;
+        let (utf8_bytes_result, _, new_pending_surrogate) =
+            crate::escape_processor::process_unicode_escape_sequence(
+                self.stream_buffer.current_position(),
+                pending_surrogate,
+                self, // Pass self as the DataSource
+            )?;
+
+        // Update the collector's state
+        self.unicode_escape_collector
+            .set_pending_high_surrogate(new_pending_surrogate);
 
         // Handle the UTF-8 bytes if we have them
         if let Some((utf8_bytes, len)) = utf8_bytes_result {
@@ -338,5 +314,27 @@ impl<R: Reader> StreamContentBuilder<'_, R> {
             }
         }
         Ok(())
+    }
+}
+
+/// DataSource implementation for StreamContentBuilder
+///
+/// This implementation provides access to both borrowed content from the StreamBuffer's
+/// internal buffer and unescaped content from the StreamBuffer's scratch space.
+/// Note: StreamParser doesn't have a distinct 'input lifetime since it reads from a stream,
+/// so we use the buffer lifetime 'b for both borrowed and unescaped content.
+impl<'b, R: Reader> DataSource<'b, 'b> for StreamContentBuilder<'b, R> {
+    fn get_borrowed_slice(&'b self, start: usize, end: usize) -> Result<&'b [u8], ParseError> {
+        self.stream_buffer
+            .get_string_slice(start, end)
+            .map_err(Into::into)
+    }
+
+    fn get_unescaped_slice(&'b self) -> Result<&'b [u8], ParseError> {
+        self.stream_buffer.get_unescaped_slice().map_err(Into::into)
+    }
+
+    fn has_unescaped_content(&self) -> bool {
+        self.stream_buffer.has_unescaped_content()
     }
 }
