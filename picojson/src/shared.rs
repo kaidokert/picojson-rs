@@ -120,7 +120,11 @@ impl ContentRange {
         current_pos: usize,
     ) -> (usize, usize) {
         let content_end = current_pos.saturating_sub(1); // Back up to exclude closing quote
-        (content_start, content_end)
+        if content_start > content_end {
+            (content_start, content_start)
+        } else {
+            (content_start, content_end)
+        }
     }
 
     /// Calculate Unicode escape sequence boundaries

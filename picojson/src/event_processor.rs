@@ -22,16 +22,35 @@ pub struct ParserCore<T: ujson::BitBucket, C: ujson::DepthCounter> {
     pub parser_state: ParserState,
     /// Tracks if the parser is currently inside any escape sequence (\n, \uXXXX, etc.)
     in_escape_sequence: bool,
+    /// Whether this parser handles chunked input (true for PushParser, false for Slice/Stream)
+    /// When true, running out of input returns EndOfData. When false, calls tokenizer.finish().
+    handles_chunked_input: bool,
 }
 
 impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
-    /// Create a new ParserCore
+    /// Create a new ParserCore for non-chunked parsers (SliceParser, StreamParser)
     pub fn new() -> Self {
         Self {
             tokenizer: Tokenizer::new(),
             parser_state: ParserState::new(),
             in_escape_sequence: false,
+            handles_chunked_input: false,
         }
+    }
+
+    /// Create a new ParserCore for chunked parsers (PushParser)
+    pub fn new_chunked() -> Self {
+        Self {
+            tokenizer: Tokenizer::new(),
+            parser_state: ParserState::new(),
+            in_escape_sequence: false,
+            handles_chunked_input: true,
+        }
+    }
+
+    /// Check if currently in an escape sequence
+    pub fn in_escape_sequence(&self) -> bool {
+        self.in_escape_sequence
     }
 
     /// Unified implementation with optional byte accumulation callback.
@@ -41,7 +60,22 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         &mut self,
         provider: &'a mut P,
         escape_timing: EscapeTiming,
+        byte_accumulator: F,
+    ) -> Result<Event<'a, 'a>, ParseError>
+    where
+        P: ContentExtractor,
+        F: FnMut(&mut P, u8) -> Result<(), ParseError>,
+    {
+        self.next_event_impl_with_flags(provider, escape_timing, byte_accumulator, false)
+    }
+
+    /// Extended version with flags for specialized behavior
+    pub fn next_event_impl_with_flags<'a, P, F>(
+        &mut self,
+        provider: &'a mut P,
+        escape_timing: EscapeTiming,
         mut byte_accumulator: F,
+        always_accumulate_during_escapes: bool,
     ) -> Result<Event<'a, 'a>, ParseError>
     where
         P: ContentExtractor,
@@ -58,22 +92,44 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                             .map_err(ParseError::TokenizerError)?;
                     }
 
-                    // Call byte accumulator if no events were generated AND we are not in an escape sequence
-                    if !have_events(&self.parser_state.evts) && !self.in_escape_sequence {
+                    // Call byte accumulator if no events were generated AND we're not in an escape sequence
+                    // OR if we're configured to always accumulate during escape sequences (for PushParser)
+                    // OR if we always accumulate during escapes AND we're processing Unicode escape hex digits
+                    let should_accumulate = if always_accumulate_during_escapes {
+                        // For PushParser: accumulate during escapes even when events are generated
+                        // This ensures hex digits reach the accumulator even when End UnicodeEscape events consume them
+                        // BUT still respect the normal logic when not in escape sequences
+                        if self.in_escape_sequence {
+                            true // Always accumulate during escape sequences
+                        } else {
+                            !have_events(&self.parser_state.evts) // Normal behavior outside escapes
+                        }
+                    } else {
+                        // For other parsers: only accumulate when no events generated and not in escape
+                        !have_events(&self.parser_state.evts) && !self.in_escape_sequence
+                    };
+
+                    if should_accumulate {
                         byte_accumulator(provider, byte)?;
                     }
                 } else {
-                    // Handle end of stream
-                    {
-                        clear_events(&mut self.parser_state.evts);
-                        let mut callback = create_tokenizer_callback(&mut self.parser_state.evts);
-                        self.tokenizer
-                            .finish(&mut callback)
-                            .map_err(ParseError::TokenizerError)?;
-                    }
+                    // Handle end of input - behavior depends on parser type
+                    if self.handles_chunked_input {
+                        // For chunked parsers (PushParser), return EndOfData so they can handle chunk boundaries
+                        return Err(ParseError::EndOfData);
+                    } else {
+                        // For non-chunked parsers (SliceParser, StreamParser), finish the document
+                        {
+                            let mut finish_callback =
+                                create_tokenizer_callback(&mut self.parser_state.evts);
+                            let _bytes_processed = self.tokenizer.finish(&mut finish_callback)?;
+                        } // Drop the callback to release the borrow
 
-                    if !have_events(&self.parser_state.evts) {
-                        return Ok(Event::EndDocument);
+                        // If finish() generated events, process them. Otherwise, return EndDocument.
+                        if !have_events(&self.parser_state.evts) {
+                            return Ok(Event::EndDocument);
+                        }
+                        // Continue to process any events generated by finish()
                     }
                 }
             }
@@ -370,7 +426,7 @@ pub trait ContentExtractor {
                         self.unicode_escape_collector_mut().reset();
                         self.begin_unicode_escape()?;
                     }
-                    _ => {} // Ignore if not in string/key context
+                    _ => {}
                 }
                 Ok(true) // Event was handled
             }
@@ -380,7 +436,7 @@ pub trait ContentExtractor {
                     State::String(_) | State::Key(_) => {
                         self.process_unicode_escape_with_collector()?;
                     }
-                    _ => {} // Ignore if not in string/key context
+                    _ => {}
                 }
                 Ok(true) // Event was handled
             }
