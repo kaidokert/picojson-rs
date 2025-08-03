@@ -166,53 +166,13 @@ where
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
     {
-        // Handle any remaining content in the buffer and check for incomplete parsing
-        match self.state {
-            ParserState::ParsingNumber => {
-                // Numbers are automatically switched to unescaped mode at the end of each write() call,
-                // so by the time we reach finish(), they should always be in the stream buffer
-                if !self.content_builder.using_unescaped_buffer() {
-                    return Err(PushParseError::Parse(ParseError::Unexpected(
-                        crate::shared::UnexpectedState::StateMismatch,
-                    )));
-                }
-
-                // Emit number from unescaped buffer atomically
-                self.content_builder.emit_number_from_unescaped_buffer()?;
-            }
-            ParserState::ParsingString => {
-                if self
-                    .content_builder
-                    .unicode_escape_collector_mut()
-                    .is_in_progress()
-                {
-                    return Err(PushParseError::Parse(ParseError::InvalidUnicodeHex));
-                }
-                return Err(PushParseError::Parse(ParseError::EndOfData));
-            }
-            ParserState::ParsingKey => {
-                if self
-                    .content_builder
-                    .unicode_escape_collector_mut()
-                    .is_in_progress()
-                {
-                    return Err(PushParseError::Parse(ParseError::InvalidUnicodeHex));
-                }
-                return Err(PushParseError::Parse(ParseError::EndOfData));
-            }
-            ParserState::Idle => {}
-        }
-
         // Check that the JSON document is complete (all containers closed)
         // Use a no-op callback since we don't expect any more events
         let mut no_op_callback = |_event: ujson::Event, _pos: usize| {};
         let _bytes_processed = self.tokenizer.finish(&mut no_op_callback)?;
 
-        self.content_builder
-            .emit_event(Event::EndDocument)
-            .map_err(PushParseError::Handler)?;
-
-        Ok(self.content_builder.into_handler())
+        // Delegate finish to content_builder
+        self.content_builder.finish()
     }
 
     /// Returns (new_state, should_append_byte)

@@ -6,7 +6,7 @@ use core::ops::Deref;
 ///
 /// 'a is the lifetime of the original input buffer.
 /// 'b is the lifetime of the scratch buffer.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum String<'a, 'b> {
     /// A raw slice from the original input, used when no un-escaping is needed.
     Borrowed(&'a str),

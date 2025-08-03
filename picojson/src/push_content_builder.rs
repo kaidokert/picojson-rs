@@ -133,6 +133,26 @@ impl<'scratch, H> PushContentBuilder<'scratch, H> {
         self.handler
     }
 
+    /// Finishes parsing and returns the handler.
+    pub fn finish<E>(mut self) -> Result<H, crate::push_parser::PushParseError<E>>
+    where
+        H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
+    {
+        // Handle any remaining content in the buffer
+        if self.parser_state != State::None {
+            return Err(crate::push_parser::PushParseError::Parse(
+                ParseError::EndOfData,
+            ));
+        }
+
+        // Emit EndDocument event
+        self.handler
+            .handle_event(Event::EndDocument)
+            .map_err(crate::push_parser::PushParseError::Handler)?;
+
+        Ok(self.handler)
+    }
+
     /// Emit a number event from the unescaped buffer and clear it atomically
     pub fn emit_number_from_unescaped_buffer<E>(
         &mut self,
