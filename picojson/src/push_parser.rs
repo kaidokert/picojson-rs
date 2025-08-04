@@ -186,9 +186,3 @@ impl<E> From<core::str::Utf8Error> for PushParseError<E> {
         PushParseError::Parse(ParseError::InvalidUtf8(e))
     }
 }
-
-// Implement From<ParseError> for common error types used in tests
-// This needs to be globally accessible for integration tests, not just unit tests
-impl From<ParseError> for () {
-    fn from(_: ParseError) -> Self {}
-}

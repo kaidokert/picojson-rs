@@ -2,7 +2,7 @@
 
 //! Test for PushParser copy-on-escape optimization (no_std compliant)
 
-use picojson::{DefaultConfig, Event, PushParser, PushParserHandler, String};
+use picojson::{DefaultConfig, Event, ParseError, PushParser, PushParserHandler, String};
 
 #[test]
 fn test_borrowed_vs_unescaped_simple() {
@@ -12,8 +12,8 @@ fn test_borrowed_vs_unescaped_simple() {
         value_is_borrowed: Option<bool>,
     }
 
-    impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for SimpleHandler {
-        fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+    impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for SimpleHandler {
+        fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
             match event {
                 Event::Key(s) => {
                     self.key_is_borrowed = Some(matches!(s, String::Borrowed(_)));
@@ -36,7 +36,7 @@ fn test_borrowed_vs_unescaped_simple() {
 
     parser.write(br#"{"foo": "bar"}"#).unwrap();
 
-    let handler = parser.finish().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     // Both should be borrowed since no escapes
     assert_eq!(
@@ -59,8 +59,8 @@ fn test_borrowed_vs_unescaped_with_escapes() {
         value_is_borrowed: Option<bool>,
     }
 
-    impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for EscapeHandler {
-        fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+    impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for EscapeHandler {
+        fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
             match event {
                 Event::Key(s) => {
                     self.key_is_borrowed = Some(matches!(s, String::Borrowed(_)));
@@ -82,7 +82,7 @@ fn test_borrowed_vs_unescaped_with_escapes() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(br#"{"key\\n": "val\\t"}"#).unwrap();
-    let handler = parser.finish().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     // Both should be unescaped since they have escape sequences
     assert_eq!(
@@ -108,8 +108,8 @@ fn test_buffer_isolation() {
         count: usize,
     }
 
-    impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for ContentChecker {
-        fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+    impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for ContentChecker {
+        fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
             match event {
                 Event::Key(s) | Event::String(s) => {
                     let bytes = s.as_ref().as_bytes();
@@ -148,7 +148,7 @@ fn test_buffer_isolation() {
 
     // Test: simple string followed by escaped string
     parser.write(br#"{"simple": "esc\\n"}"#).unwrap();
-    let handler = parser.finish().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     // Verify first string is "simple"
     assert!(handler.first_string.is_some());

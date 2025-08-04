@@ -41,8 +41,8 @@ mod json_checker_tests {
         event_count: usize,
     }
 
-    impl<'a, 'b> PushParserHandler<'a, 'b, ()> for ConformanceTestHandler {
-        fn handle_event(&mut self, _event: Event<'a, 'b>) -> Result<(), ()> {
+    impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for ConformanceTestHandler {
+        fn handle_event(&mut self, _event: Event<'a, 'b>) -> Result<(), ParseError> {
             self.event_count += 1;
             Ok(())
         }
@@ -53,20 +53,16 @@ mod json_checker_tests {
         let handler = ConformanceTestHandler { event_count: 0 };
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
-        let to_parse_error = |e: PushParseError<()>| match e {
+        let to_parse_error = |e: PushParseError<ParseError>| match e {
             PushParseError::Parse(parse_err) => parse_err,
-            PushParseError::Handler(_handler_err) => {
-                // Handler error - represents logic error in callback, not parsing issue
-                // Using InvalidNumber as a placeholder for handler errors since UnexpectedState is not exported
-                ParseError::InvalidNumber
-            }
+            PushParseError::Handler(handler_err) => handler_err,
         };
 
         parser
             .write(json_content.as_bytes())
             .map_err(to_parse_error)?;
 
-        let handler = parser.finish::<()>().map_err(to_parse_error)?;
+        let handler = parser.finish::<ParseError>().map_err(to_parse_error)?;
         Ok(handler.event_count)
     }
 

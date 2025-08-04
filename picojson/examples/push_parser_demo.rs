@@ -1,6 +1,6 @@
 // Example demonstrating PushParser with SAX-style event handling
 
-use picojson::{DefaultConfig, Event, PushParseError, PushParser, PushParserHandler};
+use picojson::{DefaultConfig, Event, ParseError, PushParseError, PushParser, PushParserHandler};
 
 /// A simple event handler that prints JSON events as they arrive
 struct JsonEventPrinter {
@@ -21,8 +21,8 @@ impl JsonEventPrinter {
     }
 }
 
-impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for JsonEventPrinter {
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for JsonEventPrinter {
+    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
         self.event_count += 1;
 
         match event {
@@ -65,7 +65,7 @@ impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for JsonEventPrin
     }
 }
 
-fn main() -> Result<(), PushParseError<()>> {
+fn main() -> Result<(), PushParseError<ParseError>> {
     println!("🚀 PushParser Demo - SAX-style JSON Processing");
     println!("===============================================");
     println!();
@@ -103,22 +103,17 @@ fn main() -> Result<(), PushParseError<()>> {
     // Feed data chunk by chunk to demonstrate streaming capability
     for (i, chunk) in json_chunks.iter().enumerate() {
         println!("📨 Processing chunk {} ({} bytes):", i + 1, chunk.len());
-        let chunk_str = std::str::from_utf8(chunk)
-            .map_err(|e| PushParseError::Parse(picojson::ParseError::InvalidUtf8(e)))?;
+        let chunk_str = std::str::from_utf8(chunk)?;
         println!("   Chunk data: {:?}", chunk_str);
 
         // Write chunk to parser - events are handled immediately
-        parser
-            .write::<()>(chunk)
-            .map_err(|_| PushParseError::Parse(picojson::ParseError::ScratchBufferFull))?;
+        parser.write(chunk)?;
         println!();
     }
 
     // Signal end of input and retrieve the handler
     println!("🔚 Finishing parsing...");
-    let handler = parser
-        .finish::<()>()
-        .map_err(|_| PushParseError::Parse(picojson::ParseError::ScratchBufferFull))?;
+    let handler = parser.finish()?;
 
     println!();
     println!(

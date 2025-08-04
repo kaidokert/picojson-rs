@@ -70,10 +70,10 @@ impl<'expected> StressTestHandler<'expected> {
     }
 }
 
-impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ()>
+impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ParseError>
     for StressTestHandler<'expected>
 {
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
         self.assert_event_matches(&event);
         Ok(())
     }
@@ -88,8 +88,8 @@ impl PermissiveTestHandler {
     }
 }
 
-impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for PermissiveTestHandler {
-    fn handle_event(&mut self, _event: Event<'input, 'scratch>) -> Result<(), ()> {
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for PermissiveTestHandler {
+    fn handle_event(&mut self, _event: Event<'input, 'scratch>) -> Result<(), ParseError> {
         // Accept any events - we expect the parser to fail eventually
         Ok(())
     }
@@ -311,7 +311,7 @@ fn test_push_parsing_with_config(
     scenario: &TestScenario,
     buffer_size: usize,
     chunk_pattern: &[usize],
-) -> Result<(), ()> {
+) -> Result<(), ParseError> {
     let mut buffer = vec![0u8; buffer_size];
     let expected_events: Vec<OwnedEvent> = scenario
         .expected_events
@@ -329,7 +329,10 @@ fn test_push_parsing_with_config(
             handler.assert_complete();
             Ok(())
         }
-        Err(_) => Err(()),
+        Err(e) => match e {
+            PushParseError::Parse(parse_err) => Err(parse_err),
+            PushParseError::Handler(handler_err) => Err(handler_err),
+        },
     }
 }
 

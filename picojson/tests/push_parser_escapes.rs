@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
+use picojson::{DefaultConfig, Event, ParseError, PushParser, PushParserHandler};
 
 /// Simple test handler that collects events as debug strings
 struct EventCollector {
@@ -13,8 +13,8 @@ impl EventCollector {
     }
 }
 
-impl<'a, 'b> PushParserHandler<'a, 'b, ()> for EventCollector {
-    fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for EventCollector {
+    fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
         let event_desc = match event {
             Event::StartObject => "StartObject".to_string(),
             Event::EndObject => "EndObject".to_string(),
@@ -43,7 +43,7 @@ fn test_string_with_actual_escapes() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(json).unwrap();
-    let handler = parser.finish::<()>().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -68,7 +68,7 @@ fn test_quote_escape() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(json).unwrap();
-    let handler = parser.finish::<()>().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -92,7 +92,7 @@ fn test_escaped_key_with_newline() {
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
     parser.write(json).unwrap();
-    let handler = parser.finish::<()>().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -116,7 +116,7 @@ fn test_actual_key_escape_sequence() {
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
     parser.write(json).unwrap();
-    let handler = parser.finish::<()>().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),
@@ -140,7 +140,7 @@ fn test_unicode_escapes() {
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     parser.write(json).unwrap();
-    let handler = parser.finish::<()>().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     let expected = vec![
         "StartArray".to_string(),
@@ -162,7 +162,7 @@ fn test_escaped_key_with_quote() {
     let mut buffer = [0u8; 256];
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
     parser.write(json).unwrap();
-    let handler = parser.finish::<()>().unwrap();
+    let handler = parser.finish::<ParseError>().unwrap();
 
     let expected = vec![
         "StartObject".to_string(),

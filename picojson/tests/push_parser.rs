@@ -3,13 +3,15 @@
 // Push parser tests for the integrated escape handling functionality
 #[cfg(test)]
 mod tests {
-    use picojson::{DefaultConfig, Event, PullParser, PushParser, PushParserHandler, SliceParser};
+    use picojson::{
+        DefaultConfig, Event, ParseError, PullParser, PushParser, PushParserHandler, SliceParser,
+    };
 
     // Simple test handler for the clean implementation
     struct SimpleHandler;
 
-    impl<'a, 'b> PushParserHandler<'a, 'b, ()> for SimpleHandler {
-        fn handle_event(&mut self, _event: Event<'a, 'b>) -> Result<(), ()> {
+    impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for SimpleHandler {
+        fn handle_event(&mut self, _event: Event<'a, 'b>) -> Result<(), ParseError> {
             Ok(())
         }
     }
@@ -22,7 +24,7 @@ mod tests {
 
         // This should compile without lifetime issues using HRTB + tokenizer + event array
         parser.write(b"true").unwrap(); // Valid JSON
-        let _handler = parser.finish::<()>().unwrap();
+        let _handler = parser.finish::<ParseError>().unwrap();
     }
 
     #[test]
@@ -32,8 +34,8 @@ mod tests {
             event_count: usize,
         }
 
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for CapturingHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+        impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for CapturingHandler {
+            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
                 self.event_count += 1;
                 match event {
                     Event::String(s) => {
@@ -55,7 +57,7 @@ mod tests {
 
         // Test tokenizer + HRTB integration with real JSON
         parser.write(b"\"hello\"").unwrap(); // This should trigger String Begin event -> Unescaped processing
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify events were processed
         assert_eq!(handler.event_count, 2); // String + EndDocument
@@ -68,8 +70,8 @@ mod tests {
             string_content: Option<std::string::String>, // Use std::string::String to avoid lifetime issues
         }
 
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for StringHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+        impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for StringHandler {
+            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
                 match event {
                     Event::String(s) => {
                         // Capture the actual string content for verification
@@ -90,7 +92,7 @@ mod tests {
 
         // Test simple string extraction - this should extract "test" from the input
         parser.write(br#""test""#).unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // SUCCESS: Verify we extracted the actual string content!
         assert_eq!(
@@ -107,8 +109,8 @@ mod tests {
             events: Vec<std::string::String>,
         }
 
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for KeyTestHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+        impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for KeyTestHandler {
+            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
                 let event_desc = match event {
                     Event::StartObject => "StartObject".to_string(),
                     Event::EndObject => "EndObject".to_string(),
@@ -129,7 +131,7 @@ mod tests {
 
         // Test object with key-value pair
         parser.write(br#"{"name": "value"}"#).unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify we captured all object events correctly
 
@@ -153,8 +155,8 @@ mod tests {
             events: Vec<std::string::String>,
         }
 
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for EscapeTestHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+        impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for EscapeTestHandler {
+            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
                 let event_desc = match event {
                     Event::StartObject => "StartObject".to_string(),
                     Event::EndObject => "EndObject".to_string(),
@@ -174,7 +176,7 @@ mod tests {
 
         // Test string with actual escape sequence (\n should become newline)
         parser.write(b"{\"key\": \"hello\\nworld\"}").unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify escape sequence was processed correctly
 
@@ -198,8 +200,8 @@ mod tests {
             events: Vec<std::string::String>,
         }
 
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for UnicodeEscapeTestHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+        impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for UnicodeEscapeTestHandler {
+            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
                 let event_desc = match event {
                     Event::StartObject => "StartObject".to_string(),
                     Event::EndObject => "EndObject".to_string(),
@@ -219,7 +221,7 @@ mod tests {
 
         // Test string with Unicode escape sequence (\u0041 should become 'A')
         parser.write(br#"{"key": "\u0041"}"#).unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify Unicode escape sequence was processed correctly
 
@@ -243,8 +245,10 @@ mod tests {
             events: Vec<String>,
         }
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for ConsecutiveUnicodeTestHandler {
-            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError>
+            for ConsecutiveUnicodeTestHandler
+        {
+            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
                 match event {
                     Event::StartObject => self.events.push("StartObject".to_string()),
                     Event::EndObject => self.events.push("EndObject".to_string()),
@@ -263,7 +267,7 @@ mod tests {
 
         // Test string with mixed escapes like in pass1.json line 45
         parser.write(br#"{"key": "\uCAFE\uBABE"}"#).unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify consecutive Unicode escapes were processed correctly
 
@@ -287,8 +291,8 @@ mod tests {
             events: Vec<String>,
         }
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for TraceHandler {
-            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for TraceHandler {
+            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
                 match event {
                     Event::String(s) => {
                         self.events.push(format!("String({})", s.as_ref()));
@@ -310,7 +314,7 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         assert_eq!(parser.write(line_28.as_bytes()), Ok(()));
-        assert!(parser.finish::<()>().is_ok());
+        assert!(parser.finish::<ParseError>().is_ok());
 
         // Test line 45 from pass1.json (the longer one we tested before)
         let line_45 = r#""\\/\\\\\\\"\\uCAFE\\uBABE\\uAB98\\uFCDE\\ubcda\\uef4A\\b\\f\\n\\r\\t`1~!@#$%^&*()_+-=[]{}|;:',./<>?""#;
@@ -320,7 +324,7 @@ mod tests {
         let mut parser2 = PushParser::<_, DefaultConfig>::new(handler2, &mut buffer2);
 
         assert_eq!(parser2.write(line_45.as_bytes()), Ok(()));
-        assert!(parser2.finish::<()>().is_ok());
+        assert!(parser2.finish::<ParseError>().is_ok());
     }
 
     // Test larger section of pass1.json to find what causes InvalidSliceBounds
@@ -330,8 +334,8 @@ mod tests {
             events: Vec<String>,
         }
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for TraceHandler {
-            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for TraceHandler {
+            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
                 match event {
                     Event::String(s) => {
                         self.events
@@ -398,7 +402,7 @@ mod tests {
         let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
         assert_eq!(parser.write(larger_section.as_bytes()), Ok(()));
-        assert!(parser.finish::<()>().is_ok());
+        assert!(parser.finish::<ParseError>().is_ok());
     }
 
     // Test how parsers handle empty keys like in pass1.json
@@ -427,8 +431,8 @@ mod tests {
             events: Vec<String>,
         }
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for EmptyKeyHandler {
-            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for EmptyKeyHandler {
+            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
                 match event {
                     Event::Key(k) => {
                         self.events.push(format!("Key({})", k.as_ref()));
@@ -448,7 +452,7 @@ mod tests {
 
         assert_eq!(push_parser.write(empty_key_json.as_bytes()), Ok(()));
 
-        let handler = push_parser.finish::<()>().unwrap();
+        let handler = push_parser.finish::<ParseError>().unwrap();
         assert_eq!(
             handler.events,
             vec!["Key()".to_string(), "Number(123)".to_string()],
@@ -463,8 +467,8 @@ mod tests {
             events: Vec<std::string::String>,
         }
 
-        impl<'a, 'b> PushParserHandler<'a, 'b, ()> for NumberTestHandler {
-            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ()> {
+        impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for NumberTestHandler {
+            fn handle_event(&mut self, event: Event<'a, 'b>) -> Result<(), ParseError> {
                 let event_desc = match event {
                     Event::StartArray => "StartArray".to_string(),
                     Event::EndArray => "EndArray".to_string(),
@@ -493,7 +497,7 @@ mod tests {
         let json_input = br#"{"int": 42, "negative": -123}"#;
 
         parser.write(json_input).unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify number events were captured correctly
 
@@ -527,14 +531,12 @@ mod tests {
 
     #[test]
     fn test_single_slash_escape() {
-        use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
-
         struct Handler {
             events: Vec<String>,
         }
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
-            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
+            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
                 match event {
                     Event::String(s) => self.events.push(format!("String({})", s)),
                     _ => {}
@@ -549,7 +551,7 @@ mod tests {
 
         // Test just \/
         parser.write(br#""\/""#).unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify single slash escape was processed correctly
         // Should be: ["String(/)"]
@@ -558,15 +560,13 @@ mod tests {
 
     #[test]
     fn test_invalid_unicode_escape_incomplete() {
-        use picojson::{DefaultConfig, PushParser, PushParserHandler};
-
         struct Handler;
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
             fn handle_event(
                 &mut self,
                 _event: picojson::Event<'input, 'scratch>,
-            ) -> Result<(), ()> {
+            ) -> Result<(), ParseError> {
                 Ok(())
             }
         }
@@ -579,7 +579,7 @@ mod tests {
         let write_result = parser.write(br#""\u004""#);
         if write_result.is_ok() {
             // If write succeeds, the error should be caught in finish
-            let finish_result = parser.finish::<()>();
+            let finish_result = parser.finish::<ParseError>();
             assert!(
                 finish_result.is_err(),
                 "Incomplete Unicode escape should fail during finish"
@@ -595,15 +595,13 @@ mod tests {
 
     #[test]
     fn test_invalid_unicode_escape_invalid_hex() {
-        use picojson::{DefaultConfig, PushParser, PushParserHandler};
-
         struct Handler;
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
             fn handle_event(
                 &mut self,
                 _event: picojson::Event<'input, 'scratch>,
-            ) -> Result<(), ()> {
+            ) -> Result<(), ParseError> {
                 Ok(())
             }
         }
@@ -622,15 +620,13 @@ mod tests {
 
     #[test]
     fn test_invalid_unicode_escape_in_key() {
-        use picojson::{DefaultConfig, PushParser, PushParserHandler};
-
         struct Handler;
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
             fn handle_event(
                 &mut self,
                 _event: picojson::Event<'input, 'scratch>,
-            ) -> Result<(), ()> {
+            ) -> Result<(), ParseError> {
                 Ok(())
             }
         }
@@ -646,28 +642,26 @@ mod tests {
 
     #[test]
     fn test_mixed_borrowed_and_unescaped_strings() {
-        use picojson::{DefaultConfig, Event, PushParser, PushParserHandler, String};
-
         struct Handler {
             events: Vec<std::string::String>,
         }
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
-            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
+            fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
                 match event {
                     Event::String(s) => {
                         let content = s.as_ref().to_string();
                         let string_type = match s {
-                            String::Borrowed(_) => "Borrowed",
-                            String::Unescaped(_) => "Unescaped",
+                            picojson::String::Borrowed(_) => "Borrowed",
+                            picojson::String::Unescaped(_) => "Unescaped",
                         };
                         self.events.push(format!("{}({})", string_type, content));
                     }
                     Event::Key(k) => {
                         let content = k.as_ref().to_string();
                         let key_type = match k {
-                            String::Borrowed(_) => "BorrowedKey",
-                            String::Unescaped(_) => "UnescapedKey",
+                            picojson::String::Borrowed(_) => "BorrowedKey",
+                            picojson::String::Unescaped(_) => "UnescapedKey",
                         };
                         self.events.push(format!("{}({})", key_type, content));
                     }
@@ -685,7 +679,7 @@ mod tests {
         parser
             .write(br#"{"simple": "value", "escaped": "hello\\nworld"}"#)
             .unwrap();
-        let handler = parser.finish::<()>().unwrap();
+        let handler = parser.finish::<ParseError>().unwrap();
 
         // Verify we have both borrowed and unescaped string types
         let has_borrowed = handler.events.iter().any(|e| e.starts_with("Borrowed"));
@@ -697,15 +691,13 @@ mod tests {
 
     #[test]
     fn test_invalid_escape_sequences_in_keys() {
-        use picojson::{DefaultConfig, PushParser, PushParserHandler};
-
         struct Handler;
 
-        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for Handler {
+        impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
             fn handle_event(
                 &mut self,
                 _event: picojson::Event<'input, 'scratch>,
-            ) -> Result<(), ()> {
+            ) -> Result<(), ParseError> {
                 Ok(())
             }
         }

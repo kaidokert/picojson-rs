@@ -3,7 +3,7 @@
 //! Minimal reproduction test for InvalidSliceBounds buffer boundary tracking issue
 //! This test aims to reproduce the exact same error that occurs in pass1.json parsing
 
-use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
+use picojson::{DefaultConfig, Event, ParseError, PushParser, PushParserHandler};
 
 /// Handler that compares events immediately as they arrive for detailed validation
 struct ReproHandler<'expected> {
@@ -65,10 +65,10 @@ impl<'expected> ReproHandler<'expected> {
     }
 }
 
-impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ()>
+impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ParseError>
     for ReproHandler<'expected>
 {
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
         self.assert_event_matches(&event);
         Ok(())
     }
@@ -96,7 +96,9 @@ fn test_reproduce_invalidslicebounds_minimal() {
 
     // Should parse successfully without InvalidSliceBounds error
     parser.write(json_content).expect("Write should succeed");
-    let handler = parser.finish().expect("Finish should succeed");
+    let handler = parser
+        .finish::<ParseError>()
+        .expect("Finish should succeed");
 
     // Verify all expected events were received
     handler.assert_complete();
@@ -130,7 +132,9 @@ fn test_reproduce_invalidslicebounds_chunked() {
             .expect("Each chunk should parse successfully");
     }
 
-    let handler = parser.finish().expect("Finish should succeed");
+    let handler = parser
+        .finish::<ParseError>()
+        .expect("Finish should succeed");
 
     // Verify all expected events were received
     handler.assert_complete();
@@ -158,7 +162,9 @@ fn test_reproduce_invalidslicebounds_complex_key() {
 
     // Should parse successfully without InvalidSliceBounds error
     parser.write(json_content).expect("Write should succeed");
-    let handler = parser.finish().expect("Finish should succeed");
+    let handler = parser
+        .finish::<ParseError>()
+        .expect("Finish should succeed");
 
     // Verify all expected events were received with proper escape sequence decoding
     handler.assert_complete();
