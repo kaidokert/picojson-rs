@@ -277,17 +277,8 @@ impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
         Ok(())
     }
 
-    fn validate_and_extract_number(
-        &mut self,
-        from_container_end: bool,
-    ) -> Result<Event<'_, '_>, ParseError> {
-        let start_pos = match *self.parser_state() {
-            State::Number(pos) => pos,
-            _ => return Err(crate::shared::UnexpectedState::StateMismatch.into()),
-        };
-
-        *self.parser_state_mut() = State::None;
-        self.extract_number(start_pos, from_container_end, self.is_finished())
+    fn is_finished(&self) -> bool {
+        self.finished
     }
 }
 
