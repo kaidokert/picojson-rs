@@ -255,6 +255,11 @@ impl<'a> StreamBuffer<'a> {
         }
     }
 
+    /// Truncate unescaped content by removing the specified number of bytes from the end
+    pub fn truncate_unescaped_by(&mut self, count: usize) {
+        self.unescaped_len = self.unescaped_len.saturating_sub(count);
+    }
+
     /// Get a string slice from the buffer (zero-copy)
     /// Used for strings without escapes
     pub fn get_string_slice(&self, start: usize, end: usize) -> Result<&[u8], StreamBufferError> {

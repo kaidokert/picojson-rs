@@ -244,6 +244,14 @@ where
             }
         }
     }
+
+    /// Returns the underlying byte slice, whether from input or scratch.
+    pub fn as_bytes(&self) -> &'scratch [u8] {
+        match self {
+            ContentPiece::Input(bytes) => bytes,
+            ContentPiece::Scratch(bytes) => bytes,
+        }
+    }
 }
 
 pub fn from_utf8(v: &[u8]) -> Result<&str, ParseError> {

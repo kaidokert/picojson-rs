@@ -14,7 +14,10 @@
 
 #[cfg(feature = "remote-tests")]
 mod json_checker_tests {
-    use picojson::{Event, ParseError, PullParser, SliceParser};
+    use picojson::{
+        ChunkReader, DefaultConfig, Event, ParseError, PullParser, PushParseError, PushParser,
+        PushParserHandler, SliceParser, StreamParser,
+    };
     use std::fs;
     use std::path::Path;
 
@@ -27,6 +30,58 @@ mod json_checker_tests {
             match parser.next_event() {
                 Ok(Event::EndDocument) => break,
                 Ok(_event) => event_count += 1,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(event_count)
+    }
+
+    // Test handler for PushParser conformance tests
+    struct ConformanceTestHandler {
+        event_count: usize,
+    }
+
+    impl<'a, 'b> PushParserHandler<'a, 'b, ()> for ConformanceTestHandler {
+        fn handle_event(&mut self, _event: Event<'a, 'b>) -> Result<(), ()> {
+            self.event_count += 1;
+            Ok(())
+        }
+    }
+
+    fn run_push_parser_test(json_content: &str) -> Result<usize, ParseError> {
+        let mut buffer = [0u8; 2048]; // Larger buffer for pass1.json
+        let handler = ConformanceTestHandler { event_count: 0 };
+        let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
+
+        let to_parse_error = |e: PushParseError<()>| match e {
+            PushParseError::Parse(parse_err) => parse_err,
+            PushParseError::Handler(_handler_err) => {
+                // Handler error - represents logic error in callback, not parsing issue
+                // Using InvalidNumber as a placeholder for handler errors since UnexpectedState is not exported
+                ParseError::InvalidNumber
+            }
+        };
+
+        parser
+            .write(json_content.as_bytes())
+            .map_err(to_parse_error)?;
+
+        let handler = parser.finish::<()>().map_err(to_parse_error)?;
+        Ok(handler.event_count)
+    }
+
+    fn run_stream_parser_test(json_content: &str) -> Result<usize, ParseError> {
+        let reader = ChunkReader::full_slice(json_content.as_bytes());
+        let mut buffer = [0u8; 2048]; // Larger buffer for pass1.json
+        let mut parser = StreamParser::<_, DefaultConfig>::new(reader, &mut buffer);
+        let mut event_count = 0;
+
+        loop {
+            match parser.next_event() {
+                Ok(Event::EndDocument) => break,
+                Ok(_event) => {
+                    event_count += 1;
+                }
                 Err(e) => return Err(e),
             }
         }
@@ -85,6 +140,90 @@ mod json_checker_tests {
                 result.err()
             );
         }
+
+        // PushParser conformance tests
+        #[test]
+        fn test_push_parser_pass1_comprehensive() {
+            let content = load_test_file("pass1.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: pass1.json should parse successfully but failed: {:?}",
+                result.err()
+            );
+
+            // pass1.json is a comprehensive test with many JSON features
+            let event_count = result.unwrap();
+            assert!(
+                event_count > 50,
+                "PushParser: pass1.json should generate substantial events, got: {}",
+                event_count
+            );
+        }
+
+        #[test]
+        fn test_push_parser_pass2_deep_nesting() {
+            let content = load_test_file("pass2.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: pass2.json (deep nesting) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
+
+        #[test]
+        fn test_push_parser_pass3_simple_object() {
+            let content = load_test_file("pass3.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: pass3.json (simple object) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
+
+        // StreamParser conformance tests with logging
+        #[test]
+        fn test_stream_parser_pass1_comprehensive() {
+            let content = load_test_file("pass1.json");
+            let result = run_stream_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "StreamParser: pass1.json should parse successfully but failed: {:?}",
+                result.err()
+            );
+
+            // pass1.json is a comprehensive test with many JSON features
+            let event_count = result.unwrap();
+            assert!(
+                event_count > 50,
+                "StreamParser: pass1.json should generate substantial events, got: {}",
+                event_count
+            );
+        }
+
+        #[test]
+        fn test_stream_parser_pass2_deep_nesting() {
+            let content = load_test_file("pass2.json");
+            let result = run_stream_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "StreamParser: pass2.json (deep nesting) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
+
+        #[test]
+        fn test_stream_parser_pass3_simple_object() {
+            let content = load_test_file("pass3.json");
+            let result = run_stream_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "StreamParser: pass3.json (simple object) should parse successfully but failed: {:?}",
+                result.err()
+            );
+        }
     }
 
     // Indices of fail*.json files that should fail to parse (excluding known deviations)
@@ -122,6 +261,33 @@ mod json_checker_tests {
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26,
             27, 28, 29, 30, 31, 32, 33
         );
+
+        macro_rules! generate_push_parser_fail_tests {
+            ($($num:expr),*) => {
+                $(
+                    paste::paste! {
+                        #[test]
+                        fn [<test_push_parser_fail $num>]() {
+                            let content = load_test_file(&format!("fail{}.json", $num));
+                            let result = run_push_parser_test(&content);
+                            assert!(
+                                result.is_err(),
+                                "PushParser: fail{}.json should fail to parse but succeeded with {} events. Content: {:?}",
+                                $num,
+                                result.unwrap_or(0),
+                                content
+                            );
+                        }
+                    }
+                )*
+            };
+        }
+
+        // Generate PushParser test cases for the same 31 fail*.json files
+        generate_push_parser_fail_tests!(
+            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26,
+            27, 28, 29, 30, 31, 32, 33
+        );
     }
 
     mod known_deviations {
@@ -144,6 +310,27 @@ mod json_checker_tests {
             assert!(
                 result.is_ok(),
                 "fail18.json is expected to pass because the non-recursive parser handles deep nesting."
+            );
+        }
+
+        // PushParser known deviations - should match SliceParser behavior
+        #[test]
+        fn test_push_parser_fail1_root_string_allowed() {
+            let content = load_test_file("fail1.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: fail1.json is expected to pass because modern JSON (RFC 7159) allows scalar root values."
+            );
+        }
+
+        #[test]
+        fn test_push_parser_fail18_deep_nesting_supported() {
+            let content = load_test_file("fail18.json");
+            let result = run_push_parser_test(&content);
+            assert!(
+                result.is_ok(),
+                "PushParser: fail18.json is expected to pass because the non-recursive parser handles deep nesting."
             );
         }
     }

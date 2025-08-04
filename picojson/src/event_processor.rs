@@ -22,15 +22,29 @@ pub struct ParserCore<T: ujson::BitBucket, C: ujson::DepthCounter> {
     pub parser_state: ParserState,
     /// Tracks if the parser is currently inside any escape sequence (\n, \uXXXX, etc.)
     in_escape_sequence: bool,
+    /// Whether this parser handles chunked input (true for PushParser, false for Slice/Stream)
+    /// When true, running out of input returns EndOfData. When false, calls tokenizer.finish().
+    handles_chunked_input: bool,
 }
 
 impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
-    /// Create a new ParserCore
+    /// Create a new ParserCore for non-chunked parsers (SliceParser, StreamParser)
     pub fn new() -> Self {
         Self {
             tokenizer: Tokenizer::new(),
             parser_state: ParserState::new(),
             in_escape_sequence: false,
+            handles_chunked_input: false,
+        }
+    }
+
+    /// Create a new ParserCore for chunked parsers (PushParser)
+    pub fn new_chunked() -> Self {
+        Self {
+            tokenizer: Tokenizer::new(),
+            parser_state: ParserState::new(),
+            in_escape_sequence: false,
+            handles_chunked_input: true,
         }
     }
 
@@ -87,15 +101,22 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                         byte_accumulator(provider, byte)?;
                     }
                 } else {
-                    {
-                        let mut finish_callback =
-                            create_tokenizer_callback(&mut self.parser_state.evts);
-                        let _bytes_processed = self.tokenizer.finish(&mut finish_callback)?;
-                    } // Drop the callback to release the borrow
+                    // Handle end of input - behavior depends on parser type
+                    if self.handles_chunked_input {
+                        // For chunked parsers (PushParser), return EndOfData so they can handle chunk boundaries
+                        return Err(ParseError::EndOfData);
+                    } else {
+                        // For non-chunked parsers (SliceParser, StreamParser), finish the document
+                        {
+                            let mut finish_callback =
+                                create_tokenizer_callback(&mut self.parser_state.evts);
+                            let _bytes_processed = self.tokenizer.finish(&mut finish_callback)?;
+                        } // Drop the callback to release the borrow
 
-                    // If finish() generated events, process them. Otherwise, return EndDocument.
-                    if !have_events(&self.parser_state.evts) {
-                        return Ok(Event::EndDocument);
+                        // If finish() generated events, process them. Otherwise, return EndDocument.
+                        if !have_events(&self.parser_state.evts) {
+                            return Ok(Event::EndDocument);
+                        }
                     }
                 }
             }
