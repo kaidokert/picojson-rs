@@ -126,6 +126,11 @@ impl<'input, 'scratch> PushContentExtractor<'input, 'scratch> {
             .map_err(ParseError::from)
     }
 
+    /// Truncate unescaped content by removing bytes from the end
+    pub fn truncate_unescaped_by(&mut self, count: usize) {
+        self.stream_buffer.truncate_unescaped_by(count);
+    }
+
     /// Get the position offset
     pub fn position_offset(&self) -> usize {
         self.position_offset
@@ -428,28 +433,8 @@ impl ContentExtractor for PushContentExtractor<'_, '_> {
                     {
                         let first_hex_digit = current_content[hex_pos];
 
-                        // Remove the first hex digit - use small bounded buffer
-                        let mut temp_content = [0u8; 64]; // Small bounded buffer for reasonable string prefixes
-                        let content_len_without_hex = current_content.len() - 1;
-
-                        if content_len_without_hex > temp_content.len() {
-                            // String too long - this shouldn't happen for typical use cases
-                            // Just clear everything and continue
-                            self.stream_buffer.clear_unescaped();
-                        } else if content_len_without_hex > 0 {
-                            temp_content[..content_len_without_hex]
-                                .copy_from_slice(&current_content[..content_len_without_hex]);
-                            // Clear and rebuild buffer without the last hex digit
-                            self.stream_buffer.clear_unescaped();
-                            for &byte in &temp_content[..content_len_without_hex] {
-                                self.stream_buffer
-                                    .append_unescaped_byte(byte)
-                                    .map_err(ParseError::from)?;
-                            }
-                        } else {
-                            // Just clear the buffer if there's nothing else
-                            self.stream_buffer.clear_unescaped();
-                        }
+                        // Remove the last hex digit by truncating the buffer
+                        self.stream_buffer.truncate_unescaped_by(1);
 
                         // Now feed the first hex digit to the Unicode collector
                         let is_complete = self
@@ -525,28 +510,25 @@ impl PushContentExtractor<'_, '_> {
         // The end is the current position (where we are in the chunk)
         let content_end = self.current_position + 1;
 
-        // Get the slice of partial content from the current chunk
+        // Copy the slice of partial content from the current chunk
         if content_end > content_start {
-            let partial_slice = self.get_borrowed_slice(content_start, content_end)?;
+            // Get the range within the current chunk
+            let slice_start = content_start.saturating_sub(self.position_offset);
+            let slice_end = content_end.saturating_sub(self.position_offset);
 
-            // Copy bytes to a fixed-size buffer to avoid borrowing conflicts
-            let mut temp_buffer = [0u8; 1024]; // Should handle most token sizes
-            let byte_count = partial_slice.len();
-            if byte_count > temp_buffer.len() {
-                return Err(ParseError::InputBufferFull);
+            if slice_end <= self.current_chunk.len() && slice_start < slice_end {
+                let partial_slice = &self.current_chunk[slice_start..slice_end];
+
+                // Copy these bytes directly into the stream_buffer (the scratch space)
+                for &byte in partial_slice {
+                    self.stream_buffer
+                        .append_unescaped_byte(byte)
+                        .map_err(ParseError::from)?;
+                }
+
+                // Activate scratch buffer mode so subsequent content is also appended
+                self.using_unescaped_buffer = true;
             }
-
-            temp_buffer[..byte_count].copy_from_slice(partial_slice);
-
-            // Copy these bytes into the stream_buffer (the scratch space)
-            for &byte in &temp_buffer[..byte_count] {
-                self.stream_buffer
-                    .append_unescaped_byte(byte)
-                    .map_err(ParseError::from)?;
-            }
-
-            // Activate scratch buffer mode so subsequent content is also appended
-            self.using_unescaped_buffer = true;
         }
 
         Ok(())
