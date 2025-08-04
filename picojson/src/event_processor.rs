@@ -302,7 +302,7 @@ pub trait ContentExtractor {
     }
 
     fn is_finished(&self) -> bool {
-        false
+        true
     }
 
     /// Shared validation and extraction for number content
