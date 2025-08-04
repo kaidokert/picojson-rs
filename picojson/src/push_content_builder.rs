@@ -354,12 +354,16 @@ impl PushContentBuilder<'_, '_> {
             let slice_start = content_start.saturating_sub(self.position_offset);
             let slice_end = content_end.saturating_sub(self.position_offset);
 
-            if slice_end <= self.current_chunk.len() && slice_start < slice_end {
-                let partial_slice = &self.current_chunk[slice_start..slice_end];
+            // Explicit bounds checking with error return, similar to get_borrowed_slice
+            if slice_end > self.current_chunk.len() || slice_start > slice_end {
+                return Err(ParseError::Unexpected(
+                    crate::shared::UnexpectedState::InvalidSliceBounds,
+                ));
+            }
 
-                for &byte in partial_slice {
-                    self.stream_buffer.append_unescaped_byte(byte)?;
-                }
+            let partial_slice = &self.current_chunk[slice_start..slice_end];
+            for &byte in partial_slice {
+                self.stream_buffer.append_unescaped_byte(byte)?;
             }
         }
         Ok(())
