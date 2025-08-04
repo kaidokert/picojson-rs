@@ -1121,9 +1121,9 @@ mod tests {
         (consumed, &store[..index])
     }
 
-    fn collect_with_result<'a, 'b>(
+    fn collect_with_result<'a>(
         parser: &mut Tokenizer,
-        data: &'b [u8],
+        data: &[u8],
         store: &'a mut [Event],
     ) -> Result<(usize, &'a [Event]), Error> {
         let mut index = 0;

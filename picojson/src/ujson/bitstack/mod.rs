@@ -234,8 +234,8 @@ mod tests {
         let mut bitstack = 0;
         bitstack.push(true);
         bitstack.push(false);
-        assert_eq!(bitstack.pop(), false);
-        assert_eq!(bitstack.pop(), true);
+        assert!(!bitstack.pop());
+        assert!(bitstack.pop());
     }
 
     #[test]
@@ -249,13 +249,13 @@ mod tests {
         bitstack.push(true);
 
         // Verify top() doesn't modify stack
-        assert_eq!(bitstack.top(), true);
-        assert_eq!(bitstack.top(), true);
+        assert!(bitstack.top());
+        assert!(bitstack.top());
 
         // Verify LIFO order
-        assert_eq!(bitstack.pop(), true);
-        assert_eq!(bitstack.pop(), false);
-        assert_eq!(bitstack.pop(), true);
+        assert!(bitstack.pop());
+        assert!(!bitstack.pop());
+        assert!(bitstack.pop());
     }
 
     #[test]
@@ -317,13 +317,13 @@ mod tests {
         bitstack.push(true);
 
         // Verify top() doesn't modify stack
-        assert_eq!(bitstack.top(), true);
-        assert_eq!(bitstack.top(), true);
+        assert!(bitstack.top());
+        assert!(bitstack.top());
 
         // Verify LIFO order
-        assert_eq!(bitstack.pop(), true);
-        assert_eq!(bitstack.pop(), false);
-        assert_eq!(bitstack.pop(), true);
+        assert!(bitstack.pop());
+        assert!(!bitstack.pop());
+        assert!(bitstack.pop());
     }
 
     #[test]
@@ -374,16 +374,8 @@ mod tests {
         assert!(!bitstack.top(), "Empty stack top() returns false");
 
         // Test that underflow doesn't panic (at least it's safe)
-        assert_eq!(
-            bitstack.pop(),
-            false,
-            "Multiple underflow calls don't panic"
-        );
-        assert_eq!(
-            bitstack.pop(),
-            false,
-            "Multiple underflow calls don't panic"
-        );
+        assert!(!bitstack.pop(), "Multiple underflow calls don't panic");
+        assert!(!bitstack.pop(), "Multiple underflow calls don't panic");
     }
 
     #[test]
@@ -396,17 +388,15 @@ mod tests {
         for i in 0..5 {
             let result = bitstack.pop();
             // With new API, just ensure it doesn't panic and returns a bool
-            assert_eq!(
-                result,
-                false,
+            assert!(
+                !result,
                 "Empty ArrayBitStack pop() attempt {} should return false",
                 i + 1
             );
 
             let top_result = bitstack.top();
-            assert_eq!(
-                top_result,
-                false,
+            assert!(
+                !top_result,
                 "Empty ArrayBitStack top() attempt {} should return false",
                 i + 1
             );

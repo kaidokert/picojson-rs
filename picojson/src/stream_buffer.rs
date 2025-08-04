@@ -704,8 +704,6 @@ mod tests {
         db.mark_filled(10).unwrap();
 
         // Process tokens: { " h e l l o _ w o
-        // Parser is in State::String(2) tracking string start at position 2
-        let mut _string_start_pos = 2; // Parser's state: string started at pos 2
 
         // Advance to simulate tokenizer processing
         for _ in 0..10 {
@@ -719,17 +717,6 @@ mod tests {
         // ALWAYS compact when hitting buffer wall
         let offset = db.compact_from(10).unwrap();
         assert_eq!(offset, 10); // Moved by 10 positions (everything was processed)
-
-        // Parser updates state: string_start_pos = 2 - 10 = -8
-        // Since string_start_pos < 0, the original string start was discarded!
-        // Parser must now switch to escape/copy mode for the continuation
-        if _string_start_pos < offset {
-            // Original string start was discarded - must use escape/copy mode
-            // In real implementation, parser would copy what it had processed to unescaped buffer
-            _string_start_pos = 0; // Reset for escape mode
-        } else {
-            _string_start_pos = _string_start_pos.saturating_sub(offset); // Normal position update
-        }
 
         // After compaction, buffer is reset and ready for new data
         assert_eq!(db.tokenize_pos, 0);
@@ -767,20 +754,12 @@ mod tests {
         }
 
         // Current state: parser at position 5, with "lo\"" remaining (3 bytes)
-        let mut _string_start_pos = 2; // Parser state: string started at position 2
         assert_eq!(db.current_byte().unwrap(), b'l');
         assert_eq!(db.remaining_bytes(), 3);
 
         // Hit buffer wall, compact
         let offset = db.compact_from(5).unwrap();
         assert_eq!(offset, 5); // Moved data by 5 positions
-
-        // Update parser state
-        _string_start_pos = if _string_start_pos < offset {
-            0 // Switch to escape mode - original start was discarded
-        } else {
-            _string_start_pos - offset // Normal position update: 2 - 5 = -3, so switch to escape mode
-        };
 
         // After compaction: "lo\"" is now at start of buffer
         assert_eq!(db.tokenize_pos, 0);

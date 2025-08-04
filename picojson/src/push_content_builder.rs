@@ -2,7 +2,7 @@
 
 //! Content extractor for PushParser.
 
-use crate::escape_processor::{EscapeProcessor, UnicodeEscapeCollector};
+use crate::escape_processor::UnicodeEscapeCollector;
 use crate::event_processor::ContentExtractor;
 use crate::shared::{DataSource, State};
 use crate::stream_buffer::StreamBuffer;
@@ -79,44 +79,9 @@ impl<'input, 'scratch> PushContentExtractor<'input, 'scratch> {
         self.chunk_cursor = 0;
     }
 
-    /// Update the current position
-    pub fn set_current_position(&mut self, pos: usize) {
-        self.current_position = pos;
-    }
-
-    /// Update the position offset for chunk processing
-    pub fn set_position_offset(&mut self, offset: usize) {
-        self.position_offset = offset;
-    }
-
     /// Update position offset by adding to it
     pub fn add_position_offset(&mut self, amount: usize) {
         self.position_offset += amount;
-    }
-
-    /// Set the token start position
-    pub fn set_token_start_pos(&mut self, pos: usize) {
-        self.token_start_pos = pos;
-    }
-
-    /// Get the token start position
-    pub fn token_start_pos(&self) -> usize {
-        self.token_start_pos
-    }
-
-    /// Set whether we're using the unescaped buffer
-    pub fn set_using_unescaped_buffer(&mut self, using: bool) {
-        self.using_unescaped_buffer = using;
-    }
-
-    /// Check if we're using the unescaped buffer
-    pub fn using_unescaped_buffer(&self) -> bool {
-        self.using_unescaped_buffer
-    }
-
-    /// Clear the unescaped buffer
-    pub fn clear_unescaped(&mut self) {
-        self.stream_buffer.clear_unescaped();
     }
 
     /// Append a byte to the unescaped buffer
@@ -124,44 +89,6 @@ impl<'input, 'scratch> PushContentExtractor<'input, 'scratch> {
         self.stream_buffer
             .append_unescaped_byte(byte)
             .map_err(ParseError::from)
-    }
-
-    /// Truncate unescaped content by removing bytes from the end
-    pub fn truncate_unescaped_by(&mut self, count: usize) {
-        self.stream_buffer.truncate_unescaped_by(count);
-    }
-
-    /// Get the position offset
-    pub fn position_offset(&self) -> usize {
-        self.position_offset
-    }
-
-    /// Get mutable access to the unicode escape collector
-    pub fn unicode_escape_collector_mut(&mut self) -> &mut UnicodeEscapeCollector {
-        &mut self.unicode_escape_collector
-    }
-
-    /// Process simple escape sequence events that have similar patterns between parsers
-    pub fn process_simple_escape_event(
-        &mut self,
-        escape_token: &crate::ujson::EventToken,
-    ) -> Result<(), ParseError> {
-        // Clear any pending high surrogate state when we encounter a simple escape
-        // This ensures that interrupted surrogate pairs (like \uD801\n\uDC37) are properly rejected
-        self.unicode_escape_collector_mut().reset_all();
-
-        // Use unified escape token processing from EscapeProcessor
-        let unescaped_char = EscapeProcessor::process_escape_token(escape_token)?;
-
-        // Only process if we're inside a string or key
-        match self.parser_state {
-            State::String(_) | State::Key(_) => {
-                self.append_unescaped_byte(unescaped_char)?;
-            }
-            _ => {} // Ignore if not in string/key context
-        }
-
-        Ok(())
     }
 
     /// Apply queued unescaped content reset if needed

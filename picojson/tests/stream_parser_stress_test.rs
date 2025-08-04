@@ -21,7 +21,7 @@ impl<'a> VariableChunkReader<'a> {
     }
 }
 
-impl<'a> Reader for VariableChunkReader<'a> {
+impl Reader for VariableChunkReader<'_> {
     type Error = ();
 
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {

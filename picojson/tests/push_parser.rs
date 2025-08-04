@@ -537,9 +537,8 @@ mod tests {
 
         impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for Handler {
             fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
-                match event {
-                    Event::String(s) => self.events.push(format!("String({})", s)),
-                    _ => {}
+                if let Event::String(s) = event {
+                    self.events.push(format!("String({})", s));
                 }
                 Ok(())
             }

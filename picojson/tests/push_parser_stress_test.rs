@@ -70,9 +70,7 @@ impl<'expected> StressTestHandler<'expected> {
     }
 }
 
-impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ParseError>
-    for StressTestHandler<'expected>
-{
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for StressTestHandler<'_> {
     fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ParseError> {
         self.assert_event_matches(&event);
         Ok(())
