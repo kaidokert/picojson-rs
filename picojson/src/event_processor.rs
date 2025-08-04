@@ -301,6 +301,10 @@ pub trait ContentExtractor {
         self.extract_key_content(start_pos)
     }
 
+    fn is_finished(&self) -> bool {
+        true
+    }
+
     /// Shared validation and extraction for number content
     fn validate_and_extract_number(
         &mut self,
@@ -312,7 +316,7 @@ pub trait ContentExtractor {
         };
 
         *self.parser_state_mut() = State::None;
-        self.extract_number(start_pos, from_container_end, true)
+        self.extract_number(start_pos, from_container_end, self.is_finished())
     }
 
     /// Get the current parser state for escape context checking
