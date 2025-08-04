@@ -21,8 +21,8 @@ impl JsonEventPrinter {
     }
 }
 
-impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String> for JsonEventPrinter {
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), String> {
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for JsonEventPrinter {
+    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
         self.event_count += 1;
 
         match event {
@@ -65,7 +65,7 @@ impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String> for JsonEvent
     }
 }
 
-fn main() -> Result<(), PushParseError<String>> {
+fn main() -> Result<(), PushParseError<()>> {
     println!("🚀 PushParser Demo - SAX-style JSON Processing");
     println!("===============================================");
     println!();
@@ -103,16 +103,22 @@ fn main() -> Result<(), PushParseError<String>> {
     // Feed data chunk by chunk to demonstrate streaming capability
     for (i, chunk) in json_chunks.iter().enumerate() {
         println!("📨 Processing chunk {} ({} bytes):", i + 1, chunk.len());
-        println!("   Chunk data: {:?}", std::str::from_utf8(chunk)?);
+        let chunk_str = std::str::from_utf8(chunk)
+            .map_err(|e| PushParseError::Parse(picojson::ParseError::InvalidUtf8(e)))?;
+        println!("   Chunk data: {:?}", chunk_str);
 
         // Write chunk to parser - events are handled immediately
-        parser.write(chunk)?;
+        parser
+            .write::<()>(chunk)
+            .map_err(|_| PushParseError::Parse(picojson::ParseError::ScratchBufferFull))?;
         println!();
     }
 
     // Signal end of input and retrieve the handler
     println!("🔚 Finishing parsing...");
-    let handler = parser.finish()?;
+    let handler = parser
+        .finish::<()>()
+        .map_err(|_| PushParseError::Parse(picojson::ParseError::ScratchBufferFull))?;
 
     println!();
     println!(

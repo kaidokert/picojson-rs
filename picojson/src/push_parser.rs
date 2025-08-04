@@ -10,9 +10,6 @@ use crate::shared::{DataSource, State};
 use crate::stream_buffer::StreamBufferError;
 use crate::{ujson, BitStackConfig, Event, ParseError};
 
-#[cfg(any(test, debug_assertions))]
-extern crate std;
-
 /// A SAX-style JSON push parser.
 ///
 /// Generic over BitStack storage type for configurable nesting depth. Parsing
@@ -192,14 +189,6 @@ impl<E> From<core::str::Utf8Error> for PushParseError<E> {
 
 // Implement From<ParseError> for common error types used in tests
 // This needs to be globally accessible for integration tests, not just unit tests
-#[cfg(any(test, debug_assertions))]
-impl From<ParseError> for std::string::String {
-    fn from(_: ParseError) -> Self {
-        std::string::String::new()
-    }
-}
-
-#[cfg(any(test, debug_assertions))]
 impl From<ParseError> for () {
     fn from(_: ParseError) -> Self {}
 }

@@ -25,54 +25,72 @@ enum OwnedEvent {
     EndDocument,
 }
 
-/// Handler that collects events for verification during stress testing
-struct StressTestHandler {
-    events: Vec<OwnedEvent>,
-    expected_events: Vec<OwnedEvent>,
+/// Handler that compares events immediately as they arrive
+struct StressTestHandler<'expected> {
+    expected_events: &'expected [OwnedEvent],
     current_index: usize,
 }
 
-impl StressTestHandler {
-    fn new(expected_events: Vec<OwnedEvent>) -> Self {
+impl<'expected> StressTestHandler<'expected> {
+    fn new(expected_events: &'expected [OwnedEvent]) -> Self {
         Self {
-            events: Vec::new(),
             expected_events,
             current_index: 0,
         }
     }
 
-    fn verify_complete(&self) -> Result<(), String> {
-        if self.events.len() != self.expected_events.len() {
-            return Err(format!(
-                "Event count mismatch: expected {}, got {}",
-                self.expected_events.len(),
-                self.events.len()
-            ));
-        }
+    fn assert_complete(&self) {
+        assert_eq!(
+            self.current_index,
+            self.expected_events.len(),
+            "Expected {} events, but only received {}",
+            self.expected_events.len(),
+            self.current_index
+        );
+    }
 
-        for (i, (actual, expected)) in self
-            .events
-            .iter()
-            .zip(self.expected_events.iter())
-            .enumerate()
-        {
-            if actual != expected {
-                return Err(format!(
-                    "Event {} mismatch: expected {:?}, got {:?}",
-                    i, expected, actual
-                ));
-            }
-        }
+    fn assert_event_matches(&mut self, received: &Event) {
+        assert!(
+            self.current_index < self.expected_events.len(),
+            "Received more events than expected. Got event at index {} but only expected {} events total",
+            self.current_index,
+            self.expected_events.len()
+        );
 
+        let expected = &self.expected_events[self.current_index];
+        let received_owned = OwnedEvent::from_event(received);
+
+        assert_eq!(
+            *expected, received_owned,
+            "Event mismatch at index {}",
+            self.current_index
+        );
+
+        self.current_index += 1;
+    }
+}
+
+impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ()>
+    for StressTestHandler<'expected>
+{
+    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        self.assert_event_matches(&event);
         Ok(())
     }
 }
 
-impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String> for StressTestHandler {
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), String> {
-        let owned_event = OwnedEvent::from_event(&event);
-        self.events.push(owned_event);
-        self.current_index += 1;
+/// Handler for tests that expect parsing to fail - accepts any events without validation
+struct PermissiveTestHandler;
+
+impl PermissiveTestHandler {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ()> for PermissiveTestHandler {
+    fn handle_event(&mut self, _event: Event<'input, 'scratch>) -> Result<(), ()> {
+        // Accept any events - we expect the parser to fail eventually
         Ok(())
     }
 }
@@ -293,22 +311,25 @@ fn test_push_parsing_with_config(
     scenario: &TestScenario,
     buffer_size: usize,
     chunk_pattern: &[usize],
-) -> Result<(), String> {
+) -> Result<(), ()> {
     let mut buffer = vec![0u8; buffer_size];
-    let handler = StressTestHandler::new(
-        scenario
-            .expected_events
-            .iter()
-            .map(OwnedEvent::from_event)
-            .collect(),
-    );
+    let expected_events: Vec<OwnedEvent> = scenario
+        .expected_events
+        .iter()
+        .map(OwnedEvent::from_event)
+        .collect();
+
+    let handler = StressTestHandler::new(&expected_events);
     let parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     let mut writer = ChunkedWriter::new(scenario.json, chunk_pattern);
 
     match writer.run(parser) {
-        Ok(handler) => handler.verify_complete(),
-        Err(e) => Err(format!("Parser error: {:?}", e)),
+        Ok(handler) => {
+            handler.assert_complete();
+            Ok(())
+        }
+        Err(_) => Err(()),
     }
 }
 
@@ -410,10 +431,8 @@ fn test_push_parser_stress_buffer_sizes() {
                 }
                 (false, true) => {
                     panic!(
-                        "❌ [B={}] Unexpected FAILURE for scenario '{}' - {}",
-                        buffer_size,
-                        scenario.name,
-                        result.unwrap_err()
+                        "❌ [B={}] Unexpected FAILURE for scenario '{}'",
+                        buffer_size, scenario.name
                     );
                 }
             }
@@ -448,10 +467,10 @@ fn test_push_parser_stress_chunk_patterns() {
                 Ok(()) => {
                     println!("✅ [P={:?}] SUCCESS", pattern);
                 }
-                Err(e) => {
+                Err(_e) => {
                     panic!(
-                        "❌ [P={:?}] UNEXPECTED FAILURE for scenario '{}' - {}",
-                        pattern, scenario.name, e
+                        "❌ [P={:?}] UNEXPECTED FAILURE for scenario '{}'",
+                        pattern, scenario.name
                     );
                 }
             }
@@ -503,11 +522,8 @@ fn test_push_parser_stress_critical_matrix() {
                     }
                     (false, true) => {
                         panic!(
-                            "❌ [B={}, P={:?}] Unexpected FAILURE for scenario '{}' - {}",
-                            buffer_size,
-                            pattern,
-                            scenario.name,
-                            result.unwrap_err()
+                            "❌ [B={}, P={:?}] Unexpected FAILURE for scenario '{}'",
+                            buffer_size, pattern, scenario.name
                         );
                     }
                 }
@@ -576,10 +592,10 @@ fn test_push_parser_stress_unicode_edge_cases() {
                 Ok(()) => {
                     println!("✅ [P={:?}] Unicode SUCCESS", pattern);
                 }
-                Err(e) => {
+                Err(_e) => {
                     panic!(
-                        "❌ [P={:?}] Unicode FAILURE for scenario '{}' - {}",
-                        pattern, scenario.name, e
+                        "❌ [P={:?}] Unicode FAILURE for scenario '{}'",
+                        pattern, scenario.name
                     );
                 }
             }
@@ -611,7 +627,8 @@ fn test_push_parser_stress_document_validation() {
 
         for &pattern in chunk_patterns {
             let mut buffer = vec![0u8; buffer_size];
-            let handler = StressTestHandler::new(vec![]);
+            // For invalid JSON tests, use a permissive handler that doesn't validate events
+            let handler = PermissiveTestHandler::new();
             let parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
             let mut writer = ChunkedWriter::new(json, pattern);
 

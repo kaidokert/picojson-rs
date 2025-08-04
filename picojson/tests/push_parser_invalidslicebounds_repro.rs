@@ -5,34 +5,71 @@
 
 use picojson::{DefaultConfig, Event, PushParser, PushParserHandler};
 
-/// Simple handler that collects events for verification
-struct ReproHandler {
-    events: Vec<String>,
+/// Handler that compares events immediately as they arrive for detailed validation
+struct ReproHandler<'expected> {
+    expected_events: &'expected [&'expected str],
+    current_index: usize,
 }
 
-impl ReproHandler {
-    fn new() -> Self {
-        Self { events: Vec::new() }
+impl<'expected> ReproHandler<'expected> {
+    fn new(expected_events: &'expected [&'expected str]) -> Self {
+        Self {
+            expected_events,
+            current_index: 0,
+        }
     }
-}
 
-impl<'input, 'scratch> PushParserHandler<'input, 'scratch, String> for ReproHandler {
-    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), String> {
-        // Convert to owned event for storage
-        let event_str = match event {
+    fn assert_complete(&self) {
+        assert_eq!(
+            self.current_index,
+            self.expected_events.len(),
+            "Expected {} events, but only received {}",
+            self.expected_events.len(),
+            self.current_index
+        );
+    }
+
+    fn assert_event_matches(&mut self, received: &Event) {
+        assert!(
+            self.current_index < self.expected_events.len(),
+            "Received more events than expected. Got event at index {} but only expected {} events total",
+            self.current_index,
+            self.expected_events.len()
+        );
+
+        let expected_str = self.expected_events[self.current_index];
+        let received_str = self.event_to_string(received);
+
+        assert_eq!(
+            expected_str, received_str,
+            "Event mismatch at index {}",
+            self.current_index
+        );
+
+        self.current_index += 1;
+    }
+
+    fn event_to_string(&self, event: &Event) -> String {
+        match event {
             Event::StartObject => "StartObject".to_string(),
             Event::EndObject => "EndObject".to_string(),
             Event::StartArray => "StartArray".to_string(),
             Event::EndArray => "EndArray".to_string(),
-            Event::Key(k) => format!("Key({})", k.as_ref()),
-            Event::String(s) => format!("String({})", s.as_ref()),
+            Event::Key(k) => format!("Key({})", k.as_str()),
+            Event::String(s) => format!("String({})", s.as_str()),
             Event::Number(n) => format!("Number({})", n.as_str()),
             Event::Bool(b) => format!("Bool({})", b),
             Event::Null => "Null".to_string(),
             Event::EndDocument => "EndDocument".to_string(),
-        };
+        }
+    }
+}
 
-        self.events.push(event_str);
+impl<'input, 'scratch, 'expected> PushParserHandler<'input, 'scratch, ()>
+    for ReproHandler<'expected>
+{
+    fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), ()> {
+        self.assert_event_matches(&event);
         Ok(())
     }
 }
@@ -44,26 +81,25 @@ fn test_reproduce_invalidslicebounds_minimal() {
 
     // Use a small buffer that might trigger boundary issues
     let mut buffer = [0u8; 128];
-    let handler = ReproHandler::new();
+
+    // Define expected events with properly decoded Unicode escapes
+    let expected_events = [
+        "StartObject",
+        "Key(hex)",
+        "String(ģ䕧覫췯ꯍ\u{ef4a})", // Unicode escapes properly decoded to characters
+        "EndObject",
+        "EndDocument",
+    ];
+
+    let handler = ReproHandler::new(&expected_events);
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     // Should parse successfully without InvalidSliceBounds error
     parser.write(json_content).expect("Write should succeed");
     let handler = parser.finish().expect("Finish should succeed");
 
-    // Verify we got the expected events
-    let expected_events = vec![
-        "StartObject".to_string(),
-        "Key(hex)".to_string(),
-        "String(ģ䕧覫췯ꯍ\u{ef4a})".to_string(), // Unicode escapes properly decoded to characters
-        "EndObject".to_string(),
-        "EndDocument".to_string(),
-    ];
-
-    assert_eq!(
-        handler.events, expected_events,
-        "Should parse Unicode escapes without InvalidSliceBounds errors"
-    );
+    // Verify all expected events were received
+    handler.assert_complete();
 }
 
 #[test]
@@ -73,7 +109,17 @@ fn test_reproduce_invalidslicebounds_chunked() {
 
     // Use a buffer large enough for the content but small enough to test chunking
     let mut buffer = [0u8; 128];
-    let handler = ReproHandler::new();
+
+    // Define expected events (same as previous test)
+    let expected_events = [
+        "StartObject",
+        "Key(hex)",
+        "String(ģ䕧覫췯ꯍ\u{ef4a})",
+        "EndObject",
+        "EndDocument",
+    ];
+
+    let handler = ReproHandler::new(&expected_events);
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     // Write in small chunks to stress boundary handling
@@ -86,19 +132,8 @@ fn test_reproduce_invalidslicebounds_chunked() {
 
     let handler = parser.finish().expect("Finish should succeed");
 
-    // Verify we got the expected events
-    let expected_events = vec![
-        "StartObject".to_string(),
-        "Key(hex)".to_string(),
-        "String(ģ䕧覫췯ꯍ\u{ef4a})".to_string(),
-        "EndObject".to_string(),
-        "EndDocument".to_string(),
-    ];
-
-    assert_eq!(
-        handler.events, expected_events,
-        "Should parse Unicode escapes in chunks without InvalidSliceBounds errors"
-    );
+    // Verify all expected events were received
+    handler.assert_complete();
 }
 
 #[test]
@@ -108,24 +143,23 @@ fn test_reproduce_invalidslicebounds_complex_key() {
 
     // Use a small buffer to stress boundary handling
     let mut buffer = [0u8; 128];
-    let handler = ReproHandler::new();
+
+    // Define expected events with complex key containing decoded escape sequences
+    let expected_events = [
+        "StartObject",
+        "Key(\\/\\\\\"쫾몾ꮘﳞ볚\u{ef4a}\u{8}\u{c}\n\r\t)", // Complex key with decoded escapes
+        "String(value)",
+        "EndObject",
+        "EndDocument",
+    ];
+
+    let handler = ReproHandler::new(&expected_events);
     let mut parser = PushParser::<_, DefaultConfig>::new(handler, &mut buffer);
 
     // Should parse successfully without InvalidSliceBounds error
     parser.write(json_content).expect("Write should succeed");
     let handler = parser.finish().expect("Finish should succeed");
 
-    // Verify we got the expected structure with properly decoded escape sequences
-    let expected_events = vec![
-        "StartObject".to_string(),
-        "Key(\\/\\\\\"쫾몾ꮘﳞ볚\u{ef4a}\u{8}\u{c}\n\r\t)".to_string(), // Complex key with decoded escapes
-        "String(value)".to_string(),
-        "EndObject".to_string(),
-        "EndDocument".to_string(),
-    ];
-
-    assert_eq!(
-        handler.events, expected_events,
-        "Should parse complex key with mixed escape sequences correctly"
-    );
+    // Verify all expected events were received with proper escape sequence decoding
+    handler.assert_complete();
 }
