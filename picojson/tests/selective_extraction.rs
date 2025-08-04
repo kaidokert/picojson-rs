@@ -104,13 +104,12 @@ fn test_selective_extraction() {
                 }
                 _ => {}
             },
-            Event::Bool(b) => match state {
-                ExtractionState::ExpectingNewDashboardStatus => {
+            Event::Bool(b) => {
+                if state == ExtractionState::ExpectingNewDashboardStatus {
                     extracted.new_dashboard_status = Some(b);
                     state = ExtractionState::InFeatureFlags;
                 }
-                _ => {}
-            },
+            }
             Event::StartArray => {
                 if state == ExtractionState::InProductsArray {
                     array_depth += 1;

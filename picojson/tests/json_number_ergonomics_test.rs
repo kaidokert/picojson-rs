@@ -69,7 +69,7 @@ fn test_json_number_deref_trait() {
 
     // Test Deref trait (enables &*num syntax)
     if let Event::Number(num) = parser.next_event().unwrap() {
-        let s: &str = &*num; // This uses Deref
+        let s: &str = &num; // This uses Deref
         assert_eq!(s, "123");
 
         // Also test direct dereference
@@ -80,7 +80,7 @@ fn test_json_number_deref_trait() {
 
     // Test negative number
     if let Event::Number(num) = parser.next_event().unwrap() {
-        let s: &str = &*num;
+        let s: &str = &num;
         assert_eq!(s, "-456");
     } else {
         panic!("Expected Number event");

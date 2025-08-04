@@ -321,7 +321,7 @@ mod integration_tests {
 
                     let parsed: i32 = num_str
                         .parse()
-                        .expect(&format!("Failed to parse '{}' as number", num_str));
+                        .unwrap_or_else(|_| panic!("Failed to parse '{}' as number", num_str));
                     assert_eq!(
                         parsed, number_count,
                         "Number {} should be {}, got {}",
