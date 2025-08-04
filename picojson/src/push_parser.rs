@@ -5,7 +5,7 @@
 //! Clean implementation based on handler_design pattern with proper HRTB lifetime management.
 
 use crate::event_processor::{ContentExtractor, EscapeTiming, ParserCore};
-use crate::push_content_builder::{PushContentExtractor, PushParserHandler};
+use crate::push_content_builder::{PushContentBuilder, PushParserHandler};
 use crate::shared::{DataSource, State};
 use crate::stream_buffer::StreamBufferError;
 use crate::{ujson, BitStackConfig, Event, ParseError};
@@ -25,7 +25,7 @@ where
     C: BitStackConfig,
 {
     /// Content extractor that handles content extraction and event emission
-    extractor: PushContentExtractor<'input, 'scratch>,
+    extractor: PushContentBuilder<'input, 'scratch>,
     /// The handler that receives events
     handler: H,
     /// Core parser logic shared with other parsers
@@ -39,7 +39,7 @@ where
     /// Creates a new `PushParser`.
     pub fn new(handler: H, buffer: &'scratch mut [u8]) -> Self {
         Self {
-            extractor: PushContentExtractor::new(buffer),
+            extractor: PushContentBuilder::new(buffer),
             handler,
             core: ParserCore::new_chunked(),
         }
@@ -63,7 +63,7 @@ where
                 &mut self.extractor,
                 EscapeTiming::OnEnd, // PushParser uses OnEnd timing like StreamParser
                 |extractor, byte| {
-                    // Selective accumulation: let PushContentExtractor decide based on its state
+                    // Selective accumulation: let PushContentBuilder decide based on its state
                     // whether this byte should be accumulated or processed directly
                     extractor.handle_byte_accumulation(byte)
                 },

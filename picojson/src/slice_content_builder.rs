@@ -56,16 +56,20 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         &mut self.parser_state
     }
 
+    fn parser_state(&self) -> &State {
+        &self.parser_state
+    }
+
+    fn unicode_escape_collector_mut(&mut self) -> &mut UnicodeEscapeCollector {
+        &mut self.unicode_escape_collector
+    }
+
     fn current_position(&self) -> usize {
         self.buffer.current_pos()
     }
 
     fn begin_string_content(&mut self, pos: usize) {
         self.copy_on_escape.begin_string(pos);
-    }
-
-    fn unicode_escape_collector_mut(&mut self) -> &mut UnicodeEscapeCollector {
-        &mut self.unicode_escape_collector
     }
 
     fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
@@ -111,12 +115,19 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
         Ok(Event::Number(json_number))
     }
 
+    fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
+        Ok(())
+    }
+
     fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
         Ok(())
     }
 
-    fn parser_state(&self) -> &State {
-        &self.parser_state
+    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
+        // Clear the escape sequence flag when simple escape completes
+        self.copy_on_escape
+            .handle_escape(self.buffer.current_pos(), escape_char)?;
+        Ok(())
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
@@ -159,17 +170,6 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
             }
         }
 
-        Ok(())
-    }
-
-    fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
-        // Clear the escape sequence flag when simple escape completes
-        self.copy_on_escape
-            .handle_escape(self.buffer.current_pos(), escape_char)?;
-        Ok(())
-    }
-
-    fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         Ok(())
     }
 }
