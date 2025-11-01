@@ -107,6 +107,10 @@ impl OwnedEvent {
             Event::Bool(b) => OwnedEvent::Bool(*b),
             Event::Null => OwnedEvent::Null,
             Event::EndDocument => OwnedEvent::EndDocument,
+            // ContentSpan events should not reach user code - they get converted by PushParser
+            Event::ContentSpan { .. } | Event::PartialContentSpanStart { .. } | Event::PartialContentSpanEnd { .. } => {
+                panic!("Internal ContentSpan events should not reach user handlers")
+            }
         }
     }
 }
