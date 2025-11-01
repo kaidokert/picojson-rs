@@ -62,7 +62,9 @@ impl<'expected> ReproHandler<'expected> {
             Event::Null => "Null".to_string(),
             Event::EndDocument => "EndDocument".to_string(),
             // ContentSpan events should not reach user code - they get converted by PushParser
-            Event::ContentSpan { .. } | Event::PartialContentSpanStart { .. } | Event::PartialContentSpanEnd { .. } => {
+            Event::ContentSpan { .. }
+            | Event::PartialContentSpanStart { .. }
+            | Event::PartialContentSpanEnd { .. } => {
                 panic!("Internal ContentSpan events should not reach user handlers")
             }
         }

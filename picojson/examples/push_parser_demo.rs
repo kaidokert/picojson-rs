@@ -61,7 +61,9 @@ impl<'input, 'scratch> PushParserHandler<'input, 'scratch, ParseError> for JsonE
                 println!("{}🏁 EndDocument", self.indent_str());
             }
             // ContentSpan events should not reach user code - they get converted by PushParser
-            Event::ContentSpan { .. } | Event::PartialContentSpanStart { .. } | Event::PartialContentSpanEnd { .. } => {
+            Event::ContentSpan { .. }
+            | Event::PartialContentSpanStart { .. }
+            | Event::PartialContentSpanEnd { .. } => {
                 panic!("Internal ContentSpan events should not reach user handlers")
             }
         }

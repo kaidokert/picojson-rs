@@ -114,8 +114,6 @@ impl<'input, 'scratch> PushContentBuilder<'input, 'scratch> {
     pub fn position_offset(&self) -> usize {
         self.position_offset
     }
-
-
 }
 
 impl ContentExtractor for PushContentBuilder<'_, '_> {
@@ -144,7 +142,7 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
     }
 
     fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        // Queue reset if using unescaped content - the scratch buffer now contains complete content  
+        // Queue reset if using unescaped content - the scratch buffer now contains complete content
         if self.has_unescaped_content() {
             self.queue_unescaped_reset();
         }
@@ -181,13 +179,16 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
             // For numbers, content continues to current_position + 1 (no delimiter to exclude)
             let current_chunk_content_start = 0;
             let current_chunk_content_end = self.current_position + 1;
-            
+
             // Only append if there's remaining content in the current chunk
             if current_chunk_content_end > current_chunk_content_start {
                 // Append the final portion from the current chunk to complete the content
-                self.copy_content_chunk_to_scratch(current_chunk_content_start, current_chunk_content_end)?;
+                self.copy_content_chunk_to_scratch(
+                    current_chunk_content_start,
+                    current_chunk_content_end,
+                )?;
             }
-            
+
             self.queue_unescaped_reset();
         }
 

@@ -82,7 +82,6 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         self.next_event_impl_with_flags(provider, escape_timing, Some(byte_accumulator), false)
     }
 
-
     /// Extended version with flags for specialized behavior
     pub fn next_event_impl_with_flags<'a, P, F>(
         &mut self,
@@ -127,7 +126,9 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     // Handle end of input - behavior depends on parser type
                     if self.handles_chunked_input {
                         // For chunked parsers (PushParser), check if we need to emit PartialContentSpanStart
-                        if let Some(partial_event) = self.try_emit_partial_content_span_start(provider.current_position()) {
+                        if let Some(partial_event) =
+                            self.try_emit_partial_content_span_start(provider.current_position())
+                        {
                             return Ok(partial_event);
                         }
                         // Otherwise, return EndOfData so they can handle chunk boundaries
@@ -159,21 +160,27 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                     EventResult::Complete(event) => return Ok(event),
                     EventResult::ExtractString => {
                         // Check if we can emit a ContentSpan instead of delegating
-                        if let Some(content_span) = self.try_emit_content_span(ContentKind::String, provider.current_position()) {
+                        if let Some(content_span) = self
+                            .try_emit_content_span(ContentKind::String, provider.current_position())
+                        {
                             return Ok(content_span);
                         }
                         return provider.validate_and_extract_string();
                     }
                     EventResult::ExtractKey => {
                         // Check if we can emit a ContentSpan instead of delegating
-                        if let Some(content_span) = self.try_emit_content_span(ContentKind::Key, provider.current_position()) {
+                        if let Some(content_span) = self
+                            .try_emit_content_span(ContentKind::Key, provider.current_position())
+                        {
                             return Ok(content_span);
                         }
                         return provider.validate_and_extract_key();
                     }
                     EventResult::ExtractNumber(from_container_end) => {
                         // Check if we can emit a ContentSpan instead of delegating
-                        if let Some(content_span) = self.try_emit_content_span(ContentKind::Number, provider.current_position()) {
+                        if let Some(content_span) = self
+                            .try_emit_content_span(ContentKind::Number, provider.current_position())
+                        {
                             return Ok(content_span);
                         }
                         return provider.validate_and_extract_number(from_container_end);
@@ -247,28 +254,37 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
     }
 
     /// Try to emit a PartialContentSpanStart event when we hit chunk boundary while tracking content
-    fn try_emit_partial_content_span_start(&mut self, current_pos: usize) -> Option<Event<'static, 'static>> {
-        log::debug!("try_emit_partial_content_span_start: pos={}, tracking_kind={:?}, has_escapes={}", 
-                   current_pos, self.current_content_kind, self.current_content_has_escapes);
-        
+    fn try_emit_partial_content_span_start(
+        &mut self,
+        current_pos: usize,
+    ) -> Option<Event<'static, 'static>> {
+        log::debug!(
+            "try_emit_partial_content_span_start: pos={}, tracking_kind={:?}, has_escapes={}",
+            current_pos,
+            self.current_content_kind,
+            self.current_content_has_escapes
+        );
+
         // Only emit if we're currently tracking content and haven't already emitted a PartialContentSpanStart
         if let Some(_kind) = self.current_content_kind {
             if self.partial_span_start_emitted {
                 log::debug!("try_emit_partial_content_span_start: already emitted PartialContentSpanStart, skipping");
                 return None;
             }
-            
+
             // Skip PartialContentSpan logic if content already has escapes
             // This ensures that escaped content continues using existing escape processing logic
             if self.current_content_has_escapes {
                 log::debug!("try_emit_partial_content_span_start: content has escapes, using existing escape processing");
                 return None;
             }
-            
+
             // TEMPORARY: Disable PartialContentSpan logic for all content types for now
             // The existing chunk boundary handling logic already works correctly
             // TODO: PLACEHOLDER - Re-enable once Step 5 is complete and this can be properly tested
-            log::debug!("try_emit_partial_content_span_start: temporarily disabled for all content types");
+            log::debug!(
+                "try_emit_partial_content_span_start: temporarily disabled for all content types"
+            );
             return None;
         } else {
             log::debug!("try_emit_partial_content_span_start: not tracking content, no partial event needed");
@@ -277,33 +293,43 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
     }
 
     /// Try to emit a ContentSpan event if the current content is simple (no escapes, complete in chunk)
-    fn try_emit_content_span(&mut self, kind: ContentKind, current_pos: usize) -> Option<Event<'static, 'static>> {
-        log::debug!("try_emit_content_span: kind={:?}, pos={}, handles_chunked={}, tracking_kind={:?}, has_escapes={}", 
+    fn try_emit_content_span(
+        &mut self,
+        kind: ContentKind,
+        current_pos: usize,
+    ) -> Option<Event<'static, 'static>> {
+        log::debug!("try_emit_content_span: kind={:?}, pos={}, handles_chunked={}, tracking_kind={:?}, has_escapes={}",
                    kind, current_pos, self.handles_chunked_input, self.current_content_kind, self.current_content_has_escapes);
-        
+
         // Only emit ContentSpan for chunked parsers (PushParser) and only if we're tracking content
         if !self.handles_chunked_input || self.current_content_kind != Some(kind) {
-            log::debug!("try_emit_content_span: not eligible - chunked={}, tracking={:?}", self.handles_chunked_input, self.current_content_kind);
+            log::debug!(
+                "try_emit_content_span: not eligible - chunked={}, tracking={:?}",
+                self.handles_chunked_input,
+                self.current_content_kind
+            );
             return None;
         }
 
         // Check if this content spans multiple chunks (PartialContentSpanEnd case)
         // This happens when we're continuing content from a previous chunk
         if self.continuing_from_previous_chunk {
-            log::debug!("try_emit_content_span: content spans chunks, emitting PartialContentSpanEnd");
-            
+            log::debug!(
+                "try_emit_content_span: content spans chunks, emitting PartialContentSpanEnd"
+            );
+
             // Calculate the final span from previous chunk boundary to current position
             let _start = 0; // Start of current chunk
             let end = match kind {
                 ContentKind::String | ContentKind::Key => current_pos, // Current pos is at closing quote
-                ContentKind::Number => current_pos + 1, // Include the last digit
+                ContentKind::Number => current_pos + 1,                // Include the last digit
             };
-            
+
             let _has_escapes = self.current_content_has_escapes;
-            
+
             // Reset tracking since we're completing this content
             self.reset_content_tracking();
-            
+
             return Some(Event::PartialContentSpanEnd {
                 kind,
                 end,
@@ -325,7 +351,7 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
         };
         let end = match kind {
             ContentKind::String | ContentKind::Key => current_pos, // Current pos is at closing quote
-            ContentKind::Number => current_pos + 1, // Include the last digit
+            ContentKind::Number => current_pos + 1,                // Include the last digit
         };
 
         // Use the actual escape detection result
@@ -343,17 +369,29 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
     }
 
     /// Track ContentSpan state for Begin events and handle escape detection
-    fn track_content_spans<P>(&mut self, event: &ujson::Event, provider: &mut P) -> Option<EventResult<'static, 'static>>
+    fn track_content_spans<P>(
+        &mut self,
+        event: &ujson::Event,
+        provider: &mut P,
+    ) -> Option<EventResult<'static, 'static>>
     where
         P: ContentExtractor,
     {
-        log::debug!("track_content_spans: event={:?}, handles_chunked={}", event, self.handles_chunked_input);
-        
+        log::debug!(
+            "track_content_spans: event={:?}, handles_chunked={}",
+            event,
+            self.handles_chunked_input
+        );
+
         match event {
             // Start tracking content spans for String/Key/Number Begin events
             ujson::Event::Begin(EventToken::String) => {
                 let pos = provider.current_position();
-                log::debug!("Begin String at pos={}, chunked={}", pos, self.handles_chunked_input);
+                log::debug!(
+                    "Begin String at pos={}, chunked={}",
+                    pos,
+                    self.handles_chunked_input
+                );
                 if self.handles_chunked_input {
                     self.current_content_kind = Some(ContentKind::String);
                     self.current_content_start = pos;
@@ -365,7 +403,11 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
             }
             ujson::Event::Begin(EventToken::Key) => {
                 let pos = provider.current_position();
-                log::debug!("Begin Key at pos={}, chunked={}", pos, self.handles_chunked_input);
+                log::debug!(
+                    "Begin Key at pos={}, chunked={}",
+                    pos,
+                    self.handles_chunked_input
+                );
                 if self.handles_chunked_input {
                     self.current_content_kind = Some(ContentKind::Key);
                     self.current_content_start = pos;
@@ -375,9 +417,15 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                 // Still delegate to provider for state management
                 provider.process_begin_events(event)
             }
-            ujson::Event::Begin(EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject) => {
+            ujson::Event::Begin(
+                EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject,
+            ) => {
                 let pos = provider.current_position();
-                log::debug!("Begin Number at pos={}, chunked={}", pos, self.handles_chunked_input);
+                log::debug!(
+                    "Begin Number at pos={}, chunked={}",
+                    pos,
+                    self.handles_chunked_input
+                );
                 if self.handles_chunked_input {
                     self.current_content_kind = Some(ContentKind::Number);
                     self.current_content_start = pos;
@@ -388,12 +436,18 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                 provider.process_begin_events(event)
             }
             // Mark escapes as seen when we encounter escape events
-            ujson::Event::Begin(EventToken::EscapeSequence) | 
-            ujson::Event::Begin(EventToken::UnicodeEscape) |
-            ujson::Event::Begin(EventToken::EscapeQuote | EventToken::EscapeBackslash | 
-                               EventToken::EscapeSlash | EventToken::EscapeBackspace | 
-                               EventToken::EscapeFormFeed | EventToken::EscapeNewline | 
-                               EventToken::EscapeCarriageReturn | EventToken::EscapeTab) => {
+            ujson::Event::Begin(EventToken::EscapeSequence)
+            | ujson::Event::Begin(EventToken::UnicodeEscape)
+            | ujson::Event::Begin(
+                EventToken::EscapeQuote
+                | EventToken::EscapeBackslash
+                | EventToken::EscapeSlash
+                | EventToken::EscapeBackspace
+                | EventToken::EscapeFormFeed
+                | EventToken::EscapeNewline
+                | EventToken::EscapeCarriageReturn
+                | EventToken::EscapeTab,
+            ) => {
                 log::debug!("Escape event detected, marking content as having escapes");
                 self.current_content_has_escapes = true;
                 None // Let the existing escape handling take over
@@ -403,18 +457,21 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                 if self.handles_chunked_input && self.continuing_from_previous_chunk {
                     // This is the end of content that was started in a previous chunk
                     let pos = provider.current_position();
-                    log::debug!("End String at pos={}, continuing_from_previous_chunk=true", pos);
-                    
+                    log::debug!(
+                        "End String at pos={}, continuing_from_previous_chunk=true",
+                        pos
+                    );
+
                     // Emit PartialContentSpanEnd event
                     let partial_end_event = Event::PartialContentSpanEnd {
                         kind: ContentKind::String,
                         end: pos,
                         has_escapes_in_this_chunk: self.current_content_has_escapes,
                     };
-                    
+
                     // Reset tracking state now that content is complete
                     self.reset_content_tracking();
-                    
+
                     Some(EventResult::Complete(partial_end_event))
                 } else {
                     // Normal case - delegate to process_simple_events
@@ -425,18 +482,21 @@ impl<T: ujson::BitBucket, C: ujson::DepthCounter> ParserCore<T, C> {
                 if self.handles_chunked_input && self.continuing_from_previous_chunk {
                     // This is the end of content that was started in a previous chunk
                     let pos = provider.current_position();
-                    log::debug!("End Key at pos={}, continuing_from_previous_chunk=true", pos);
-                    
+                    log::debug!(
+                        "End Key at pos={}, continuing_from_previous_chunk=true",
+                        pos
+                    );
+
                     // Emit PartialContentSpanEnd event
                     let partial_end_event = Event::PartialContentSpanEnd {
                         kind: ContentKind::Key,
                         end: pos,
                         has_escapes_in_this_chunk: self.current_content_has_escapes,
                     };
-                    
+
                     // Reset tracking state now that content is complete
                     self.reset_content_tracking();
-                    
+
                     Some(EventResult::Complete(partial_end_event))
                 } else {
                     // Normal case - delegate to process_simple_events

@@ -67,40 +67,26 @@ where
             match self.core.next_event_impl(
                 &mut self.extractor,
                 EscapeTiming::OnEnd, // PushParser uses OnEnd timing like StreamParser
-                |extractor, byte| {
-                    // Selective byte accumulation: only accumulate when scratch buffer is in use
-                    // This handles remaining content after escape processing
-                    if extractor.has_unescaped_content() {
-                        let should_accumulate = match extractor.parser_state() {
-                            crate::shared::State::String(_) | crate::shared::State::Key(_) => {
-                                // For strings/keys, accumulate regular content (not escapes or delimiters)
-                                byte != b'\\' && byte != b'"'
-                            }
-                            crate::shared::State::Number(_) => {
-                                // For numbers, accumulate all content (no escapes in numbers)
-                                true
-                            }
-                            _ => false,
-                        };
-                        
-                        if should_accumulate {
-                            extractor.append_unescaped_byte(byte)?;
-                        }
-                    }
-                    Ok(())
-                },
+                |_, _| Ok(()),       // No byte accumulation needed with ContentSpan
             ) {
                 Ok(Event::EndDocument) => {
                     // EndDocument during write() means we've consumed all bytes in current chunk
                     break;
                 }
-                Ok(Event::ContentSpan { kind, start, end, has_escapes }) => {
+                Ok(Event::ContentSpan {
+                    kind,
+                    start,
+                    end,
+                    has_escapes,
+                }) => {
                     // Handle ContentSpan by extracting content and emitting the appropriate event
                     // For simple case (no escapes), directly extract from input chunk
                     if !has_escapes {
-                        let content_slice = self.extractor.get_borrowed_slice(start, end)
+                        let content_slice = self
+                            .extractor
+                            .get_borrowed_slice(start, end)
                             .map_err(PushParseError::Parse)?;
-                        
+
                         let content_event = match kind {
                             ContentKind::String => {
                                 let content_str = core::str::from_utf8(content_slice)?;
@@ -115,7 +101,7 @@ where
                                 Event::Number(json_number)
                             }
                         };
-                        
+
                         self.handler
                             .handle_event(content_event)
                             .map_err(PushParseError::Handler)?;
@@ -129,22 +115,30 @@ where
                     // Apply any queued buffer resets after the event has been processed
                     self.extractor.apply_unescaped_reset_if_queued();
                 }
-                Ok(Event::PartialContentSpanStart { kind, start, has_escapes_in_this_chunk }) => {
+                Ok(Event::PartialContentSpanStart {
+                    kind,
+                    start,
+                    has_escapes_in_this_chunk,
+                }) => {
                     // Handle start of content that spans chunk boundaries
                     self.handle_partial_content_span_start(kind, start, has_escapes_in_this_chunk)?;
                 }
-                Ok(Event::PartialContentSpanEnd { kind, end, has_escapes_in_this_chunk: _ }) => {
+                Ok(Event::PartialContentSpanEnd {
+                    kind,
+                    end,
+                    has_escapes_in_this_chunk: _,
+                }) => {
                     // Handle end of content that spans chunk boundaries
                     // Create the content event in place to avoid borrowing issues
-                    
+
                     // Convert absolute position to relative position within current chunk
                     let position_offset = self.extractor.position_offset();
                     let relative_end = end.saturating_sub(position_offset);
                     let chunk_len = self.extractor.current_chunk_len();
-                    
-                    log::debug!("PartialContentSpanEnd: kind={:?}, absolute_end={}, position_offset={}, relative_end={}, chunk_len={}", 
+
+                    log::debug!("PartialContentSpanEnd: kind={:?}, absolute_end={}, position_offset={}, relative_end={}, chunk_len={}",
                                kind, end, position_offset, relative_end, chunk_len);
-                    
+
                     // For content that continues from previous chunk, the content in this chunk
                     // starts at position 0 and ends at relative_end (but we need to exclude quotes)
                     let content_start = 0;
@@ -159,37 +153,53 @@ where
                             relative_end
                         }
                     };
-                    
-                    log::debug!("PartialContentSpanEnd: extracting slice [{}, {})", content_start, content_end);
-                    
+
+                    log::debug!(
+                        "PartialContentSpanEnd: extracting slice [{}, {})",
+                        content_start,
+                        content_end
+                    );
+
                     // Append the final part from this chunk to the scratch buffer
                     // First, get and copy the final slice data
-                    let final_slice = self.extractor.get_borrowed_slice(content_start, content_end)
+                    let final_slice = self
+                        .extractor
+                        .get_borrowed_slice(content_start, content_end)
                         .map_err(PushParseError::Parse)?;
-                        
-                    log::debug!("PartialContentSpanEnd: final_slice = {:?}", 
-                               core::str::from_utf8(final_slice).unwrap_or("[invalid utf8]"));
-                    
+
+                    log::debug!(
+                        "PartialContentSpanEnd: final_slice = {:?}",
+                        core::str::from_utf8(final_slice).unwrap_or("[invalid utf8]")
+                    );
+
                     // Copy ALL data to local buffer to completely avoid borrowing conflicts
                     let mut final_data = alloc::vec::Vec::new();
                     final_data.extend_from_slice(final_slice);
-                    
+
                     // Now append from local buffer - no more borrowing conflicts
                     for byte in final_data {
-                        self.extractor.append_unescaped_byte(byte)
+                        self.extractor
+                            .append_unescaped_byte(byte)
                             .map_err(PushParseError::Parse)?;
                     }
-                        
+
                     // Get the complete content from the scratch buffer and copy it
-                    let complete_content = self.extractor.get_unescaped_slice()
+                    let complete_content = self
+                        .extractor
+                        .get_unescaped_slice()
                         .map_err(PushParseError::Parse)?;
-                    
+
+                    log::debug!(
+                        "PartialContentSpanEnd: complete_content = {:?}",
+                        core::str::from_utf8(complete_content).unwrap_or("[invalid utf8]")
+                    );
+
                     // Copy to owned data to avoid borrowing conflicts
                     let complete_data = alloc::vec::Vec::from(complete_content);
-                    
+
                     // Queue buffer reset before creating the event
                     self.extractor.queue_unescaped_reset();
-                        
+
                     let content_event = match kind {
                         ContentKind::String => {
                             let content_str = core::str::from_utf8(&complete_data)?;
@@ -204,11 +214,11 @@ where
                             Event::Number(json_number)
                         }
                     };
-                    
+
                     self.handler
                         .handle_event(content_event)
                         .map_err(PushParseError::Handler)?;
-                    
+
                     // Reset the extractor's parser state since content processing is complete
                     *self.extractor.parser_state_mut() = crate::shared::State::None;
                 }
@@ -268,44 +278,55 @@ where
 
     /// Handle the start of content that spans chunk boundaries
     fn handle_partial_content_span_start<E>(
-        &mut self, 
-        kind: ContentKind, 
-        absolute_start: usize, 
-        has_escapes_in_this_chunk: bool
+        &mut self,
+        kind: ContentKind,
+        absolute_start: usize,
+        has_escapes_in_this_chunk: bool,
     ) -> Result<(), PushParseError<E>> {
-        log::debug!("handle_partial_content_span_start: kind={:?}, absolute_start={}, has_escapes={}", 
-                   kind, absolute_start, has_escapes_in_this_chunk);
-        
+        log::debug!(
+            "handle_partial_content_span_start: kind={:?}, absolute_start={}, has_escapes={}",
+            kind,
+            absolute_start,
+            has_escapes_in_this_chunk
+        );
+
         // Convert absolute position to relative position within current chunk
         let position_offset = self.extractor.position_offset();
         let relative_start = absolute_start.saturating_sub(position_offset);
         let chunk_len = self.extractor.current_chunk_len();
-        
-        log::debug!("handle_partial_content_span_start: position_offset={}, relative_start={}, chunk_len={}", 
+
+        log::debug!("handle_partial_content_span_start: position_offset={}, relative_start={}, chunk_len={}",
                    position_offset, relative_start, chunk_len);
-        
+
         // For now, we'll implement a simple version that copies byte by byte
         // This can be optimized later with bulk copy methods
-        
-        let content_slice = self.extractor.get_borrowed_slice(relative_start, chunk_len)
+
+        let content_slice = self
+            .extractor
+            .get_borrowed_slice(relative_start + 1, chunk_len)
             .map_err(PushParseError::Parse)?;
-        
-        log::debug!("handle_partial_content_span_start: content_slice = {:?}", 
-                   core::str::from_utf8(content_slice).unwrap_or("[invalid utf8]"));
-            
+
+        log::debug!(
+            "handle_partial_content_span_start: content_slice = {:?}",
+            core::str::from_utf8(content_slice).unwrap_or("[invalid utf8]")
+        );
+
         // Copy ALL data to local buffer to completely avoid borrowing conflicts
         let content_data = alloc::vec::Vec::from(content_slice);
-        
+
         // Now append from local buffer - no more borrowing conflicts
         for byte in &content_data {
-            self.extractor.append_unescaped_byte(*byte)
+            self.extractor
+                .append_unescaped_byte(*byte)
                 .map_err(PushParseError::Parse)?;
         }
-        
-        log::debug!("handle_partial_content_span_start: copied {} bytes to scratch buffer", content_data.len());
+
+        log::debug!(
+            "handle_partial_content_span_start: copied {} bytes to scratch buffer",
+            content_data.len()
+        );
         Ok(())
     }
-
 
     /// Finishes parsing, flushes any remaining events, and returns the handler.
     /// This method consumes the parser.
@@ -322,7 +343,10 @@ where
         let extractor_state = self.extractor.parser_state();
         log::debug!("finish(): extractor state = {:?}", extractor_state);
         if *extractor_state != State::None {
-            log::error!("finish(): extractor still in state {:?}, returning EndOfData error", extractor_state);
+            log::error!(
+                "finish(): extractor still in state {:?}, returning EndOfData error",
+                extractor_state
+            );
             return Err(crate::push_parser::PushParseError::Parse(
                 ParseError::EndOfData,
             ));

@@ -33,7 +33,7 @@ pub enum Event<'a, 'b> {
     Bool(bool),
     /// A null value (e.g., `null`).
     Null,
-    
+
     /// Describes a complete token found within the current input chunk.
     ContentSpan {
         /// The type of content (string, key, or number)
@@ -65,7 +65,7 @@ pub enum Event<'a, 'b> {
         /// Whether escapes were seen in this final chunk
         has_escapes_in_this_chunk: bool,
     },
-    
+
     /// End of the document.
     EndDocument,
 }

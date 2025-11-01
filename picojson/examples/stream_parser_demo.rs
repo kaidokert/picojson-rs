@@ -56,7 +56,9 @@ fn main() -> Result<(), ParseError> {
                         break;
                     }
                     // ContentSpan events should not appear in StreamParser - they're PushParser-specific
-                    Event::ContentSpan { .. } | Event::PartialContentSpanStart { .. } | Event::PartialContentSpanEnd { .. } => {
+                    Event::ContentSpan { .. }
+                    | Event::PartialContentSpanStart { .. }
+                    | Event::PartialContentSpanEnd { .. } => {
                         panic!("ContentSpan events should not appear in StreamParser")
                     }
                 }
