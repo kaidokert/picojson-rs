@@ -199,6 +199,11 @@ pub struct Error {
     position: usize,
     line: usize,
     column: usize,
+    // AVR workaround: AVR has a codegen quirk where structs in the
+    // 6-9 byte range cause panic symbols to be included when used in
+    // state machine code. Padding to 10+ bytes avoids this issue.
+    #[cfg(target_arch = "avr")]
+    _avr_padding: u16,
 }
 
 // Custom PartialEq implementation that only compares kind, character, and position
@@ -246,6 +251,8 @@ impl Error {
             position,
             line,
             column,
+            #[cfg(target_arch = "avr")]
+            _avr_padding: 0,
         })
     }
 }
