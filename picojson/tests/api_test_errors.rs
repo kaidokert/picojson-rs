@@ -210,3 +210,61 @@ fn test_malformed_json_invalid_number() {
         ),
     }
 }
+
+#[test]
+fn test_error_includes_line_and_column_info() {
+    // Test that tokenizer errors propagated through ParseError include line/column info
+    let json = "{\n  \"key\": \"value\"\n  invalid\n}";
+    let mut parser = SliceParser::new(json);
+
+    assert_eq!(parser.next_event(), Ok(Event::StartObject));
+    assert_eq!(parser.next_event(), Ok(Event::Key(String::Borrowed("key"))));
+    assert_eq!(
+        parser.next_event(),
+        Ok(Event::String(String::Borrowed("value")))
+    );
+
+    // Should fail with detailed error including line and column
+    match parser.next_event() {
+        Err(e) => {
+            let err_msg = format!("{}", e);
+            // Verify the error message includes line and column information
+            assert!(
+                err_msg.contains("line") && err_msg.contains("column"),
+                "Error message should contain line and column info, got: {}",
+                err_msg
+            );
+            // The error should be on line 3 where "invalid" appears
+            assert!(
+                err_msg.contains("line 3"),
+                "Expected line 3, got: {}",
+                err_msg
+            );
+        }
+        other => panic!("Expected error for invalid JSON, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_multiline_error_tracking() {
+    // Test error tracking across multiple lines
+    let json = "[\n  1,\n  2,\n  true,\n]"; // Trailing comma at line 5
+    let mut parser = SliceParser::new(json);
+
+    // Parse through all events until we hit the error
+    loop {
+        match parser.next_event() {
+            Ok(Event::StartArray) | Ok(Event::Bool(_)) | Ok(Event::Number(_)) => continue,
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                assert!(
+                    err_msg.contains("line 5"),
+                    "Expected line 5 in error message, got: {}",
+                    err_msg
+                );
+                break;
+            }
+            other => panic!("Expected trailing comma error, got: {:?}", other),
+        }
+    }
+}
