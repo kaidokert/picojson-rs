@@ -90,9 +90,9 @@ The parser's behavior can be customized with feature flags. For example, integer
 
 ## Stability
 
-This library is experimental and not yet recommended for production use, though the parsers pass conformance tests.
+This library is experimental, though the parsers pass conformance tests.
 
-For production code please use [serde-json-core](https://crates.io/crates/serde-json-core) or various other alternatives.
+For battle-tested code please use [serde-json-core](https://crates.io/crates/serde-json-core) or various other alternatives.
 
 ## License
 
