@@ -667,8 +667,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
         let start_pos = self.position.pos;
         let mut pos = 0;
         while let Some(&current_byte) = data.get(pos) {
-            // Update absolute position for current byte
-            self.position.pos = start_pos.wrapping_add(pos);
+            // Update absolute position for current byte (saturating to avoid misleading error locations)
+            self.position.pos = start_pos.saturating_add(pos);
 
             // Capture current position for error reporting
             let current_position = self.position;
@@ -1148,8 +1148,8 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                 self.position.column = self.position.column.saturating_add(1);
             }
         }
-        // Update final absolute position after processing all bytes
-        self.position.pos = start_pos.wrapping_add(pos);
+        // Update final absolute position after processing all bytes (saturating to avoid misleading error locations)
+        self.position.pos = start_pos.saturating_add(pos);
         Ok(pos)
     }
 }
