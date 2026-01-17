@@ -248,7 +248,7 @@ fn test_error_includes_line_and_column_info() {
 #[test]
 fn test_multiline_error_tracking() {
     // Test error tracking across multiple lines
-    let json = "[\n  1,\n  2,\n  true,\n]"; // Trailing comma at line 5
+    let json = "[\n  1,\n  2,\n  true,\n]"; // Trailing comma at line 4, column 7 (comma position)
     let mut parser = SliceParser::new(json);
 
     // Parse through all events until we hit the error
@@ -258,8 +258,13 @@ fn test_multiline_error_tracking() {
             Err(e) => {
                 let err_msg = format!("{}", e);
                 assert!(
-                    err_msg.contains("line 5"),
-                    "Expected line 5 in error message, got: {}",
+                    err_msg.contains("line 4"),
+                    "Expected line 4 in error message, got: {}",
+                    err_msg
+                );
+                assert!(
+                    err_msg.contains("column 7"),
+                    "Expected column 7 in error message, got: {}",
                     err_msg
                 );
                 break;
