@@ -252,24 +252,23 @@ fn test_multiline_error_tracking() {
     let mut parser = SliceParser::new(json);
 
     // Parse through all events until we hit the error
-    loop {
+    let err = loop {
         match parser.next_event() {
             Ok(Event::StartArray) | Ok(Event::Bool(_)) | Ok(Event::Number(_)) => continue,
-            Err(e) => {
-                let err_msg = format!("{}", e);
-                assert!(
-                    err_msg.contains("line 4"),
-                    "Expected line 4 in error message, got: {}",
-                    err_msg
-                );
-                assert!(
-                    err_msg.contains("column 7"),
-                    "Expected column 7 in error message, got: {}",
-                    err_msg
-                );
-                break;
-            }
+            Err(e) => break e,
             other => panic!("Expected trailing comma error, got: {:?}", other),
         }
-    }
+    };
+
+    let err_msg = format!("{}", err);
+    assert!(
+        err_msg.contains("line 4"),
+        "Expected line 4 in error message, got: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("column 7"),
+        "Expected column 7 in error message, got: {}",
+        err_msg
+    );
 }

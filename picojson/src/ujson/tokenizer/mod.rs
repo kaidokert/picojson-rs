@@ -3,14 +3,43 @@
 use super::BitBucket;
 use super::DepthCounter;
 
+/// Represents a position in the JSON input with byte offset, line, and column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    /// Byte offset from the start of input
+    pub pos: usize,
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Column number (1-indexed)
+    pub column: usize,
+}
+
+#[cfg(test)]
+impl Position {
+    /// Creates a new Position with the given byte offset, line, and column.
+    fn new(pos: usize, line: usize, column: usize) -> Self {
+        Self { pos, line, column }
+    }
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+            pos: 0,
+            line: 1,
+            column: 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ParseContext<T: BitBucket, D> {
     /// Keeps track of the depth of the object/array
     depth: D,
     /// Keeps track of the stack of objects/arrays
     stack: T,
-    /// Keeps track of the last comma and its position (char, pos, line, col)
-    after_comma: Option<(u8, usize, usize, usize)>,
+    /// Keeps track of the last comma character and its position
+    after_comma: Option<(u8, Position)>,
 }
 
 impl<T: BitBucket, D: DepthCounter> ParseContext<T, D> {
@@ -21,60 +50,36 @@ impl<T: BitBucket, D: DepthCounter> ParseContext<T, D> {
             after_comma: None,
         }
     }
-    fn enter_object(
-        &mut self,
-        data: u8,
-        pos: usize,
-        line: usize,
-        column: usize,
-    ) -> Result<(), Error> {
+    fn enter_object(&mut self, data: u8, position: Position) -> Result<(), Error> {
         let (new_depth, overflow) = self.depth.increment();
         if overflow {
-            return Error::new(
-                ErrKind::MaxDepthReached,
-                data,
-                pos,
-                Some(line),
-                Some(column),
-            );
+            return Error::new(ErrKind::MaxDepthReached, data, position);
         }
         self.stack.push(true);
         self.depth = new_depth;
         Ok(())
     }
-    fn exit_object(&mut self, pos: usize, line: usize, column: usize) -> Result<(), Error> {
+    fn exit_object(&mut self, position: Position) -> Result<(), Error> {
         if self.depth.is_zero() {
-            return Error::new(ErrKind::UnopenedObject, b'}', pos, Some(line), Some(column));
+            return Error::new(ErrKind::UnopenedObject, b'}', position);
         }
         self.stack.pop();
         let (new_depth, _underflow) = self.depth.decrement();
         self.depth = new_depth;
         Ok(())
     }
-    fn enter_array(
-        &mut self,
-        data: u8,
-        pos: usize,
-        line: usize,
-        column: usize,
-    ) -> Result<(), Error> {
+    fn enter_array(&mut self, data: u8, position: Position) -> Result<(), Error> {
         let (new_depth, overflow) = self.depth.increment();
         if overflow {
-            return Error::new(
-                ErrKind::MaxDepthReached,
-                data,
-                pos,
-                Some(line),
-                Some(column),
-            );
+            return Error::new(ErrKind::MaxDepthReached, data, position);
         }
         self.stack.push(false);
         self.depth = new_depth;
         Ok(())
     }
-    fn exit_array(&mut self, pos: usize, line: usize, column: usize) -> Result<(), Error> {
+    fn exit_array(&mut self, position: Position) -> Result<(), Error> {
         if self.depth.is_zero() {
-            return Error::new(ErrKind::UnopenedArray, b']', pos, Some(line), Some(column));
+            return Error::new(ErrKind::UnopenedArray, b']', position);
         }
         self.stack.pop();
         let (new_depth, _underflow) = self.depth.decrement();
@@ -202,33 +207,29 @@ pub enum Event {
 /// Low-level JSON tokenizer that tracks parsing state and line/column positions.
 pub struct Tokenizer<T: BitBucket = u32, D = u8> {
     state: State,
-    total_consumed: usize,
     context: ParseContext<T, D>,
-    line: usize,
-    column: usize,
+    position: Position,
 }
 
 /// Error type returned by the tokenizer with line/column information.
 pub struct Error {
     kind: ErrKind,
     character: u8,
-    position: usize,
-    line: Option<usize>,
-    column: Option<usize>,
+    position: Position,
     // AVR workaround: AVR has a codegen quirk where structs in the
     // 6-11 byte range cause panic symbols to be included when used in
-    // state machine code. Padding to 16 bytes (with u64) avoids this issue.
+    // state machine code. Padding with u16 to avoid the problematic range.
     #[cfg(target_arch = "avr")]
-    _avr_padding: u64,
+    _avr_padding: u16,
 }
 
-// Custom PartialEq implementation that only compares kind, character, and position
+// Custom PartialEq implementation that only compares kind, character, and byte position
 // This allows existing tests to pass while still providing line/column info in error messages
 impl PartialEq for Error {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
             && self.character == other.character
-            && self.position == other.position
+            && self.position.pos == other.position.pos
     }
 }
 
@@ -256,19 +257,11 @@ pub enum ErrKind {
 
 impl Error {
     /// Creates a new error result with the given details.
-    pub fn new<T>(
-        kind: ErrKind,
-        character: u8,
-        position: usize,
-        line: Option<usize>,
-        column: Option<usize>,
-    ) -> Result<T, Self> {
+    pub fn new<T>(kind: ErrKind, character: u8, position: Position) -> Result<T, Self> {
         Err(Self {
             kind,
             character,
             position,
-            line,
-            column,
             #[cfg(target_arch = "avr")]
             _avr_padding: 0,
         })
@@ -277,37 +270,29 @@ impl Error {
 
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if let (Some(line), Some(column)) = (self.line, self.column) {
-            write!(
-                f,
-                "Tokenizer error: {:?} at line {} column {} (position {}) near {:?}",
-                self.kind, line, column, self.position, self.character as char
-            )
-        } else {
-            write!(
-                f,
-                "Tokenizer error: {:?} at position {} near {:?}",
-                self.kind, self.position, self.character as char
-            )
-        }
+        write!(
+            f,
+            "Tokenizer error: {:?} at line {} column {} (position {}) near {:?}",
+            self.kind,
+            self.position.line,
+            self.position.column,
+            self.position.pos,
+            self.character as char
+        )
     }
 }
 
 impl core::fmt::Debug for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if let (Some(line), Some(column)) = (self.line, self.column) {
-            write!(
-                f,
-                "{:?}({}) at line {} col {} (pos {})",
-                self.kind, self.character as char, line, column, self.position
-            )
-        } else {
-            write!(
-                f,
-                "{:?}({}) at {}",
-                self.kind, self.character as char, self.position
-            )
-        }
+        write!(
+            f,
+            "{:?}({}) at line {} col {} (pos {})",
+            self.kind,
+            self.character as char,
+            self.position.line,
+            self.position.column,
+            self.position.pos
+        )
     }
 }
 
@@ -523,29 +508,16 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     pub fn new() -> Self {
         Tokenizer {
             state: State::Idle,
-            total_consumed: 0,
             context: ParseContext::new(),
-            line: 1,
-            column: 1,
+            position: Position::default(),
         }
     }
 
-    fn check_trailing_comma(
-        &mut self,
-        data: u8,
-        _line: usize,
-        _column: usize,
-    ) -> Result<(), Error> {
+    fn check_trailing_comma(&mut self, data: u8) -> Result<(), Error> {
         // Check for trailing comma if we're at a closing bracket/brace
-        if let Some((c, pos, comma_line, comma_column)) = self.context.after_comma {
+        if let Some((c, comma_pos)) = self.context.after_comma {
             if data == b']' || data == b'}' {
-                return Error::new(
-                    ErrKind::TrailingComma,
-                    c,
-                    pos,
-                    Some(comma_line),
-                    Some(comma_column),
-                );
+                return Error::new(ErrKind::TrailingComma, c, comma_pos);
             }
         }
 
@@ -573,26 +545,14 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     {
         // we check that parser was idle, at zero nesting depth
         if !self.context.depth.is_zero() {
-            return Error::new(
-                ErrKind::UnfinishedStream,
-                b' ',
-                self.total_consumed,
-                Some(self.line),
-                Some(self.column),
-            );
+            return Error::new(ErrKind::UnfinishedStream, b' ', self.position);
         }
-        if self.total_consumed == 0 {
-            return Error::new(
-                ErrKind::EmptyStream,
-                b' ',
-                self.total_consumed,
-                Some(self.line),
-                Some(self.column),
-            );
+        if self.position.pos == 0 {
+            return Error::new(ErrKind::EmptyStream, b' ', self.position);
         }
 
         match &self.state {
-            State::Finished => Ok(self.total_consumed),
+            State::Finished => Ok(self.position.pos),
             State::Number {
                 state: Num::LeadingZero,
             }
@@ -605,16 +565,10 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
             | State::Number {
                 state: Num::AfterExponent,
             } => {
-                callback(Event::End(EventToken::Number), self.total_consumed);
-                Ok(self.total_consumed)
+                callback(Event::End(EventToken::Number), self.position.pos);
+                Ok(self.position.pos)
             }
-            _ => Error::new(
-                ErrKind::UnfinishedStream,
-                b' ',
-                self.total_consumed,
-                Some(self.line),
-                Some(self.column),
-            ),
+            _ => Error::new(ErrKind::UnfinishedStream, b' ', self.position),
         }
     }
 
@@ -623,8 +577,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     where
         F: FnMut(Event, usize) + ?Sized,
     {
-        self.p(data, callback)?;
-        Ok(self.total_consumed)
+        self.p(data, callback)
     }
 
     // testing helper
@@ -637,9 +590,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     where
         F: FnMut(Event, usize) + ?Sized,
     {
-        let consumed = self.parse_chunk_inner(data, callback)?;
-        self.total_consumed = self.total_consumed.wrapping_add(consumed);
-        Ok(consumed)
+        self.parse_chunk_inner(data, callback)
     }
 
     fn maybe_exit_level(&self) -> State {
@@ -676,8 +627,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
         &mut self,
         token: u8,
         pos: usize,
-        line: usize,
-        column: usize,
+        position: Position,
         callback: &mut dyn FnMut(Event, usize),
     ) -> Result<State, Error> {
         let token_type = match token {
@@ -693,7 +643,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                 callback(Event::Begin(EventToken::Null), pos);
                 TokenType::Null
             }
-            _ => return Error::new(ErrKind::InvalidToken, token, pos, Some(line), Some(column)),
+            _ => return Error::new(ErrKind::InvalidToken, token, position),
         };
 
         let progress = TokenProgress {
@@ -714,18 +664,21 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
     where
         F: FnMut(Event, usize) + ?Sized,
     {
+        let start_pos = self.position.pos;
         let mut pos = 0;
         while let Some(&current_byte) = data.get(pos) {
-            // Capture current line and column for error reporting
-            let current_line = self.line;
-            let current_column = self.column;
+            // Update absolute position for current byte
+            self.position.pos = start_pos.wrapping_add(pos);
+
+            // Capture current position for error reporting
+            let current_position = self.position;
 
             // Special case - this needs to be done for every Array match arm
             if let State::Array {
                 expect: Array::ItemOrEnd,
             } = &self.state
             {
-                self.check_trailing_comma(current_byte, current_line, current_column)?;
+                self.check_trailing_comma(current_byte)?;
             }
 
             self.state = match (&self.state, current_byte) {
@@ -739,8 +692,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     else if Self::is_valid_number_terminal_state(*num_state) {
                         if ch == b',' {
                             callback(Event::End(EventToken::Number), pos);
-                            self.context.after_comma =
-                                Some((ch, pos, current_line, current_column));
+                            self.context.after_comma = Some((ch, current_position));
                             self.saw_a_comma_now_what()
                         } else if Self::IS_WHITESPACE[ch as usize] {
                             callback(Event::End(EventToken::Number), pos);
@@ -748,32 +700,19 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         } else if ch == b']' {
                             callback(Event::End(EventToken::NumberAndArray), pos);
                             callback(Event::ArrayEnd, pos);
-                            self.context.exit_array(pos, current_line, current_column)?;
+                            self.context.exit_array(current_position)?;
                             self.maybe_exit_level()
                         } else if ch == b'}' {
                             callback(Event::End(EventToken::NumberAndObject), pos);
                             callback(Event::ObjectEnd, pos);
-                            self.context
-                                .exit_object(pos, current_line, current_column)?;
+                            self.context.exit_object(current_position)?;
                             self.maybe_exit_level()
                         } else {
-                            return Error::new(
-                                ErrKind::InvalidNumber,
-                                ch,
-                                pos,
-                                Some(current_line),
-                                Some(current_column),
-                            );
+                            return Error::new(ErrKind::InvalidNumber, ch, current_position);
                         }
                     } else {
                         // Invalid transition from current state
-                        return Error::new(
-                            ErrKind::InvalidNumber,
-                            ch,
-                            pos,
-                            Some(current_line),
-                            Some(current_column),
-                        );
+                        return Error::new(ErrKind::InvalidNumber, ch, current_position);
                     }
                 }
                 (
@@ -816,9 +755,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     return Error::new(
                         ErrKind::UnescapedControlCharacter,
                         current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
+                        current_position,
                     );
                 }
                 (
@@ -853,9 +790,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         return Error::new(
                             ErrKind::InvalidStringEscape,
                             escape_char,
-                            pos,
-                            Some(current_line),
-                            Some(current_column),
+                            current_position,
                         );
                     }
                 }
@@ -927,9 +862,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     return Error::new(
                         ErrKind::InvalidUnicodeEscape,
                         current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
+                        current_position,
                     );
                 }
                 (
@@ -949,8 +882,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'[',
                 ) => {
-                    self.context
-                        .enter_array(current_byte, pos, current_line, current_column)?;
+                    self.context.enter_array(current_byte, current_position)?;
                     callback(Event::ArrayStart, pos);
                     State::Array {
                         expect: Array::ItemOrEnd,
@@ -966,8 +898,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'{',
                 ) => {
-                    self.context
-                        .enter_object(current_byte, pos, current_line, current_column)?;
+                    self.context.enter_object(current_byte, current_position)?;
                     callback(Event::ObjectStart, pos);
                     State::Object {
                         expect: Object::Key,
@@ -998,13 +929,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Array::ItemOrEnd,
                     },
                     b't' | b'f' | b'n',
-                ) => self.start_token(
-                    current_byte,
-                    pos,
-                    current_line,
-                    current_column,
-                    &mut callback,
-                )?,
+                ) => self.start_token(current_byte, pos, current_position, &mut callback)?,
                 (
                     State::Idle
                     | State::Object {
@@ -1054,13 +979,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     _,
                 ) => {
-                    return Error::new(
-                        ErrKind::ExpectedObjectValue,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    )
+                    return Error::new(ErrKind::ExpectedObjectValue, current_byte, current_position)
                 }
                 (
                     State::Array {
@@ -1069,7 +988,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     b']',
                 ) => {
                     callback(Event::ArrayEnd, pos);
-                    self.context.exit_array(pos, current_line, current_column)?;
+                    self.context.exit_array(current_position)?;
                     self.maybe_exit_level()
                 }
                 (
@@ -1090,19 +1009,10 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'}',
                 ) => {
-                    if let Some((comma_char, comma_pos, comma_line, comma_column)) =
-                        self.context.after_comma
-                    {
-                        return Error::new(
-                            ErrKind::TrailingComma,
-                            comma_char,
-                            comma_pos,
-                            Some(comma_line),
-                            Some(comma_column),
-                        );
+                    if let Some((comma_char, comma_pos)) = self.context.after_comma {
+                        return Error::new(ErrKind::TrailingComma, comma_char, comma_pos);
                     }
-                    self.context
-                        .exit_object(pos, current_line, current_column)?;
+                    self.context.exit_object(current_position)?;
                     callback(Event::ObjectEnd, pos);
                     self.maybe_exit_level()
                 }
@@ -1124,8 +1034,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b',',
                 ) => {
-                    self.context.after_comma =
-                        Some((current_byte, pos, current_line, current_column));
+                    self.context.after_comma = Some((current_byte, current_position));
                     State::Object {
                         expect: Object::Key,
                     }
@@ -1136,8 +1045,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b'}',
                 ) => {
-                    self.context
-                        .exit_object(pos, current_line, current_column)?;
+                    self.context.exit_object(current_position)?;
                     callback(Event::ObjectEnd, pos);
                     self.maybe_exit_level()
                 }
@@ -1147,8 +1055,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     },
                     b',',
                 ) => {
-                    self.context.after_comma =
-                        Some((current_byte, pos, current_line, current_column));
+                    self.context.after_comma = Some((current_byte, current_position));
                     State::Array {
                         expect: Array::ItemOrEnd,
                     }
@@ -1160,7 +1067,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                     b']',
                 ) => {
                     callback(Event::ArrayEnd, pos);
-                    self.context.exit_array(pos, current_line, current_column)?;
+                    self.context.exit_array(current_position)?;
                     self.maybe_exit_level()
                 }
                 (State::Token { token }, current_byte) => {
@@ -1182,9 +1089,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                             return Error::new(
                                 ErrKind::InvalidToken,
                                 current_byte,
-                                pos,
-                                Some(current_line),
-                                Some(current_column),
+                                current_position,
                             );
                         }
                         Err(event_token) => {
@@ -1197,13 +1102,7 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
 
                 // Wrong tokens
                 (State::Idle, _) => {
-                    return Error::new(
-                        ErrKind::InvalidRoot,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    );
+                    return Error::new(ErrKind::InvalidRoot, current_byte, current_position);
                 }
 
                 (
@@ -1211,42 +1110,20 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Object::Key,
                     },
                     _,
-                ) => {
-                    return Error::new(
-                        ErrKind::ExpectedObjectKey,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    )
-                }
+                ) => return Error::new(ErrKind::ExpectedObjectKey, current_byte, current_position),
                 (
                     State::Object {
                         expect: Object::Colon,
                     },
                     _,
-                ) => {
-                    return Error::new(
-                        ErrKind::ExpectedColon,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    )
-                }
+                ) => return Error::new(ErrKind::ExpectedColon, current_byte, current_position),
                 (
                     State::Object {
                         expect: Object::CommaOrEnd,
                     },
                     _,
                 ) => {
-                    return Error::new(
-                        ErrKind::ExpectedObjectValue,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    )
+                    return Error::new(ErrKind::ExpectedObjectValue, current_byte, current_position)
                 }
                 (
                     State::Array {
@@ -1256,35 +1133,23 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                         expect: Array::CommaOrEnd,
                     },
                     _,
-                ) => {
-                    return Error::new(
-                        ErrKind::ExpectedArrayItem,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    )
-                }
+                ) => return Error::new(ErrKind::ExpectedArrayItem, current_byte, current_position),
                 (State::Finished, _) => {
-                    return Error::new(
-                        ErrKind::ContentEnded,
-                        current_byte,
-                        pos,
-                        Some(current_line),
-                        Some(current_column),
-                    )
+                    return Error::new(ErrKind::ContentEnded, current_byte, current_position)
                 }
             };
             pos = pos.saturating_add(1);
 
             // Update line and column tracking with panic-free math
             if current_byte == b'\n' {
-                self.line = self.line.saturating_add(1);
-                self.column = 1;
+                self.position.line = self.position.line.saturating_add(1);
+                self.position.column = 1;
             } else {
-                self.column = self.column.saturating_add(1);
+                self.position.column = self.position.column.saturating_add(1);
             }
         }
+        // Update final absolute position after processing all bytes
+        self.position.pos = start_pos.wrapping_add(pos);
         Ok(pos)
     }
 }
@@ -1302,11 +1167,11 @@ mod tests {
     fn test_root_is_garbage() {
         assert_eq!(
             Tokenizer::<u32, u8>::new().t(b"a"),
-            Error::new(ErrKind::InvalidRoot, b'a', 0, None, None)
+            Error::new(ErrKind::InvalidRoot, b'a', Position::new(0, 1, 1))
         );
         assert_eq!(
             Tokenizer::<u32, u8>::new().t(b" a"),
-            Error::new(ErrKind::InvalidRoot, b'a', 1, None, None)
+            Error::new(ErrKind::InvalidRoot, b'a', Position::new(1, 1, 2))
         );
     }
     #[test]
@@ -1335,7 +1200,7 @@ mod tests {
         let result = collect_with_result(&mut parser, b"true extra", &mut events);
         assert_eq!(
             result,
-            Error::new(ErrKind::ContentEnded, b'e', 5, None, None)
+            Error::new(ErrKind::ContentEnded, b'e', Position::new(5, 1, 6))
         );
     }
 
@@ -1400,7 +1265,10 @@ mod tests {
     fn test_after_root_should_not_accept_comma() {
         let mut m: [Event; 2] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b" true,", &mut m);
-        assert_eq!(r, Error::new(ErrKind::ContentEnded, b',', 5, None, None));
+        assert_eq!(
+            r,
+            Error::new(ErrKind::ContentEnded, b',', Position::new(5, 1, 6))
+        );
     }
 
     #[test]
@@ -1493,7 +1361,7 @@ mod tests {
         let r = collect_with_result(&mut Tokenizer::new(), b"{true", &mut m);
         assert_eq!(
             r,
-            Error::new(ErrKind::ExpectedObjectKey, b't', 1, None, None)
+            Error::new(ErrKind::ExpectedObjectKey, b't', Position::new(1, 1, 2))
         );
     }
 
@@ -1501,7 +1369,10 @@ mod tests {
     fn test_object_missing_colon() {
         let mut m: [Event; 3] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b"{\"key\"true}", &mut m);
-        assert_eq!(r, Error::new(ErrKind::ExpectedColon, b't', 6, None, None));
+        assert_eq!(
+            r,
+            Error::new(ErrKind::ExpectedColon, b't', Position::new(6, 1, 7))
+        );
     }
 
     #[test]
@@ -1510,7 +1381,7 @@ mod tests {
         let r = collect_with_result(&mut Tokenizer::new(), b"{\"key\":}", &mut m);
         assert_eq!(
             r,
-            Error::new(ErrKind::ExpectedObjectValue, b'}', 7, None, None)
+            Error::new(ErrKind::ExpectedObjectValue, b'}', Position::new(7, 1, 8))
         );
     }
 
@@ -1520,7 +1391,7 @@ mod tests {
         let r = collect_with_result(&mut Tokenizer::new(), b"{\"a\":true\"b\":true}", &mut m);
         assert_eq!(
             r,
-            Error::new(ErrKind::ExpectedObjectValue, b'"', 9, None, None)
+            Error::new(ErrKind::ExpectedObjectValue, b'"', Position::new(9, 1, 10))
         );
     }
 
@@ -1712,21 +1583,30 @@ mod tests {
     fn test_array_with_trailing_comma() {
         let mut m: [Event; 6] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b"[1,]", &mut m);
-        assert_eq!(r, Error::new(ErrKind::TrailingComma, b',', 2, None, None));
+        assert_eq!(
+            r,
+            Error::new(ErrKind::TrailingComma, b',', Position::new(2, 1, 3))
+        );
     }
 
     #[test]
     fn test_array_with_trailing_comma_true() {
         let mut m: [Event; 6] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b"[true,]", &mut m);
-        assert_eq!(r, Error::new(ErrKind::TrailingComma, b',', 5, None, None));
+        assert_eq!(
+            r,
+            Error::new(ErrKind::TrailingComma, b',', Position::new(5, 1, 6))
+        );
     }
 
     #[test]
     fn test_array_with_trailing_comma_in_nested_array() {
         let mut m: [Event; 16] = core::array::from_fn(|_| Event::Uninitialized);
         let r = collect_with_result(&mut Tokenizer::new(), b"{ \"d\": [\"f\",\"b\",] }", &mut m);
-        assert_eq!(r, Error::new(ErrKind::TrailingComma, b',', 15, None, None));
+        assert_eq!(
+            r,
+            Error::new(ErrKind::TrailingComma, b',', Position::new(15, 1, 16))
+        );
     }
 
     #[test]
@@ -1854,7 +1734,7 @@ mod tests {
         let r = collect_with_result(&mut Tokenizer::new(), b"\"\\u00g\"", &mut m);
         assert_eq!(
             r,
-            Error::new(ErrKind::InvalidUnicodeEscape, b'g', 5, None, None)
+            Error::new(ErrKind::InvalidUnicodeEscape, b'g', Position::new(5, 1, 6))
         );
     }
 
@@ -1864,7 +1744,7 @@ mod tests {
         let r = collect_with_result(&mut Tokenizer::new(), b"\"\\u001\"", &mut m);
         assert_eq!(
             r,
-            Error::new(ErrKind::InvalidUnicodeEscape, b'"', 6, None, None)
+            Error::new(ErrKind::InvalidUnicodeEscape, b'"', Position::new(6, 1, 7))
         );
     }
 
@@ -2054,7 +1934,7 @@ mod conformance {
         // valid escapes are \\, \t and \n and so on, lets do \x
         check!(
             b"[\"\\x\"]",
-            Error::new(ErrKind::InvalidStringEscape, b'x', 3, None, None),
+            Error::new(ErrKind::InvalidStringEscape, b'x', Position::new(3, 1, 4)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1),
@@ -2070,7 +1950,7 @@ mod conformance {
         // leave at minus sign
         check!(
             b"[-]",
-            Error::new(ErrKind::InvalidNumber, b']', 2, None, None),
+            Error::new(ErrKind::InvalidNumber, b']', Position::new(2, 1, 3)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1),
@@ -2079,7 +1959,7 @@ mod conformance {
         // leave at decimal point
         check!(
             b"[123.]",
-            Error::new(ErrKind::InvalidNumber, b']', 5, None, None),
+            Error::new(ErrKind::InvalidNumber, b']', Position::new(5, 1, 6)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1),
@@ -2088,7 +1968,7 @@ mod conformance {
         // leave at exponent
         check!(
             b"[123e]",
-            Error::new(ErrKind::InvalidNumber, b']', 5, None, None),
+            Error::new(ErrKind::InvalidNumber, b']', Position::new(5, 1, 6)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1),
@@ -2123,7 +2003,7 @@ mod conformance {
         // leave at minus sign
         check!(
             b"{ \"a\" : -}",
-            Error::new(ErrKind::InvalidNumber, b'}', 9, None, None),
+            Error::new(ErrKind::InvalidNumber, b'}', Position::new(9, 1, 10)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 2),
@@ -2134,7 +2014,7 @@ mod conformance {
         // leave at decimal point
         check!(
             b"{ \"a\" : 123.}",
-            Error::new(ErrKind::InvalidNumber, b'}', 12, None, None),
+            Error::new(ErrKind::InvalidNumber, b'}', Position::new(12, 1, 13)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 2),
@@ -2145,7 +2025,7 @@ mod conformance {
         // leave at exponent sign
         check!(
             b"{ \"a\" : 123e+}",
-            Error::new(ErrKind::InvalidNumber, b'}', 13, None, None),
+            Error::new(ErrKind::InvalidNumber, b'}', Position::new(13, 1, 14)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 2),
@@ -2157,7 +2037,7 @@ mod conformance {
         // leave at exponent
         check!(
             b"{ \"a\" : 123e}",
-            Error::new(ErrKind::InvalidNumber, b'}', 12, None, None),
+            Error::new(ErrKind::InvalidNumber, b'}', Position::new(12, 1, 13)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 2),
@@ -2171,7 +2051,7 @@ mod conformance {
     fn test_confformance_2_str() {
         check!(
             b"[\"a\",,\"b\"]",
-            Error::new(ErrKind::ExpectedArrayItem, b',', 5, None, None),
+            Error::new(ErrKind::ExpectedArrayItem, b',', Position::new(5, 1, 6)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1),
@@ -2184,7 +2064,7 @@ mod conformance {
     fn test_confformance_2_num() {
         check!(
             b"[1,,2]",
-            Error::new(ErrKind::ExpectedArrayItem, b',', 3, None, None),
+            Error::new(ErrKind::ExpectedArrayItem, b',', Position::new(3, 1, 4)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1),
@@ -2197,7 +2077,7 @@ mod conformance {
     fn test_conformance_unopened_array() {
         check!(
             b"1]",
-            Error::new(ErrKind::UnopenedArray, b']', 1, None, None),
+            Error::new(ErrKind::UnopenedArray, b']', Position::new(1, 1, 2)),
             &[
                 (Event::Begin(EventToken::Number), 0),
                 (Event::End(EventToken::NumberAndArray), 1),
@@ -2222,7 +2102,7 @@ mod conformance {
     fn test_conformance_trailing_object_comm() {
         check!(
             b"{\"id\":0,}",
-            Error::new(ErrKind::TrailingComma, b',', 7, Some(1), Some(8)),
+            Error::new(ErrKind::TrailingComma, b',', Position::new(7, 1, 8)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 1),
@@ -2237,7 +2117,7 @@ mod conformance {
     fn test_conformance_trailing_object_comma_after_string() {
         check!(
             b"{\"key\":\"value\",}",
-            Error::new(ErrKind::TrailingComma, b',', 14, Some(1), Some(15)),
+            Error::new(ErrKind::TrailingComma, b',', Position::new(14, 1, 15)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 1),
@@ -2252,7 +2132,7 @@ mod conformance {
     fn test_conformance_trailing_object_comma_after_bool() {
         check!(
             b"{\"flag\":true,}",
-            Error::new(ErrKind::TrailingComma, b',', 12, Some(1), Some(13)),
+            Error::new(ErrKind::TrailingComma, b',', Position::new(12, 1, 13)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 1),
@@ -2267,7 +2147,7 @@ mod conformance {
     fn test_conformance_trailing_object_comma_after_null() {
         check!(
             b"{\"value\":null,}",
-            Error::new(ErrKind::TrailingComma, b',', 13, Some(1), Some(14)),
+            Error::new(ErrKind::TrailingComma, b',', Position::new(13, 1, 14)),
             &[
                 (Event::ObjectStart, 0),
                 (Event::Begin(EventToken::Key), 1),
@@ -2282,7 +2162,7 @@ mod conformance {
     fn test_conformance_double_array() {
         check!(
             b"false false",
-            Error::new(ErrKind::ContentEnded, b'f', 6, None, None),
+            Error::new(ErrKind::ContentEnded, b'f', Position::new(6, 1, 7)),
             &[
                 (Event::Begin(EventToken::False), 0),
                 (Event::End(EventToken::False), 4)
@@ -2296,7 +2176,7 @@ mod conformance {
         let starts: [(Event, usize); 255] = core::array::from_fn(|x: usize| (Event::ArrayStart, x));
         check!(
             data,
-            Error::new(ErrKind::MaxDepthReached, b'[', 255, None, None),
+            Error::new(ErrKind::MaxDepthReached, b'[', Position::new(255, 1, 256)),
             starts.as_slice()
         );
     }
@@ -2305,7 +2185,7 @@ mod conformance {
     fn concormance_test_n_array_just_minus() {
         check!(
             b"[-]",
-            Error::new(ErrKind::InvalidNumber, b']', 2, None, None),
+            Error::new(ErrKind::InvalidNumber, b']', Position::new(2, 1, 3)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1)
@@ -2317,7 +2197,7 @@ mod conformance {
     fn conformance_test_n_number_real_without_fractional_part() {
         check!(
             b"[1.]",
-            Error::new(ErrKind::InvalidNumber, b']', 3, None, None),
+            Error::new(ErrKind::InvalidNumber, b']', Position::new(3, 1, 4)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1)
@@ -2329,7 +2209,7 @@ mod conformance {
     fn conformance_test_n_number_plus_one() {
         check!(
             b"[+1]",
-            Error::new(ErrKind::ExpectedArrayItem, b'+', 1, None, None),
+            Error::new(ErrKind::ExpectedArrayItem, b'+', Position::new(1, 1, 2)),
             &[(Event::ArrayStart, 0)]
         );
     }
@@ -2338,7 +2218,7 @@ mod conformance {
     fn conformance_test_n_number_minus_zero_one() {
         check!(
             b"[-01]",
-            Error::new(ErrKind::InvalidNumber, b'1', 3, None, None),
+            Error::new(ErrKind::InvalidNumber, b'1', Position::new(3, 1, 4)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1)
@@ -2350,7 +2230,7 @@ mod conformance {
     fn conformance_test_n_number_neg_int_starting_with_zero() {
         check!(
             b"[-012]",
-            Error::new(ErrKind::InvalidNumber, b'1', 3, None, None),
+            Error::new(ErrKind::InvalidNumber, b'1', Position::new(3, 1, 4)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1)
@@ -2362,7 +2242,7 @@ mod conformance {
     fn conformance_test_n_number_with_leading_zero() {
         check!(
             b"[012]",
-            Error::new(ErrKind::InvalidNumber, b'1', 2, None, None),
+            Error::new(ErrKind::InvalidNumber, b'1', Position::new(2, 1, 3)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1)
@@ -2474,7 +2354,7 @@ mod conformance {
     fn conformance_test_n_number_1_0e_minus() {
         check!(
             b"[1.0e-]",
-            Error::new(ErrKind::InvalidNumber, b']', 6, None, None),
+            Error::new(ErrKind::InvalidNumber, b']', Position::new(6, 1, 7)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::Number), 1)
@@ -2498,7 +2378,7 @@ mod conformance {
     fn conformance_n_structure_no_data() {
         check!(
             b"",
-            Error::new(ErrKind::EmptyStream, b' ', 0, None, None),
+            Error::new(ErrKind::EmptyStream, b' ', Position::new(0, 1, 1)),
             &[]
         );
     }
@@ -2507,7 +2387,11 @@ mod conformance {
     fn conformance_n_string_unescaped_tab() {
         check!(
             b"[\"\t\"]",
-            Error::new(ErrKind::UnescapedControlCharacter, b'\t', 2, None, None),
+            Error::new(
+                ErrKind::UnescapedControlCharacter,
+                b'\t',
+                Position::new(2, 1, 3)
+            ),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1)
@@ -2518,7 +2402,11 @@ mod conformance {
     fn conformance_n_unescaped_ctrl_char() {
         check!(
             b"[\"a\x00a\"]",
-            Error::new(ErrKind::UnescapedControlCharacter, b'\x00', 3, None, None),
+            Error::new(
+                ErrKind::UnescapedControlCharacter,
+                b'\x00',
+                Position::new(3, 1, 4)
+            ),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1)
@@ -2530,7 +2418,7 @@ mod conformance {
     fn conformance_test_n_single_space() {
         check!(
             b" ",
-            Error::new(ErrKind::UnfinishedStream, b' ', 1, None, None),
+            Error::new(ErrKind::UnfinishedStream, b' ', Position::new(1, 1, 2)),
             &[]
         );
     }
@@ -2539,7 +2427,11 @@ mod conformance {
     fn conformance_test_n_string_1_surrogate_then_escape_u1() {
         check!(
             b"[\"\\uD800\\u1\"]",
-            Error::new(ErrKind::InvalidUnicodeEscape, b'"', 11, None, None),
+            Error::new(
+                ErrKind::InvalidUnicodeEscape,
+                b'"',
+                Position::new(11, 1, 12)
+            ),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1),
@@ -2556,7 +2448,11 @@ mod conformance {
     fn conformance_test_n_string_1_surrogate_then_escape_u1x() {
         check!(
             b"[\"\\uD800\\u1x\"]",
-            Error::new(ErrKind::InvalidUnicodeEscape, b'x', 11, None, None),
+            Error::new(
+                ErrKind::InvalidUnicodeEscape,
+                b'x',
+                Position::new(11, 1, 12)
+            ),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1),
@@ -2573,7 +2469,11 @@ mod conformance {
     fn conformance_test_n_string_unescaped_tab() {
         check!(
             b"[\"\t\"]",
-            Error::new(ErrKind::UnescapedControlCharacter, b'\t', 2, None, None),
+            Error::new(
+                ErrKind::UnescapedControlCharacter,
+                b'\t',
+                Position::new(2, 1, 3)
+            ),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1)
@@ -2585,7 +2485,7 @@ mod conformance {
     fn conformance_test_n_string_incomplete_escaped_character() {
         check!(
             b"[\"\\u00A\"]",
-            Error::new(ErrKind::InvalidUnicodeEscape, b'"', 7, None, None),
+            Error::new(ErrKind::InvalidUnicodeEscape, b'"', Position::new(7, 1, 8)),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1),
@@ -2599,7 +2499,11 @@ mod conformance {
     fn conformance_test_n_string_incomplete_surrogate() {
         check!(
             b"[\"\\uD834\\uDd\"]",
-            Error::new(ErrKind::InvalidUnicodeEscape, b'"', 12, None, None),
+            Error::new(
+                ErrKind::InvalidUnicodeEscape,
+                b'"',
+                Position::new(12, 1, 13)
+            ),
             &[
                 (Event::ArrayStart, 0),
                 (Event::Begin(EventToken::String), 1),
@@ -2622,9 +2526,9 @@ mod conformance {
         match result {
             Err(err) => {
                 assert_eq!(err.kind, ErrKind::ExpectedObjectKey);
-                assert_eq!(err.position, 1);
-                assert_eq!(err.line, Some(1));
-                assert_eq!(err.column, Some(2));
+                assert_eq!(err.position.pos, 1);
+                assert_eq!(err.position.line, 1);
+                assert_eq!(err.position.column, 2);
 
                 // Also check the error message includes line/column
                 let err_msg = format!("{}", err);
@@ -2646,8 +2550,8 @@ mod conformance {
         match result {
             Err(err) => {
                 assert_eq!(err.kind, ErrKind::TrailingComma);
-                assert_eq!(err.line, Some(3));
-                assert_eq!(err.column, Some(7));
+                assert_eq!(err.position.line, 3);
+                assert_eq!(err.position.column, 7);
 
                 let err_msg = format!("{}", err);
                 assert!(err_msg.contains("line 3"));
@@ -2668,8 +2572,8 @@ mod conformance {
         match result {
             Err(err) => {
                 assert_eq!(err.kind, ErrKind::ExpectedObjectValue);
-                assert_eq!(err.line, Some(2));
-                assert_eq!(err.column, Some(3));
+                assert_eq!(err.position.line, 2);
+                assert_eq!(err.position.column, 3);
 
                 let err_msg = format!("{}", err);
                 assert!(err_msg.contains("line 2"));
@@ -2690,8 +2594,8 @@ mod conformance {
         match result {
             Err(err) => {
                 assert_eq!(err.kind, ErrKind::TrailingComma);
-                assert_eq!(err.line, Some(4));
-                assert_eq!(err.column, Some(5));
+                assert_eq!(err.position.line, 4);
+                assert_eq!(err.position.column, 5);
             }
             Ok(_) => panic!("Expected error"),
         }
@@ -2708,9 +2612,9 @@ mod conformance {
         match result {
             Err(err) => {
                 assert_eq!(err.kind, ErrKind::InvalidRoot);
-                assert_eq!(err.position, 0);
-                assert_eq!(err.line, Some(1));
-                assert_eq!(err.column, Some(1));
+                assert_eq!(err.position.pos, 0);
+                assert_eq!(err.position.line, 1);
+                assert_eq!(err.position.column, 1);
             }
             Ok(_) => panic!("Expected error"),
         }
@@ -2728,8 +2632,8 @@ mod conformance {
         match result {
             Err(err) => {
                 assert_eq!(err.kind, ErrKind::TrailingComma);
-                assert_eq!(err.line, Some(2)); // Line incremented by \n
-                assert_eq!(err.column, Some(5)); // Column of the comma, not the bracket
+                assert_eq!(err.position.line, 2); // Line incremented by \n
+                assert_eq!(err.position.column, 5); // Column of the comma, not the bracket
             }
             Ok(_) => panic!("Expected error"),
         }
@@ -2747,9 +2651,9 @@ mod conformance {
 
         match result {
             Err(err) => {
-                assert_eq!(err.position, 1001);
-                assert_eq!(err.line, Some(1));
-                assert_eq!(err.column, Some(1002));
+                assert_eq!(err.position.pos, 1001);
+                assert_eq!(err.position.line, 1);
+                assert_eq!(err.position.column, 1002);
             }
             Ok(_) => panic!("Expected error"),
         }
