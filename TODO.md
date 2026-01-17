@@ -9,6 +9,7 @@
 - [x] Clippy cleanup
 - [x] Unify code in SliceParser and StreamParser
 - [x] Address and remove `// TODO` comments
+- [x] Line/col numbers in errors
 - [ ] Clean up reference docs
 - [ ] Provide user guide docs
 - [ ] Direct defmt support
