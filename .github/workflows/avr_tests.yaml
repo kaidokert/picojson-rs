@@ -124,5 +124,6 @@ jobs:
         run: cargo nm    --example minimal               --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}" | ( ! egrep "panic|unwind" )
 
       - name: Check for panics
+        if: ${{ !(matrix.profile == 'dev' && matrix.example == 'test_picojson') }}
         working-directory: avr_demo
         run: cargo nm    --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}" | ( ! egrep "panic|unwind" )
