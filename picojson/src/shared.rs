@@ -4,6 +4,14 @@ use crate::ParseError;
 /// Shared components for JSON parsers
 use crate::{ujson, JsonNumber, String};
 
+/// Content type identification for ContentSpan events
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum ContentKind {
+    String,
+    Key,
+    Number,
+}
+
 /// Events produced by JSON parsers
 #[derive(Debug, PartialEq)]
 pub enum Event<'a, 'b> {
@@ -25,6 +33,39 @@ pub enum Event<'a, 'b> {
     Bool(bool),
     /// A null value (e.g., `null`).
     Null,
+
+    /// Describes a complete token found within the current input chunk.
+    ContentSpan {
+        /// The type of content (string, key, or number)
+        kind: ContentKind,
+        /// Absolute start position in the overall stream
+        start: usize,
+        /// Absolute end position in the overall stream
+        end: usize,
+        /// Whether the content contains escape sequences
+        has_escapes: bool,
+    },
+
+    /// Describes the beginning of a token that is cut off by a chunk boundary.
+    PartialContentSpanStart {
+        /// The type of content (string, key, or number)
+        kind: ContentKind,
+        /// Absolute start position in the overall stream
+        start: usize,
+        /// Whether escapes were seen before the chunk ended
+        has_escapes_in_this_chunk: bool,
+    },
+
+    /// Describes the end of a token that began in a previous chunk.
+    PartialContentSpanEnd {
+        /// The type of content (string, key, or number)
+        kind: ContentKind,
+        /// Absolute end position in the overall stream
+        end: usize,
+        /// Whether escapes were seen in this final chunk
+        has_escapes_in_this_chunk: bool,
+    },
+
     /// End of the document.
     EndDocument,
 }
@@ -186,6 +227,10 @@ impl ContentRange {
 /// * `'input` - Lifetime for the input data being parsed
 /// * `'scratch` - Lifetime for the scratch buffer used for temporary storage
 pub trait DataSource<'input, 'scratch> {
+    /// Returns the next byte from the input source.
+    /// Returns None when end of input is reached
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError>;
+
     /// Returns a slice of the raw, unprocessed input data from a specific range.
     /// Used for zero-copy extraction of content that contains no escape sequences.
     ///

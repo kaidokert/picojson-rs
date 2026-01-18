@@ -44,14 +44,9 @@ impl<'a, 'b> SliceContentBuilder<'a, 'b> {
 }
 
 impl ContentExtractor for SliceContentBuilder<'_, '_> {
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        match self.buffer_mut().consume_byte() {
-            Ok(byte) => Ok(Some(byte)),
-            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+    fn get_next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        DataSource::next_byte(self)
     }
-
     fn parser_state_mut(&mut self) -> &mut State {
         &mut self.parser_state
     }
@@ -179,6 +174,14 @@ impl ContentExtractor for SliceContentBuilder<'_, '_> {
 /// This implementation provides access to both borrowed content from the original
 /// input slice and unescaped content from the CopyOnEscape scratch buffer.
 impl<'a, 'b> DataSource<'a, 'b> for SliceContentBuilder<'a, 'b> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        match self.buffer_mut().consume_byte() {
+            Ok(byte) => Ok(Some(byte)),
+            Err(crate::slice_input_buffer::Error::ReachedEnd) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     fn get_borrowed_slice(&'a self, start: usize, end: usize) -> Result<&'a [u8], ParseError> {
         self.buffer.slice(start, end).map_err(Into::into)
     }
