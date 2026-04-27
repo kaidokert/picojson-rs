@@ -37,6 +37,47 @@ pub enum ParseError {
     NumericOverflow,
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for ParseError {
+    fn format(&self, fmt: defmt::Formatter) {
+        match self {
+            ParseError::TokenizerError(err) => {
+                defmt::write!(fmt, "ParseError::TokenizerError({:?})", err)
+            }
+            ParseError::ScratchBufferFull => defmt::write!(fmt, "ParseError::ScratchBufferFull"),
+            ParseError::InvalidUtf8(err) => match err.error_len() {
+                Some(len) => defmt::write!(
+                    fmt,
+                    "ParseError::InvalidUtf8(valid_up_to={=usize}, error_len={=usize})",
+                    err.valid_up_to(),
+                    len
+                ),
+                None => defmt::write!(
+                    fmt,
+                    "ParseError::InvalidUtf8(valid_up_to={=usize}, incomplete)",
+                    err.valid_up_to()
+                ),
+            },
+            ParseError::InputBufferFull => defmt::write!(fmt, "ParseError::InputBufferFull"),
+            ParseError::InvalidNumber => defmt::write!(fmt, "ParseError::InvalidNumber"),
+            ParseError::Unexpected(state) => {
+                defmt::write!(fmt, "ParseError::Unexpected({:?})", state)
+            }
+            ParseError::EndOfData => defmt::write!(fmt, "ParseError::EndOfData"),
+            ParseError::InvalidUnicodeHex => defmt::write!(fmt, "ParseError::InvalidUnicodeHex"),
+            ParseError::InvalidUnicodeCodepoint => {
+                defmt::write!(fmt, "ParseError::InvalidUnicodeCodepoint")
+            }
+            ParseError::InvalidEscapeSequence => {
+                defmt::write!(fmt, "ParseError::InvalidEscapeSequence")
+            }
+            ParseError::FloatNotAllowed => defmt::write!(fmt, "ParseError::FloatNotAllowed"),
+            ParseError::ReaderError => defmt::write!(fmt, "ParseError::ReaderError"),
+            ParseError::NumericOverflow => defmt::write!(fmt, "ParseError::NumericOverflow"),
+        }
+    }
+}
+
 impl From<slice_input_buffer::Error> for ParseError {
     fn from(err: slice_input_buffer::Error) -> Self {
         match err {

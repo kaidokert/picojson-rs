@@ -5,6 +5,7 @@ use super::DepthCounter;
 
 /// Represents a position in the JSON input with byte offset, line, and column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Position {
     /// Byte offset from the start of input
     pub pos: usize,
@@ -223,6 +224,19 @@ pub struct Error {
     _avr_padding: u16,
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for Error {
+    fn format(&self, fmt: defmt::Formatter) {
+        defmt::write!(
+            fmt,
+            "TokenizerError(kind={:?}, character={=u8}, position={:?})",
+            self.kind,
+            self.character,
+            self.position
+        );
+    }
+}
+
 // Custom PartialEq implementation that only compares kind, character, and byte position
 // This allows existing tests to pass while still providing line/column info in error messages
 impl PartialEq for Error {
@@ -235,6 +249,7 @@ impl PartialEq for Error {
 
 /// Kinds of errors that can occur during tokenization.
 #[derive(PartialEq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ErrKind {
     EmptyStream,
     UnfinishedStream,

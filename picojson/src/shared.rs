@@ -6,6 +6,7 @@ use crate::{ujson, JsonNumber, String};
 
 /// Events produced by JSON parsers
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Event<'a, 'b> {
     /// The start of an object (e.g., `{`).
     StartObject,
@@ -31,6 +32,7 @@ pub enum Event<'a, 'b> {
 
 /// Specific unexpected states that can occur during parsing.
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum UnexpectedState {
     /// A generic state mismatch occurred.
     StateMismatch,

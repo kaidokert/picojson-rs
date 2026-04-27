@@ -156,6 +156,7 @@ where
 
 /// An error that can occur during push-based parsing.
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum PushParseError<E> {
     /// An error occurred within the parser itself.
     Parse(ParseError),
