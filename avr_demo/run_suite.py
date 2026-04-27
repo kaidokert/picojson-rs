@@ -31,9 +31,11 @@ DEPTHS = get_depths_from_build_rs()
 CONFIGS = [
     ("serde", "test_serde", ["ufmt","int8"]),
     ("slice-tiny", "test_picojson", ["pico-tiny","ufmt", "int8"]),
+    ("slice-tiny-defmt", "test_picojson", ["pico-tiny","ufmt", "int8", "defmt"]),
     ("slice-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
     ("slice-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
     ("stream-tiny", "test_streamparser", ["pico-tiny","ufmt", "int8"]),
+    ("stream-tiny-defmt", "test_streamparser", ["pico-tiny","ufmt", "int8", "defmt"]),
     ("stream-small", "test_streamparser", ["pico-small","ufmt", "int8"]),
     ("stream-huge", "test_streamparser", ["pico-huge","ufmt", "int8"]),
 ]

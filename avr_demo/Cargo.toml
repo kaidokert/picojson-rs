@@ -45,6 +45,7 @@ default = ["depth-7", "pico-tiny", "ufmt", "int8"]
 
 int8 = [ "picojson/int8"]
 int32 = [ "picojson/int32"]
+defmt = ["picojson/defmt"]
 
 depth-7 = []
 depth-9 = []
