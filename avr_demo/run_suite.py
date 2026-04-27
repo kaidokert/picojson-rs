@@ -5,6 +5,11 @@ import json
 import sys
 import os
 
+DEFMT_SMOKE_CONFIGS = [
+    ("slice-tiny", "test_picojson", ["depth-7", "pico-tiny", "ufmt", "int8"]),
+    ("stream-tiny", "test_streamparser", ["depth-7", "pico-tiny", "ufmt", "int8"]),
+]
+
 def get_depths_from_build_rs():
     """Parses build.rs to extract the DEPTHS constant."""
     try:
@@ -31,9 +36,11 @@ DEPTHS = get_depths_from_build_rs()
 CONFIGS = [
     ("serde", "test_serde", ["ufmt","int8"]),
     ("slice-tiny", "test_picojson", ["pico-tiny","ufmt", "int8"]),
+    ("slice-tiny-defmt", "test_picojson", ["pico-tiny","ufmt", "int8", "defmt"]),
     ("slice-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
     ("slice-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
     ("stream-tiny", "test_streamparser", ["pico-tiny","ufmt", "int8"]),
+    ("stream-tiny-defmt", "test_streamparser", ["pico-tiny","ufmt", "int8", "defmt"]),
     ("stream-small", "test_streamparser", ["pico-small","ufmt", "int8"]),
     ("stream-huge", "test_streamparser", ["pico-huge","ufmt", "int8"]),
 ]
@@ -142,6 +149,235 @@ def run_bloat_analysis():
 
     return results
 
+def _cargo_build_example(example_name, profile, no_default_features, features, verbose=False):
+    """Build an AVR example and return the canonical ELF path."""
+    cmd = ["cargo", "build"]
+    if profile == "release":
+        cmd.append("--release")
+    elif profile != "dev":
+        cmd.extend(["--profile", profile])
+
+    if no_default_features:
+        cmd.append("--no-default-features")
+    if features:
+        cmd.extend(["--features", features])
+    cmd.extend(["--example", example_name])
+
+    if verbose:
+        print(f"Running: {' '.join(cmd)}")
+
+    subprocess.run(cmd, check=True, text=True, timeout=180)
+    target_profile = "release" if profile == "release" else profile
+    return f"target/avr-none/{target_profile}/examples/{example_name}.elf"
+
+def _read_elf_sizes(elf_path):
+    """Read AVR ELF section sizes using avr-size."""
+    result = subprocess.run(
+        ["avr-size", elf_path],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) < 2:
+        raise ValueError(f"Unexpected avr-size output for {elf_path!r}: {result.stdout!r}")
+
+    cols = lines[-1].split()
+    if len(cols) < 5:
+        raise ValueError(f"Unexpected avr-size columns for {elf_path!r}: {lines[-1]!r}")
+
+    text_size = int(cols[0])
+    data_size = int(cols[1])
+    bss_size = int(cols[2])
+    dec_size = int(cols[3])
+
+    return {
+        "text": text_size,
+        "data": data_size,
+        "bss": bss_size,
+        "dec": dec_size,
+        "program": text_size + data_size,
+    }
+
+def _run_example_smoke(example_name, elf_path, verbose=False):
+    """Run the AVR simulator smoke test for a specific built ELF."""
+    cmd = [
+        sys.executable,
+        "simavr_wrapper.py",
+        "-t",
+        "3",
+        "-m",
+        "atmega2560",
+        "-f",
+        "16000000",
+        elf_path,
+    ]
+
+    if verbose:
+        print(f"Running: {' '.join(cmd)}")
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    if result.returncode != 0:
+        print(f"❌ Smoke run failed for '{example_name}':\n{result.stdout}\n{result.stderr}")
+        return False
+
+    output = result.stdout + result.stderr
+    if "=== TEST COMPLETE ===" not in output:
+        print(f"❌ Smoke run for '{example_name}' did not finish cleanly.")
+        if verbose:
+            print(output)
+        return False
+
+    if "JSON parsing failed!" in output:
+        print(f"❌ Smoke run for '{example_name}' reported parse failure.")
+        if verbose:
+            print(output)
+        return False
+
+    return True
+
+def run_defmt_smoke(specific_examples=None, verbose=False):
+    """Check that enabling picojson/defmt does not change AVR binary size or add panic refs."""
+    selected = []
+    for label, example, features in DEFMT_SMOKE_CONFIGS:
+        if specific_examples and example not in specific_examples:
+            continue
+        selected.append((label, example, features))
+
+    if not selected:
+        print("No matching defmt smoke-test examples selected.", file=sys.stderr)
+        return {}
+
+    results = {}
+    print("\n=== defmt Smoke Check ===")
+
+    for label, example, base_features in selected:
+        base_feature_str = ",".join(base_features)
+        defmt_feature_str = ",".join(base_features + ["defmt"])
+        print(f"Checking {label} ({example})...")
+
+        try:
+            baseline_elf = _cargo_build_example(
+                example,
+                "release",
+                no_default_features=True,
+                features=base_feature_str,
+                verbose=verbose,
+            )
+            baseline_sizes = _read_elf_sizes(baseline_elf)
+
+            defmt_elf = _cargo_build_example(
+                example,
+                "release",
+                no_default_features=True,
+                features=defmt_feature_str,
+                verbose=verbose,
+            )
+            defmt_sizes = _read_elf_sizes(defmt_elf)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as e:
+            results[example] = {
+                "status": "❌ BUILD FAIL",
+                "details": str(e),
+            }
+            print(f"  ❌ Build/size check failed: {e}")
+            print()
+            continue
+
+        size_delta = defmt_sizes["program"] - baseline_sizes["program"]
+        size_ok = size_delta == 0
+
+        baseline_panic_output = _collect_objdump_output(
+            example,
+            "dev",
+            verbose,
+            True,
+            base_feature_str,
+        )
+        defmt_panic_output = _collect_objdump_output(
+            example,
+            "dev",
+            verbose,
+            True,
+            defmt_feature_str,
+        )
+        if baseline_panic_output is None or defmt_panic_output is None:
+            panic_ok = False
+            new_panic_symbols = ["objdump failed"]
+        else:
+            baseline_panic_symbols = set(_collect_panic_symbols(baseline_panic_output, verbose))
+            defmt_panic_symbols = set(_collect_panic_symbols(defmt_panic_output, verbose))
+            new_panic_symbols = sorted(defmt_panic_symbols - baseline_panic_symbols)
+            panic_ok = not new_panic_symbols
+
+        smoke_ok = _run_example_smoke(example, defmt_elf, verbose=verbose)
+
+        status = "✅ PASS" if (size_ok and panic_ok and smoke_ok) else "❌ FAIL"
+        results[example] = {
+            "status": status,
+            "baseline_program": baseline_sizes["program"],
+            "defmt_program": defmt_sizes["program"],
+            "delta_program": size_delta,
+            "panic_ok": panic_ok,
+            "smoke_ok": smoke_ok,
+            "new_panic_symbols": new_panic_symbols,
+        }
+
+        if size_ok:
+            print(f"  ✅ Size unchanged: {baseline_sizes['program']} bytes")
+        else:
+            print(
+                f"  ❌ Size changed: baseline={baseline_sizes['program']} bytes, "
+                f"defmt={defmt_sizes['program']} bytes, delta={size_delta:+d}"
+            )
+
+        if panic_ok:
+            print("  ✅ No new panic symbols relative to baseline")
+        else:
+            print("  ❌ New panic symbols relative to baseline:")
+            for symbol in new_panic_symbols:
+                print(f"     {symbol}")
+        print(f"  {'✅' if smoke_ok else '❌'} Simulator smoke")
+        print()
+
+    return results
+
+def print_defmt_report(results):
+    """Print a summary of defmt smoke-check results."""
+    header = "| Example | Status | Program Bytes | defmt Bytes | Delta | Panic | Smoke |"
+    separator = "|---|---|---|---|---|---|---|"
+    print("\n--- defmt Smoke Summary ---")
+    print(header)
+    print(separator)
+
+    overall_ok = True
+    for example, result in results.items():
+        if "baseline_program" not in result:
+            overall_ok = False
+            print(f"| {example} | {result['status']} | N/A | N/A | N/A | N/A | N/A |")
+            continue
+
+        panic_cell = "PASS" if result["panic_ok"] else "FAIL"
+        smoke_cell = "PASS" if result["smoke_ok"] else "FAIL"
+        print(
+            f"| {example} | {result['status']} | {result['baseline_program']} | "
+            f"{result['defmt_program']} | {result['delta_program']:+d} | "
+            f"{panic_cell} | {smoke_cell} |"
+        )
+        overall_ok = overall_ok and result["status"] == "✅ PASS"
+
+    if overall_ok:
+        print("\n✅ OVERALL: defmt smoke checks passed")
+    else:
+        print("\n❌ OVERALL: defmt smoke checks failed")
+
+    return overall_ok
+
 def print_bloat_report(results):
     """Prints a markdown table of the bloat analysis results."""
     header = "| Configuration | Binary Size |"
@@ -246,6 +482,53 @@ def _analyze_panic_patterns(content, verbose):
                 break
     return found_panics
 
+def _normalize_symbol_name(symbol_name):
+    """Normalize Rust symbol hashes so baseline/feature builds compare stably."""
+    return re.sub(r"::h[0-9a-f]+", "::h<HASH>", symbol_name)
+
+def _collect_panic_symbols(content, verbose):
+    """Collect actual linked panic-related symbols from objdump output."""
+    panic_patterns = [
+        r'panic_fmt',
+        r'panic_const',
+        r'panic_nounwind',
+        r'panic_impl',
+        r'assert_failed',
+        r'unwrap_failed',
+        r'expect_failed',
+        r'slice_end_index_len_fail',
+        r'slice_start_index_len_fail',
+        r'slice_index_len_fail',
+        r'panic_for_nonpositive_argument',
+        r'panic_bounds_check',
+        r'core::panicking::',
+    ]
+    found = set()
+    for line_num, line in enumerate(content.split('\n'), 1):
+        match = re.match(r'^[0-9a-fA-F]+ <(.+)>:$', line.strip())
+        if not match:
+            continue
+        symbol_name = match.group(1)
+        for pattern in panic_patterns:
+            if re.search(pattern, symbol_name, re.IGNORECASE):
+                normalized = _normalize_symbol_name(symbol_name)
+                found.add(normalized)
+                if verbose:
+                    print(f"Found panic symbol at line {line_num}: {normalized}")
+                break
+    return sorted(found)
+
+def _collect_objdump_output(example_name, profile, verbose, no_default_features, features):
+    """Return filtered objdump output for later analysis, or None on failure."""
+    result = _run_objdump(example_name, profile, verbose, no_default_features, features)
+    if result.returncode != 0:
+        print(f"❌ Error running objdump: {result.stderr}", file=sys.stderr)
+        return None
+
+    filtered_output = _filter_objdump_output(result.stdout)
+    _save_assembly_output(example_name, profile, filtered_output)
+    return filtered_output
+
 def _report_panic_results(example_name, asm_file, found_panics):
     """Prints the results and returns the final boolean."""
     if found_panics:
@@ -267,13 +550,17 @@ def run_panic_checker(example_name, profile="dev", verbose=False, no_default_fea
     """Run panic checker on a specific example."""
     print(f"🔍 Checking example '{example_name}' for panic references...")
     try:
-        result = _run_objdump(example_name, profile, verbose, no_default_features, features)
-        if result.returncode != 0:
-            print(f"❌ Error running objdump: {result.stderr}", file=sys.stderr)
+        filtered_output = _collect_objdump_output(
+            example_name,
+            profile,
+            verbose,
+            no_default_features,
+            features,
+        )
+        if filtered_output is None:
             return False
 
-        filtered_output = _filter_objdump_output(result.stdout)
-        asm_file = _save_assembly_output(example_name, profile, filtered_output)
+        asm_file = f"target/avr-none/{profile}/examples/{example_name}.asm"
         found_panics = _analyze_panic_patterns(filtered_output, verbose)
         return _report_panic_results(example_name, asm_file, found_panics)
 
@@ -360,8 +647,8 @@ def main():
         "tool",
         nargs='?',
         default="stack",
-        choices=["stack", "bloat", "panic"],
-        help="The analysis tool to run: 'stack' for stack size analysis, 'bloat' for binary size analysis, 'panic' for panic reference checking."
+        choices=["stack", "bloat", "panic", "defmt"],
+        help="The analysis tool to run: 'stack' for stack size analysis, 'bloat' for binary size analysis, 'panic' for panic reference checking, 'defmt' for AVR smoke checks with picojson/defmt enabled."
     )
     parser.add_argument(
         "--quick",
@@ -431,6 +718,12 @@ def main():
             # Show available examples and usage
             _print_panic_usage()
             sys.exit(0)
+
+    elif args.tool == "defmt":
+        specific_examples = [args.example] if args.example else None
+        results = run_defmt_smoke(specific_examples=specific_examples, verbose=args.verbose)
+        success = print_defmt_report(results)
+        sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()

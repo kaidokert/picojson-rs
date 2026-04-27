@@ -68,7 +68,7 @@ jobs:
         run: python run_suite.py bloat
 
   avr_panic_check:
-    name: AVR Panic Prevention (${{ matrix.int_type }}, ${{ matrix.pico_size }}, ${{ matrix.profile }})
+    name: AVR Panic Prevention (${{ matrix.int_type }}, ${{ matrix.pico_size }}, ${{ matrix.profile }}, defmt=${{ matrix.defmt }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -77,6 +77,7 @@ jobs:
         int_type: [int8, int32]
         profile: [release, dev]
         pico_size: [pico-tiny, pico-huge]
+        defmt: [false, true]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -117,14 +118,24 @@ jobs:
             cargo install cargo-binutils --locked
           fi
 
+      - name: Compose feature set
+        id: feature_set
+        shell: bash
+        run: |
+          FEATURES="${{ matrix.int_type }},${{ matrix.pico_size }}"
+          if [ "${{ matrix.defmt }}" = "true" ]; then
+            FEATURES="${FEATURES},defmt"
+          fi
+          echo "features=${FEATURES}" >> "$GITHUB_OUTPUT"
+
       - name: Build the demos in ${{ matrix.profile }} mode
         working-directory: avr_demo
-        run: cargo build --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}"
+        run: cargo build --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ steps.feature_set.outputs.features }}"
 
       - name: Check for panics ( minimal )
         working-directory: avr_demo
-        run: cargo nm    --example minimal               --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}" | ( ! egrep "panic|unwind" )
+        run: cargo nm    --example minimal               --profile ${{ matrix.profile }} --no-default-features --features "${{ steps.feature_set.outputs.features }}" | ( ! egrep "panic|unwind" )
 
       - name: Check for panics
         working-directory: avr_demo
-        run: cargo nm    --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ matrix.int_type }},${{ matrix.pico_size }}" | ( ! egrep "panic|unwind" )
+        run: cargo nm    --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ steps.feature_set.outputs.features }}" | ( ! egrep "panic|unwind" )
