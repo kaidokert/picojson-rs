@@ -26,6 +26,7 @@ type ConfiguredInt = i64;
 /// variants like `FloatDisabled`, `FloatSkipped` and `FloatTruncated` are
 /// conditionally available.
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum NumberResult {
     /// Integer that fits in the configured integer type
     Integer(ConfiguredInt),
@@ -48,6 +49,7 @@ pub enum NumberResult {
 ///
 /// Lifetimes: 'a is the input slice lifetime, 'b is the scratch/copy buffer lifetime
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum JsonNumber<'a, 'b> {
     /// A raw slice from the original input, used when no copying is needed.
     Borrowed {

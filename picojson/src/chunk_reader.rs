@@ -76,6 +76,7 @@ use crate::Reader;
 /// // Parser will receive data in small chunks, testing streaming logic
 /// ```
 #[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ChunkReader<'a> {
     data: &'a [u8],
     pos: usize,

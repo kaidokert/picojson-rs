@@ -64,6 +64,10 @@ jobs:
             features: --no-default-features --features "int64,float-error"
           - name: int64 + float-truncate
             features: --no-default-features --features "int64,float-truncate"
+
+          # defmt feature
+          - name: defmt
+            features: --features defmt
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
