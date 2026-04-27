@@ -88,6 +88,8 @@ See the [API docs](https://docs.rs/picojson/) and [examples](https://github.com/
 
 The parser's behavior can be customized with feature flags. For example, integer width can be set to `int32` or `int64`, and float handling can be configured to error, truncate, or ignore. For a detailed guide, please see the crate reference documentation.
 
+[defmt](https://crates.io/crates/defmt) is supported as an optional feature.
+
 ## Stability
 
 This library is experimental, though the parsers pass conformance tests.
