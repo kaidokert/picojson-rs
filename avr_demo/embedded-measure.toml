@@ -1,10 +1,6 @@
 [profiles.simavr-atmega2560]
-runner = "simavr"
-target = "avr-none"
-cargo-profile = "release"
-args = ["-m", "atmega2560", "-f", "16000000"]
+preset = "simavr-atmega2560"
 timeout-seconds = 5
-artifact-extension = "elf"
 
 [campaigns.picojson-avr-stack]
 profile = "simavr-atmega2560"
