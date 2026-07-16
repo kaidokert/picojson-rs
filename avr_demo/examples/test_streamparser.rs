@@ -4,7 +4,10 @@
 
 use avr_demo as _;
 use avr_demo::stack_measurement::*;
-use embedded_measure::report::{Field, StackRecord, write_stack_ufmt};
+use embedded_measure::avr::timer_measurement;
+use embedded_measure::report::{
+    Field, MeasurementRecord, StackRecord, write_measurement_ufmt, write_stack_ufmt,
+};
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]
@@ -139,17 +142,19 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
 
 #[arduino_hal::entry]
 fn main() -> ! {
+    let dp = arduino_hal::Peripherals::take().unwrap();
     #[cfg(feature = "ufmt")]
     let mut serial = {
-        let dp = arduino_hal::Peripherals::take().unwrap();
         let pins = arduino_hal::pins!(dp);
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
     let stack_probe = fill_stack_with_watermark();
 
+    let counter = avr_demo::cyclecount::CycleCounter::start(&dp.TC1);
     let mut scratch = [0u8; 16];
     let result = parse_json(JSON_DATA, &mut scratch);
+    let ticks = counter.elapsed_ticks(&dp.TC1);
 
     let stack = measure_stack(&stack_probe);
     write_stack_ufmt(
@@ -157,6 +162,15 @@ fn main() -> ! {
         &StackRecord {
             benchmark: "picojson-stream-parser",
             measurement: stack,
+            fields: &[Field::token("target", "atmega2560")],
+        },
+    )
+    .unwrap();
+    write_measurement_ufmt(
+        &mut serial,
+        &MeasurementRecord {
+            benchmark: "picojson-stream-parser",
+            measurement: timer_measurement(ticks, 15_625, false),
             fields: &[Field::token("target", "atmega2560")],
         },
     )
