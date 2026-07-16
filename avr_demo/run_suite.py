@@ -5,100 +5,6 @@ import json
 import sys
 import os
 
-def get_depths_from_build_rs():
-    """Parses build.rs to extract the DEPTHS constant."""
-    try:
-        with open("build.rs", "r") as f:
-            content = f.read()
-            match = re.search(r"const DEPTHS: &\[usize\] = &\[(.*?)\];", content, re.DOTALL)
-            if match:
-                depths_str = match.group(1).replace('\n', '').replace(',', ' ').split()
-                return [int(d) for d in depths_str]
-            else:
-                # No match found - return empty list for consistency
-                return []
-    except (IOError, ValueError) as e:
-        print(f"Could not read or parse DEPTHS from build.rs: {e}", file=sys.stderr)
-        return []  # Return a default or empty list
-
-# --- Test Configuration ---
-
-# The different nesting depths to test, matching the Cargo features.
-DEPTHS = get_depths_from_build_rs()
-
-# The test configurations to run.
-# (Test Name, Cargo Example Name, Extra Features)
-CONFIGS = [
-    ("serde", "test_serde", ["ufmt","int8"]),
-    ("slice-tiny", "test_picojson", ["pico-tiny","ufmt", "int8"]),
-    ("slice-tiny-defmt", "test_picojson", ["pico-tiny","ufmt", "int8", "defmt"]),
-    ("slice-small", "test_picojson", ["pico-small","ufmt" , "int8"]),
-    ("slice-huge", "test_picojson", ["pico-huge","ufmt", "int8"]),
-    ("stream-tiny", "test_streamparser", ["pico-tiny","ufmt", "int8"]),
-    ("stream-tiny-defmt", "test_streamparser", ["pico-tiny","ufmt", "int8", "defmt"]),
-    ("stream-small", "test_streamparser", ["pico-small","ufmt", "int8"]),
-    ("stream-huge", "test_streamparser", ["pico-huge","ufmt", "int8"]),
-]
-
-def run_stack_analysis():
-    """Runs the stack size analysis for different depths and configurations."""
-    results = {}
-    for depth in DEPTHS:
-        depth_results = {}
-        for name, example, extra_features in CONFIGS:
-            print(f"Running {name} at depth {depth}...")
-
-            # Construct the cargo command
-            features = [f"depth-{depth}"] + extra_features
-            command = ["cargo", "run", "--release", "--no-default-features"]
-            if features:
-                command.append("--features")
-                command.append(",".join(features))
-            command.extend(["--example", example])
-
-            # Execute the command
-            try:
-                print(f"Running command: {' '.join(command)}")
-                output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True)
-
-                # Parse the output
-                if "JSON parsing failed!" in output:
-                    result_str = "Clean Fail"
-                elif "=== TEST COMPLETE ===" in output:
-                    match = re.search(r"Max stack usage: (\d+) bytes", output)
-                    if match:
-                        result_str = f"{match.group(1)} bytes"
-                    else:
-                        result_str = "Success (No Stack)"
-                else:
-                    result_str = "Stack Overflow"
-
-            except UnicodeDecodeError:
-                # Handle case where output contains binary garbage (stack overflow)
-                result_str = "Stack Overflow (Binary Output)"
-            except subprocess.CalledProcessError as e:
-                result_str = f"Build Failed: {e.output}"
-
-            print(f"  Result: {result_str}")
-            depth_results[name] = result_str
-
-        results[depth] = depth_results
-    return results
-
-def print_stack_report(results):
-    """Prints a markdown table of the stack analysis results."""
-    header = "| Nesting Depth | " + " | ".join([c[0] for c in CONFIGS]) + "|"
-    separator = "|---" * (len(CONFIGS) + 1) + "|"
-    print("\n\n--- Stack Analysis Results ---")
-    print(header)
-    print(separator)
-
-    for depth in sorted(results.keys()):
-        row = f"| {depth} levels |"
-        for name, _, _ in CONFIGS:
-            row += f" {results[depth].get(name, 'N/A')} |"
-        print(row)
-
 def run_bloat_analysis():
     """Runs cargo-bloat and reports on binary size."""
     print("Running binary size analysis with cargo-bloat...")
@@ -361,14 +267,9 @@ def main():
     parser.add_argument(
         "tool",
         nargs='?',
-        default="stack",
-        choices=["stack", "bloat", "panic"],
-        help="The analysis tool to run: 'stack' for stack size analysis, 'bloat' for binary size analysis, 'panic' for panic reference checking."
-    )
-    parser.add_argument(
-        "--quick",
-        action="store_true",
-        help="Quick mode: only test the first depth (7) for faster iteration"
+        default="bloat",
+        choices=["bloat", "panic"],
+        help="Run the remaining binary-size or panic-reference analysis. Stack campaigns use cargo embedded-measure."
     )
     parser.add_argument(
         "--example",
@@ -395,22 +296,7 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.tool == "stack":
-        # Use only first depth if quick mode is enabled
-        global DEPTHS
-        if args.quick:
-            original_depths = DEPTHS
-            DEPTHS = [DEPTHS[0]] if DEPTHS else [7]  # Use first depth or fallback to 7
-            print(f"Quick mode: Testing only depth {DEPTHS[0]}")
-
-        results = run_stack_analysis()
-        print_stack_report(results)
-
-        # Restore original depths
-        if args.quick:
-            DEPTHS = original_depths
-
-    elif args.tool == "bloat":
+    if args.tool == "bloat":
         results = run_bloat_analysis()
         print_bloat_report(results)
 

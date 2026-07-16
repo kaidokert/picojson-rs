@@ -1,0 +1,69 @@
+[profiles.simavr-atmega2560]
+runner = "simavr"
+target = "avr-none"
+cargo-profile = "release"
+args = ["-m", "atmega2560", "-f", "16000000"]
+timeout-seconds = 5
+artifact-extension = "elf"
+
+[campaigns.picojson-avr-stack]
+profile = "simavr-atmega2560"
+continue-on-failure = true
+matrix-features = ["depth-{depth}"]
+
+[campaigns.picojson-avr-stack.matrix]
+depth = ["7", "9", "30", "33", "62", "65", "126", "129", "254", "257", "510", "513", "1022", "1025"]
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "serde"
+example = "test_serde"
+features = ["ufmt", "int8"]
+expected-benchmark = "serde-json-core"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "slice-tiny"
+example = "test_picojson"
+features = ["pico-tiny", "ufmt", "int8"]
+expected-benchmark = "picojson-slice-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "slice-tiny-defmt"
+example = "test_picojson"
+features = ["pico-tiny", "ufmt", "int8", "defmt"]
+expected-benchmark = "picojson-slice-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "slice-small"
+example = "test_picojson"
+features = ["pico-small", "ufmt", "int8"]
+expected-benchmark = "picojson-slice-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "slice-huge"
+example = "test_picojson"
+features = ["pico-huge", "ufmt", "int8"]
+expected-benchmark = "picojson-slice-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "stream-tiny"
+example = "test_streamparser"
+features = ["pico-tiny", "ufmt", "int8"]
+expected-benchmark = "picojson-stream-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "stream-tiny-defmt"
+example = "test_streamparser"
+features = ["pico-tiny", "ufmt", "int8", "defmt"]
+expected-benchmark = "picojson-stream-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "stream-small"
+example = "test_streamparser"
+features = ["pico-small", "ufmt", "int8"]
+expected-benchmark = "picojson-stream-parser"
+
+[[campaigns.picojson-avr-stack.cases]]
+name = "stream-huge"
+example = "test_streamparser"
+features = ["pico-huge", "ufmt", "int8"]
+expected-benchmark = "picojson-stream-parser"

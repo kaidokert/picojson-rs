@@ -6,7 +6,8 @@ use avr_demo as _;
 use avr_demo::stack_measurement::*;
 use embedded_measure::avr::timer_measurement;
 use embedded_measure::report::{
-    Field, MeasurementRecord, StackRecord, write_measurement_ufmt, write_stack_ufmt,
+    Field, MeasurementRecord, OutcomeRecord, StackRecord, write_measurement_ufmt,
+    write_outcome_ufmt, write_stack_ufmt,
 };
 use serde::Deserialize;
 
@@ -45,6 +46,7 @@ fn main() -> ! {
     let counter = avr_demo::cyclecount::CycleCounter::start(&dp.TC1);
     let mut scratch = [0u8; 1]; // Use a 1-byte scratch buffer.
     let result: Result<(Doc, _), _> = serde_json_core::from_slice_escaped(JSON_DATA, &mut scratch);
+    let passed = result.is_ok();
     let ticks = counter.elapsed_ticks(&dp.TC1);
 
     let stack = measure_stack(&stack_probe);
@@ -53,6 +55,15 @@ fn main() -> ! {
         &StackRecord {
             benchmark: "serde-json-core",
             measurement: stack,
+            fields: &[Field::token("target", "atmega2560")],
+        },
+    )
+    .unwrap();
+    write_outcome_ufmt(
+        &mut serial,
+        &OutcomeRecord {
+            benchmark: "serde-json-core",
+            passed,
             fields: &[Field::token("target", "atmega2560")],
         },
     )
@@ -85,7 +96,8 @@ fn main() -> ! {
     .ok();
     uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
 
-    // Exit the simulator
-    unsafe { core::arch::asm!("sleep") };
-    loop {}
+    avr_device::interrupt::disable();
+    loop {
+        unsafe { core::arch::asm!("sleep") }
+    }
 }
