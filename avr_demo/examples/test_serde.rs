@@ -36,12 +36,12 @@ fn main() -> ! {
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
-    unsafe { fill_stack_with_watermark() };
+    let stack_probe = fill_stack_with_watermark();
 
     let mut scratch = [0u8; 1]; // Use a 1-byte scratch buffer.
     let result: Result<(Doc, _), _> = serde_json_core::from_slice_escaped(JSON_DATA, &mut scratch);
 
-    let stack_used = unsafe { measure_stack_usage() };
+    let stack_used = measure_stack_usage(&stack_probe);
 
     match result {
         Ok((doc, _)) => {

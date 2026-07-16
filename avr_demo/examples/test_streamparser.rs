@@ -27,7 +27,7 @@ type PicoConfig = picojson::DefaultConfig; // 32 levels
 type PicoConfig = ArrayBitStack<64, u8, u16>; // 512 levels
 #[cfg(feature = "pico-huge")]
 type PicoConfig = ArrayBitStack<256, u8, u16>; // 2048 levels
-                                               // Default config for builds without a feature.
+// Default config for builds without a feature.
 #[cfg(not(any(feature = "pico-small", feature = "pico-huge", feature = "pico-tiny")))]
 type PicoConfig = picojson::DefaultConfig;
 
@@ -145,12 +145,12 @@ fn main() -> ! {
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
-    unsafe { fill_stack_with_watermark() };
+    let stack_probe = fill_stack_with_watermark();
 
     let mut scratch = [0u8; 16];
     let result = parse_json(JSON_DATA, &mut scratch);
 
-    let stack_used = unsafe { measure_stack_usage() };
+    let stack_used = measure_stack_usage(&stack_probe);
 
     match result {
         Ok(doc) => {
