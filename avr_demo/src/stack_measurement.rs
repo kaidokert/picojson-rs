@@ -1,4 +1,4 @@
-use embedded_measure::stack::{Avr, LinkerStack, StackConfig, StackProbe};
+use embedded_measure::stack::{Avr, LinkerStack, StackConfig, StackMeasurement, StackProbe};
 
 unsafe extern "C" {
     static mut _end: u8;
@@ -11,6 +11,6 @@ pub fn fill_stack_with_watermark() -> StackProbe {
     StackProbe::paint(&stack, StackConfig::new(64).sentinel(0xce)).unwrap()
 }
 
-pub fn measure_stack_usage(probe: &StackProbe) -> u16 {
-    probe.measure().high_water_bytes as u16
+pub fn measure_stack(probe: &StackProbe) -> StackMeasurement {
+    probe.measure()
 }

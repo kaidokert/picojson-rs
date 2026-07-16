@@ -4,6 +4,7 @@
 
 use avr_demo as _;
 use avr_demo::stack_measurement::*;
+use embedded_measure::report::{Field, StackRecord, write_stack_ufmt};
 use picojson::{self, Event, ParseError, PullParser, SliceParser};
 
 #[allow(unused_imports)]
@@ -113,7 +114,16 @@ fn main() -> ! {
     let mut scratch = [0u8; 16];
     let result = parse_json(JSON_DATA, &mut scratch);
 
-    let stack_used = measure_stack_usage(&stack_probe);
+    let stack = measure_stack(&stack_probe);
+    write_stack_ufmt(
+        &mut serial,
+        &StackRecord {
+            benchmark: "picojson-slice-parser",
+            measurement: stack,
+            fields: &[Field::token("target", "atmega2560")],
+        },
+    )
+    .unwrap();
 
     match result {
         Ok(doc) => {
@@ -125,7 +135,12 @@ fn main() -> ! {
             uwriteln!(&mut serial, "JSON parsing failed!").ok();
         }
     }
-    uwriteln!(&mut serial, "Max stack usage: {} bytes", stack_used).ok();
+    uwriteln!(
+        &mut serial,
+        "Max stack usage: {} bytes",
+        stack.high_water_bytes
+    )
+    .ok();
     uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
 
     // Exit the simulator

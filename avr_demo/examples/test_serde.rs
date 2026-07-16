@@ -4,6 +4,7 @@
 
 use avr_demo as _;
 use avr_demo::stack_measurement::*;
+use embedded_measure::report::{Field, StackRecord, write_stack_ufmt};
 use serde::Deserialize;
 
 // Conditional import of uwriteln! - stub out if ufmt feature is not enabled
@@ -41,7 +42,16 @@ fn main() -> ! {
     let mut scratch = [0u8; 1]; // Use a 1-byte scratch buffer.
     let result: Result<(Doc, _), _> = serde_json_core::from_slice_escaped(JSON_DATA, &mut scratch);
 
-    let stack_used = measure_stack_usage(&stack_probe);
+    let stack = measure_stack(&stack_probe);
+    write_stack_ufmt(
+        &mut serial,
+        &StackRecord {
+            benchmark: "serde-json-core",
+            measurement: stack,
+            fields: &[Field::token("target", "atmega2560")],
+        },
+    )
+    .unwrap();
 
     match result {
         Ok((doc, _)) => {
@@ -53,7 +63,12 @@ fn main() -> ! {
             uwriteln!(&mut serial, "JSON parsing failed!").ok();
         }
     }
-    uwriteln!(&mut serial, "Max stack usage: {} bytes", stack_used).ok();
+    uwriteln!(
+        &mut serial,
+        "Max stack usage: {} bytes",
+        stack.high_water_bytes
+    )
+    .ok();
     uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
 
     // Exit the simulator
