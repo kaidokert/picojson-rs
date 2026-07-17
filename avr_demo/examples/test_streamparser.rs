@@ -160,6 +160,15 @@ fn main() -> ! {
             parse_json(JSON_DATA, &mut scratch).is_ok()
         })
         .unwrap();
+    Benchmark::<3>::new("picojson-stream-parser")
+        .fields(&[Field::token("target", "atmega2560")])
+        .report_metric(
+            &mut reporter,
+            "input-bytes",
+            JSON_DATA.len() as u64,
+            Some("bytes"),
+        )
+        .unwrap();
 
     let mut serial = reporter.into_inner();
     let stack = result.stack.unwrap();

@@ -23,7 +23,8 @@ panic-reference analyses; it no longer owns stack measurement.
 The serde, slice-parser, and stream-parser fixtures use the general
 `embedded_measure::Benchmark<3>` API. Each performs one warm-up and three
 recorded Timer1 trials, validates parser success, measures stack high-water
-through the same benchmark lifecycle, and reports through `UfmtReporter`.
+through the same benchmark lifecycle, reports the 2,200-byte input as an
+application metric, and writes everything through `UfmtReporter`.
 There is no fixture-specific sequencing of timer, stack, measurement, and
 outcome records; RTT, semihosting, `fmt` UART, and AVR `ufmt` all implement the
 same target-side reporter contract.

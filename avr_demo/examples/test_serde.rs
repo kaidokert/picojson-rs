@@ -53,6 +53,15 @@ fn main() -> ! {
             parsed.is_ok()
         })
         .unwrap();
+    Benchmark::<3>::new("serde-json-core")
+        .fields(&[Field::token("target", "atmega2560")])
+        .report_metric(
+            &mut reporter,
+            "input-bytes",
+            JSON_DATA.len() as u64,
+            Some("bytes"),
+        )
+        .unwrap();
 
     let mut serial = reporter.into_inner();
     let stack = result.stack.unwrap();
