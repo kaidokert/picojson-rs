@@ -4,11 +4,8 @@
 
 use avr_demo as _;
 use avr_demo::stack_measurement::*;
-use embedded_measure::avr::timer_measurement;
-use embedded_measure::report::{
-    Field, MeasurementRecord, OutcomeRecord, StackRecord, write_measurement_ufmt,
-    write_outcome_ufmt, write_stack_ufmt,
-};
+use embedded_measure::report::{Field, UfmtReporter};
+use embedded_measure::{Benchmark, CounterPlatform};
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]
@@ -70,6 +67,7 @@ fn copy_subslice(
     }
 }
 
+#[allow(dead_code)]
 struct Doc<'b> {
     id: u32,
     test_depth: u32,
@@ -145,58 +143,27 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
 fn main() -> ! {
     let dp = arduino_hal::Peripherals::take().unwrap();
     #[cfg(feature = "ufmt")]
-    let mut serial = {
+    let serial = {
         let pins = arduino_hal::pins!(dp);
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
-    let stack_probe = fill_stack_with_watermark();
-
+    let stack = stack();
     let counter = avr_demo::cyclecount::CycleCounter::start(&dp.TC1);
-    let mut scratch = [0u8; 16];
-    let result = parse_json(JSON_DATA, &mut scratch);
-    let passed = result.is_ok();
-    let ticks = counter.elapsed_ticks(&dp.TC1);
+    let mut platform = CounterPlatform::new(counter);
+    let mut reporter = UfmtReporter::new(serial);
+    let result = Benchmark::<3>::new("picojson-stream-parser")
+        .warmups(1)
+        .fields(&[Field::token("target", "atmega2560")])
+        .run_with_stack(&mut platform, &mut reporter, &stack, stack_config(), || {
+            let mut scratch = [0u8; 16];
+            parse_json(JSON_DATA, &mut scratch).is_ok()
+        })
+        .unwrap();
 
-    let stack = measure_stack(&stack_probe);
-    write_stack_ufmt(
-        &mut serial,
-        &StackRecord {
-            benchmark: "picojson-stream-parser",
-            measurement: stack,
-            fields: &[Field::token("target", "atmega2560")],
-        },
-    )
-    .unwrap();
-    write_outcome_ufmt(
-        &mut serial,
-        &OutcomeRecord {
-            benchmark: "picojson-stream-parser",
-            passed,
-            fields: &[Field::token("target", "atmega2560")],
-        },
-    )
-    .unwrap();
-    write_measurement_ufmt(
-        &mut serial,
-        &MeasurementRecord {
-            benchmark: "picojson-stream-parser",
-            measurement: timer_measurement(ticks, 15_625, false),
-            fields: &[Field::token("target", "atmega2560")],
-        },
-    )
-    .unwrap();
-
-    match result {
-        Ok(doc) => {
-            uwriteln!(&mut serial, "Parsed doc id: {}", doc.id).ok();
-            uwriteln!(&mut serial, "Parsed test_depth: {}", doc.test_depth).ok();
-            uwriteln!(&mut serial, "Parsed status: {}", doc.status).ok();
-        }
-        Err(_) => {
-            uwriteln!(&mut serial, "JSON parsing failed!").ok();
-        }
-    }
+    let mut serial = reporter.into_inner();
+    let stack = result.stack.unwrap();
+    uwriteln!(&mut serial, "JSON parsing passed: {}", result.passed).ok();
     uwriteln!(
         &mut serial,
         "Max stack usage: {} bytes",

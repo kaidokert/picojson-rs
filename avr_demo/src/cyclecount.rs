@@ -3,6 +3,7 @@
 use arduino_hal::pac::TC1;
 use avr_device::interrupt::Mutex;
 use core::cell::Cell;
+use embedded_measure::{Counter, Measurement, Unit};
 
 static TIMER1_WRAPS: Mutex<Cell<u32>> = Mutex::new(Cell::new(0));
 
@@ -24,23 +25,30 @@ fn read_total(tc1: &TC1) -> u64 {
     })
 }
 
-pub struct CycleCounter {
-    start_total: u64,
+pub struct CycleCounter<'a> {
+    tc1: &'a TC1,
 }
 
-impl CycleCounter {
-    pub fn start(tc1: &TC1) -> Self {
+impl<'a> CycleCounter<'a> {
+    pub fn start(tc1: &'a TC1) -> Self {
         avr_device::interrupt::free(|cs| TIMER1_WRAPS.borrow(cs).set(0));
         tc1.tccr1b.write(|w| w.cs1().prescale_1024());
         tc1.tifr1.write(|w| w.tov1().set_bit());
         tc1.timsk1.write(|w| w.toie1().set_bit());
         unsafe { avr_device::interrupt::enable() };
-        Self {
-            start_total: read_total(tc1),
-        }
+        Self { tc1 }
+    }
+}
+
+impl Counter for CycleCounter<'_> {
+    type Instant = u64;
+
+    fn now(&mut self) -> Self::Instant {
+        read_total(self.tc1)
     }
 
-    pub fn elapsed_ticks(&self, tc1: &TC1) -> u64 {
-        read_total(tc1).wrapping_sub(self.start_total)
+    fn elapsed(&mut self, start: Self::Instant) -> Measurement {
+        Measurement::new(read_total(self.tc1).wrapping_sub(start), Unit::TimerTicks)
+            .with_frequency(15_625)
     }
 }

@@ -1,4 +1,4 @@
-use embedded_measure::stack::{Avr, LinkerStack, StackConfig, StackMeasurement, StackProbe};
+use embedded_measure::stack::{Avr, LinkerStack, StackConfig};
 
 unsafe extern "C" {
     static mut _end: u8;
@@ -6,11 +6,10 @@ unsafe extern "C" {
 // This harness is built and simulated for ATmega2560 by .cargo/config.toml.
 const RAMEND_EXCLUSIVE: usize = 0x2200;
 
-pub fn fill_stack_with_watermark() -> StackProbe {
-    let stack = unsafe { LinkerStack::new(&raw mut _end, RAMEND_EXCLUSIVE as *mut u8, Avr) };
-    StackProbe::paint(&stack, StackConfig::new(64).sentinel(0xce)).unwrap()
+pub fn stack() -> LinkerStack<Avr> {
+    unsafe { LinkerStack::new(&raw mut _end, RAMEND_EXCLUSIVE as *mut u8, Avr) }
 }
 
-pub fn measure_stack(probe: &StackProbe) -> StackMeasurement {
-    probe.measure()
+pub const fn stack_config() -> StackConfig {
+    StackConfig::new(64).sentinel(0xce)
 }

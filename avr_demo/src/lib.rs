@@ -1,8 +1,8 @@
 #![no_std]
 #![feature(abi_avr_interrupt)]
 
-pub mod stack_measurement;
 pub mod cyclecount;
+pub mod stack_measurement;
 
 // Panic handler - registered automatically when crate is imported
 #[inline(never)]
