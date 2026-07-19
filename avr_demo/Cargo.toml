@@ -47,6 +47,7 @@ krabi-caliper = { path = "../../krabi-caliper" }
 
 [features]
 default = ["depth-7", "pico-tiny", "ufmt", "int8"]
+neg-controls = []
 
 int8 = [ "picojson/int8"]
 int32 = [ "picojson/int32"]
