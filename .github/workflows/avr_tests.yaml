@@ -59,9 +59,12 @@ jobs:
             cargo install cargo-binutils --locked
           fi
 
+      - name: Install krabi-caliper host tooling
+        run: cargo install krabi-caliper --features cli
+
       - name: Run Stack Analysis
         working-directory: avr_demo
-        run: python run_suite.py stack
+        run: cargo krabi-caliper run picojson-avr-stack
 
       - name: Run Bloat Analysis
         working-directory: avr_demo
@@ -122,7 +125,10 @@ jobs:
         id: feature_set
         shell: bash
         run: |
-          FEATURES="${{ matrix.int_type }},${{ matrix.pico_size }}"
+          # The measured examples use the UART-backed UfmtReporter as
+          # their transport, so `ufmt` is required even though this
+          # matrix deliberately disables the crate's default features.
+          FEATURES="${{ matrix.int_type }},${{ matrix.pico_size }},ufmt"
           if [ "${{ matrix.defmt }}" = "true" ]; then
             FEATURES="${FEATURES},defmt"
           fi
