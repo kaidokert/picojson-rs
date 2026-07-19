@@ -3,8 +3,8 @@
 #![no_main]
 
 use avr_demo as _;
-use avr_demo::stack_measurement::*;
 use krabi_caliper::report::{Field, UfmtReporter};
+use krabi_caliper::stack::StackConfig;
 use krabi_caliper::{Benchmark, CounterPlatform};
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
@@ -148,17 +148,23 @@ fn main() -> ! {
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
-    let stack = stack();
-    let counter = avr_demo::cyclecount::CycleCounter::start(&dp.TC1);
+    let stack = unsafe { krabi_caliper::avr::atmega2560_stack() };
+    let counter = krabi_caliper::avr::Atmega2560Timer1Counter::start(&dp.TC1);
     let mut platform = CounterPlatform::new(counter);
     let mut reporter = UfmtReporter::new(serial);
     let result = Benchmark::<3>::new("picojson-stream-parser")
         .warmups(1)
         .fields(&[Field::token("target", "atmega2560")])
-        .run_with_stack(&mut platform, &mut reporter, &stack, stack_config(), || {
-            let mut scratch = [0u8; 16];
-            parse_json(JSON_DATA, &mut scratch).is_ok()
-        })
+        .run_with_stack(
+            &mut platform,
+            &mut reporter,
+            &stack,
+            StackConfig::new(64).sentinel(0xce),
+            || {
+                let mut scratch = [0u8; 16];
+                parse_json(JSON_DATA, &mut scratch).is_ok()
+            },
+        )
         .unwrap();
     Benchmark::<3>::new("picojson-stream-parser")
         .fields(&[Field::token("target", "atmega2560")])

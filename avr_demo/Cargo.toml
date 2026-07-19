@@ -11,7 +11,7 @@ autobenches = false
 
 [dependencies]
 avr-device = { version = "0.7", features = ["atmega2560", "rt"] }
-krabi-caliper = { version = "0.1.0", features = ["stack", "avr", "ufmt"] }
+krabi-caliper = { version = "0.1.0", features = ["stack", "avr-atmega2560", "ufmt"] }
 picojson = { path = "../picojson", default-features = false}
 ufmt = { version = "0.2", optional = true }
 serde = { version = "1", default-features = false, features = ["derive"] }

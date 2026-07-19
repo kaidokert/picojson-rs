@@ -1,8 +1,7 @@
 #![no_std]
 #![feature(abi_avr_interrupt)]
 
-pub mod cyclecount;
-pub mod stack_measurement;
+krabi_caliper::atmega2560_timer1_overflow_handler!();
 
 // Panic handler - registered automatically when crate is imported
 #[inline(never)]
