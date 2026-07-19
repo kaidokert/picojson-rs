@@ -3,24 +3,13 @@
 #![no_main]
 
 use avr_demo as _;
+use krabi_caliper::Benchmark;
 use krabi_caliper::report::{Field, UfmtReporter};
 use krabi_caliper::stack::StackConfig;
-use krabi_caliper::{Benchmark, CounterPlatform};
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]
 use picojson::ArrayBitStack;
-
-// Conditional import of uwriteln! - stub out if ufmt feature is not enabled
-#[cfg(feature = "ufmt")]
-use ufmt::uwriteln;
-
-#[cfg(not(feature = "ufmt"))]
-macro_rules! uwriteln {
-    ($($args:tt)*) => {
-        Ok::<(), core::convert::Infallible>(())
-    };
-}
 
 // Conditionally define the configuration based on features.
 #[cfg(feature = "pico-tiny")]
@@ -148,26 +137,26 @@ fn main() -> ! {
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
-    let stack = unsafe { krabi_caliper::avr::atmega2560_stack() };
-    let counter = krabi_caliper::avr::Atmega2560Timer1Counter::start(&dp.TC1);
-    let mut platform = CounterPlatform::new(counter);
     let mut reporter = UfmtReporter::new(serial);
-    let result = Benchmark::<3>::new("picojson-stream-parser")
+    let fields = [Field::token("target", "atmega2560")];
+    let benchmark = Benchmark::<3>::new("picojson-stream-parser")
         .warmups(1)
-        .fields(&[Field::token("target", "atmega2560")])
-        .run_with_stack(
-            &mut platform,
+        .fields(&fields);
+    // SAFETY: ATmega2560 SRAM above `_end` is reserved for this single stack.
+    unsafe {
+        krabi_caliper::avr::run_atmega2560_benchmark(
+            &dp.TC1,
             &mut reporter,
-            &stack,
+            &benchmark,
             StackConfig::new(64).sentinel(0xce),
             || {
                 let mut scratch = [0u8; 16];
                 parse_json(JSON_DATA, &mut scratch).is_ok()
             },
         )
-        .unwrap();
-    Benchmark::<3>::new("picojson-stream-parser")
-        .fields(&[Field::token("target", "atmega2560")])
+    }
+    .unwrap();
+    benchmark
         .report_metric(
             &mut reporter,
             "input-bytes",
@@ -175,20 +164,5 @@ fn main() -> ! {
             Some("bytes"),
         )
         .unwrap();
-
-    let mut serial = reporter.into_inner();
-    let stack = result.stack.unwrap();
-    uwriteln!(&mut serial, "JSON parsing passed: {}", result.passed).ok();
-    uwriteln!(
-        &mut serial,
-        "Max stack usage: {} bytes",
-        stack.high_water_bytes
-    )
-    .ok();
-    uwriteln!(&mut serial, "=== TEST COMPLETE ===").ok();
-
-    avr_device::interrupt::disable();
-    loop {
-        unsafe { core::arch::asm!("sleep") }
-    }
+    krabi_caliper::avr::park_simavr()
 }
