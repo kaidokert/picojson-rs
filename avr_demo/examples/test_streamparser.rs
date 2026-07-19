@@ -4,8 +4,8 @@
 
 use avr_demo as _;
 use avr_demo::stack_measurement::*;
-use embedded_measure::report::{Field, UfmtReporter};
-use embedded_measure::{Benchmark, CounterPlatform};
+use krabi_caliper::report::{Field, UfmtReporter};
+use krabi_caliper::{Benchmark, CounterPlatform};
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]

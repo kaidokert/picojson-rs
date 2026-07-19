@@ -3,7 +3,7 @@
 use arduino_hal::pac::TC1;
 use avr_device::interrupt::Mutex;
 use core::cell::Cell;
-use embedded_measure::{Counter, Measurement, Unit};
+use krabi_caliper::{Counter, Measurement, Unit};
 
 static TIMER1_WRAPS: Mutex<Cell<u32>> = Mutex::new(Cell::new(0));
 
@@ -17,7 +17,7 @@ fn TIMER1_OVF() {
 
 fn read_total(tc1: &TC1) -> u64 {
     avr_device::interrupt::free(|cs| {
-        embedded_measure::avr::extend_timer16(
+        krabi_caliper::avr::extend_timer16(
             TIMER1_WRAPS.borrow(cs).get(),
             tc1.tcnt1.read().bits(),
             tc1.tifr1.read().tov1().bit_is_set(),

@@ -269,7 +269,7 @@ def main():
         nargs='?',
         default="bloat",
         choices=["bloat", "panic"],
-        help="Run the remaining binary-size or panic-reference analysis. Stack campaigns use cargo embedded-measure."
+        help="Run the remaining binary-size or panic-reference analysis. Stack campaigns use cargo krabi-caliper."
     )
     parser.add_argument(
         "--example",

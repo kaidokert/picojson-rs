@@ -1,4 +1,4 @@
-use embedded_measure::stack::{Avr, LinkerStack, StackConfig};
+use krabi_caliper::stack::{Avr, LinkerStack, StackConfig};
 
 // This harness is built and simulated for ATmega2560 by .cargo/config.toml.
 const RAMEND_EXCLUSIVE: usize = 0x2200;
