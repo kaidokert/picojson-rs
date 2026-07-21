@@ -5,7 +5,7 @@
 use avr_demo as _;
 use krabi_caliper::Benchmark;
 use krabi_caliper::report::{Field, UfmtReporter};
-use krabi_caliper::stack::StackConfig;
+use krabi_caliper::stack::{Avr, LinkerStack, StackConfig};
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]
@@ -130,7 +130,7 @@ fn parse_json<'b>(json_data: &[u8], scratch: &'b mut [u8]) -> Result<Doc<'b>, Pa
 
 #[arduino_hal::entry]
 fn main() -> ! {
-    let dp = arduino_hal::Peripherals::take().unwrap();
+    let mut dp = arduino_hal::Peripherals::take().unwrap();
     #[cfg(feature = "ufmt")]
     let serial = {
         let pins = arduino_hal::pins!(dp);
@@ -142,12 +142,15 @@ fn main() -> ! {
     let benchmark = Benchmark::<3>::new("picojson-stream-parser")
         .warmups(1)
         .fields(&fields);
+    let stack = unsafe { LinkerStack::<Avr>::avr_runtime(0x2200) };
     // SAFETY: ATmega2560 SRAM above `_end` is reserved for this single stack.
     unsafe {
         krabi_caliper::avr::run_atmega2560_benchmark(
-            &dp.TC1,
+            &mut dp.TC1,
+            Some(15_625),
             &mut reporter,
             &benchmark,
+            &stack,
             StackConfig::new(64).sentinel(0xce),
             || {
                 let mut scratch = [0u8; 16];
@@ -164,5 +167,5 @@ fn main() -> ! {
             Some("bytes"),
         )
         .unwrap();
-    krabi_caliper::avr::park_simavr()
+    krabi_caliper::avr::park_simavr(&dp.CPU)
 }

@@ -43,7 +43,7 @@ lto = true
 opt-level = "s"
 
 [patch.crates-io]
-krabi-caliper = { path = "../../krabi-caliper" }
+krabi-caliper = { git = "https://github.com/kaidokert/krabi-caliper-rs", tag = "v0.1.0-alpha.2" }
 
 [features]
 default = ["depth-7", "pico-tiny", "ufmt", "int8"]
