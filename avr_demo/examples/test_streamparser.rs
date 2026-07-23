@@ -3,7 +3,9 @@
 #![no_main]
 
 use avr_demo as _;
-use krabi_caliper::report::{Field, UfmtReporter};
+use krabi_caliper::report::Field;
+#[cfg(feature = "ufmt")]
+use krabi_caliper::report::UfmtReporter;
 use krabi_caliper::stack::{Avr, LinkerStack, StackConfig};
 use krabi_caliper::Benchmark;
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
@@ -137,7 +139,10 @@ fn main() -> ! {
         arduino_hal::default_serial!(dp, pins, 57600)
     };
 
+    #[cfg(feature = "ufmt")]
     let mut reporter = UfmtReporter::new(serial);
+    #[cfg(not(feature = "ufmt"))]
+    let mut reporter = avr_demo::NullReporter;
     let fields = [Field::token("architecture", "atmega2560")];
     let benchmark = Benchmark::<3>::new("picojson-stream-parser")
         .warmups(1)
