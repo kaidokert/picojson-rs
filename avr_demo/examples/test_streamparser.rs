@@ -3,9 +3,9 @@
 #![no_main]
 
 use avr_demo as _;
-use krabi_caliper::Benchmark;
 use krabi_caliper::report::{Field, UfmtReporter};
 use krabi_caliper::stack::{Avr, LinkerStack, StackConfig};
+use krabi_caliper::Benchmark;
 use picojson::{self, ChunkReader, Event, ParseError, PullParser, StreamParser};
 
 #[allow(unused_imports)]
@@ -18,7 +18,7 @@ type PicoConfig = picojson::DefaultConfig; // 32 levels
 type PicoConfig = ArrayBitStack<64, u8, u16>; // 512 levels
 #[cfg(feature = "pico-huge")]
 type PicoConfig = ArrayBitStack<256, u8, u16>; // 2048 levels
-// Default config for builds without a feature.
+                                               // Default config for builds without a feature.
 #[cfg(not(any(feature = "pico-small", feature = "pico-huge", feature = "pico-tiny")))]
 type PicoConfig = picojson::DefaultConfig;
 
@@ -138,7 +138,7 @@ fn main() -> ! {
     };
 
     let mut reporter = UfmtReporter::new(serial);
-    let fields = [Field::token("target", "atmega2560")];
+    let fields = [Field::token("architecture", "atmega2560")];
     let benchmark = Benchmark::<3>::new("picojson-stream-parser")
         .warmups(1)
         .fields(&fields);

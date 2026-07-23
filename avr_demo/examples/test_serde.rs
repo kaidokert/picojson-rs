@@ -3,9 +3,9 @@
 #![no_main]
 
 use avr_demo as _;
-use krabi_caliper::Benchmark;
 use krabi_caliper::report::{Field, UfmtReporter};
 use krabi_caliper::stack::{Avr, LinkerStack, StackConfig};
+use krabi_caliper::Benchmark;
 use serde::Deserialize;
 
 #[allow(dead_code)]
@@ -29,7 +29,7 @@ fn main() -> ! {
     };
 
     let mut reporter = UfmtReporter::new(serial);
-    let fields = [Field::token("target", "atmega2560")];
+    let fields = [Field::token("architecture", "atmega2560")];
     let benchmark = Benchmark::<3>::new("serde-json-core")
         .warmups(1)
         .fields(&fields);
