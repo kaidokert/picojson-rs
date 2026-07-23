@@ -60,7 +60,7 @@ jobs:
           fi
 
       - name: Install krabi-caliper host tooling
-        run: cargo install krabi-caliper --git https://github.com/kaidokert/krabi-caliper-rs --tag v0.1.0-alpha.3 --features cli,campaign
+        run: cargo install krabi-caliper --git https://github.com/kaidokert/krabi-caliper-rs --tag v0.1.0-alpha.4 --features cli,campaign
 
       - name: Run Stack Analysis Smoke Gate
         working-directory: avr_demo
@@ -110,7 +110,7 @@ jobs:
           version: 1.0
 
       - name: Install krabi-caliper
-        run: cargo install krabi-caliper --git https://github.com/kaidokert/krabi-caliper-rs --tag v0.1.0-alpha.3 --features cli,campaign
+        run: cargo install krabi-caliper --git https://github.com/kaidokert/krabi-caliper-rs --tag v0.1.0-alpha.4 --features cli,campaign
 
       - name: Compose feature set
         id: feature_set
