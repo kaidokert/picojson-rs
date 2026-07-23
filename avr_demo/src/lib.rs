@@ -88,35 +88,26 @@ impl krabi_caliper::report::StackReporter for NullReporter {
 #[cfg(feature = "neg-controls")]
 #[inline(never)]
 #[unsafe(no_mangle)]
-///
-/// # Safety
-/// `out` must be valid and aligned for one writable `u8`.
-pub unsafe extern "C" fn panic_audit__neg__bounds_check(index: usize, out: *mut u8) {
+pub extern "C" fn panic_audit__neg__bounds_check(index: usize, out: &mut u8) {
     let values = core::hint::black_box([0u8; 4]);
     let value = values[core::hint::black_box(index)];
-    unsafe { *out = core::hint::black_box(value) };
+    *out = core::hint::black_box(value);
 }
 
 #[cfg(feature = "neg-controls")]
 #[inline(never)]
 #[unsafe(no_mangle)]
-///
-/// # Safety
-/// `out` must be valid and aligned for one writable `u8`.
-pub unsafe extern "C" fn panic_audit__neg__unwrap(out: *mut u8) {
+pub extern "C" fn panic_audit__neg__unwrap(out: &mut u8) {
     let value = core::hint::black_box(None::<u8>).unwrap();
-    unsafe { *out = core::hint::black_box(value) };
+    *out = core::hint::black_box(value);
 }
 
 #[cfg(feature = "neg-controls")]
 #[inline(never)]
 #[unsafe(no_mangle)]
-///
-/// # Safety
-/// `out` must be valid and aligned for one writable `u8`.
-pub unsafe extern "C" fn panic_audit__neg__expect(out: *mut u8) {
+pub extern "C" fn panic_audit__neg__expect(out: &mut u8) {
     let value = core::hint::black_box(None::<u8>).expect("panic audit negative control");
-    unsafe { *out = core::hint::black_box(value) };
+    *out = core::hint::black_box(value);
 }
 
 // Panic handler - registered automatically when crate is imported
