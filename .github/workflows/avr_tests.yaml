@@ -59,9 +59,17 @@ jobs:
             cargo install cargo-binutils --locked
           fi
 
-      - name: Run Stack Analysis
+      - name: Install krabi-caliper host tooling
+        run: cargo install krabi-caliper --version 0.1.0 --features cli,campaign
+
+      - name: Run Stack Analysis Smoke Gate
         working-directory: avr_demo
-        run: python run_suite.py stack
+        run: cargo krabi-caliper run picojson-avr-smoke
+
+      - name: Run Informational Stack Capacity Sweep
+        continue-on-error: true
+        working-directory: avr_demo
+        run: cargo krabi-caliper run picojson-avr-stack
 
       - name: Run Bloat Analysis
         working-directory: avr_demo
@@ -98,44 +106,41 @@ jobs:
       - name: Cache APT packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: simavr gcc-avr avr-libc
+          packages: simavr gcc-avr avr-libc binutils-avr
           version: 1.0
 
-      - name: Cache cargo binaries
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/cargo-nm
-            ~/.cargo/bin/cargo-objcopy
-            ~/.cargo/bin/cargo-objdump
-            ~/.cargo/bin/cargo-size
-            ~/.cargo/bin/cargo-strip
-          key: ${{ runner.os }}-cargo-binutils-v1
-
-      - name: Install cargo-binutils
-        run: |
-          if ! command -v cargo-nm &> /dev/null; then
-            cargo install cargo-binutils --locked
-          fi
+      - name: Install krabi-caliper
+        run: cargo install krabi-caliper --version 0.1.0 --features cli,campaign
 
       - name: Compose feature set
         id: feature_set
         shell: bash
         run: |
-          FEATURES="${{ matrix.int_type }},${{ matrix.pico_size }}"
+          # The measured examples use the UART-backed UfmtReporter as
+          # their transport, so `ufmt` is required even though this
+          # matrix deliberately disables the crate's default features.
+          FEATURES="${{ matrix.int_type }},${{ matrix.pico_size }},ufmt"
           if [ "${{ matrix.defmt }}" = "true" ]; then
             FEATURES="${FEATURES},defmt"
           fi
           echo "features=${FEATURES}" >> "$GITHUB_OUTPUT"
 
-      - name: Build the demos in ${{ matrix.profile }} mode
+      - name: Audit parser panic paths with negative controls
         working-directory: avr_demo
-        run: cargo build --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ steps.feature_set.outputs.features }}"
-
-      - name: Check for panics ( minimal )
-        working-directory: avr_demo
-        run: cargo nm    --example minimal               --profile ${{ matrix.profile }} --no-default-features --features "${{ steps.feature_set.outputs.features }}" | ( ! egrep "panic|unwind" )
-
-      - name: Check for panics
-        working-directory: avr_demo
-        run: cargo nm    --example ${{ matrix.example }} --profile ${{ matrix.profile }} --no-default-features --features "${{ steps.feature_set.outputs.features }}" | ( ! egrep "panic|unwind" )
+        run: |
+          cargo krabi-caliper panic-audit \
+            --package avr_demo \
+            --artifact-kind example \
+            --artifact-name "${{ matrix.example }}" \
+            --negative-artifact-name minimal \
+            --target avr-none \
+            --profile "${{ matrix.profile }}" \
+            --no-default-features \
+            --features "${{ steps.feature_set.outputs.features }}" \
+            --negative-features neg-controls \
+            --owned-symbol '^picojson::' \
+            --owned-symbol '^panic_audit__neg__' \
+            --expect-negative 'panic_audit__neg__bounds' \
+            --expect-negative 'panic_audit__neg__unwrap' \
+            --expect-negative 'panic_audit__neg__expect' \
+            --json "target/panic-audit/${{ matrix.example }}-${{ matrix.int_type }}-${{ matrix.profile }}-${{ matrix.pico_size }}-${{ matrix.defmt }}.json"

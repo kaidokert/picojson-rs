@@ -10,6 +10,8 @@ autotests = false
 autobenches = false
 
 [dependencies]
+avr-device = { version = "0.7", features = ["atmega2560", "rt"] }
+krabi-caliper = { version = "0.1.0", features = ["stack", "avr-atmega2560", "ufmt"] }
 picojson = { path = "../picojson", default-features = false}
 ufmt = { version = "0.2", optional = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
@@ -18,7 +20,7 @@ serde-json-core = { version = "0.6", default-features = false }
 [dependencies.arduino-hal]
 git = "https://github.com/rahix/avr-hal"
 rev = "ravedude-0.2.0"
-features = ["arduino-uno"]
+features = ["arduino-mega2560"]
 
 [profile.dev]
 panic = "abort"
@@ -42,6 +44,7 @@ opt-level = "s"
 
 [features]
 default = ["depth-7", "pico-tiny", "ufmt", "int8"]
+neg-controls = []
 
 int8 = [ "picojson/int8"]
 int32 = [ "picojson/int32"]
