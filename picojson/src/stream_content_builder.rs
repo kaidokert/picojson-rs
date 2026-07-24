@@ -120,27 +120,9 @@ impl<'scratch, R: Reader> StreamContentBuilder<'scratch, R> {
 }
 
 impl<R: Reader> ContentExtractor for StreamContentBuilder<'_, R> {
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        // If buffer is empty, try to fill it first
-        if self.stream_buffer.is_empty() {
-            self.fill_buffer_from_reader()?;
-        }
-
-        // If still empty after fill attempt, we're at EOF
-        if self.stream_buffer.is_empty() {
-            if !self.finished {
-                self.finished = true;
-            }
-            return Ok(None);
-        }
-
-        // Get byte and advance
-        let byte = self.stream_buffer.current_byte()?;
-        self.stream_buffer.advance()?;
-
-        Ok(Some(byte))
+    fn get_next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        DataSource::next_byte(self)
     }
-
     fn parser_state_mut(&mut self) -> &mut State {
         &mut self.parser_state
     }
@@ -310,6 +292,27 @@ impl<R: Reader> StreamContentBuilder<'_, R> {
 /// Note: StreamParser doesn't have a distinct 'input lifetime since it reads from a stream,
 /// so we use the buffer lifetime 'scratch for both borrowed and unescaped content.
 impl<'scratch, R: Reader> DataSource<'scratch, 'scratch> for StreamContentBuilder<'scratch, R> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        // If buffer is empty, try to fill it first
+        if self.stream_buffer.is_empty() {
+            self.fill_buffer_from_reader()?;
+        }
+
+        // If still empty after fill attempt, we're at EOF
+        if self.stream_buffer.is_empty() {
+            if !self.finished {
+                self.finished = true;
+            }
+            return Ok(None);
+        }
+
+        // Get byte and advance
+        let byte = self.stream_buffer.current_byte()?;
+        self.stream_buffer.advance()?;
+
+        Ok(Some(byte))
+    }
+
     fn get_borrowed_slice(
         &'scratch self,
         start: usize,

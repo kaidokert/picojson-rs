@@ -26,6 +26,12 @@ impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for EventCollector {
             Event::Key(k) => format!("Key({})", k.as_ref()),
             Event::String(s) => format!("String({})", s.as_ref()),
             Event::Number(n) => format!("Number({})", n.as_str()),
+            // ContentSpan events should not reach user code - they get converted by PushParser
+            Event::ContentSpan { .. }
+            | Event::PartialContentSpanStart { .. }
+            | Event::PartialContentSpanEnd { .. } => {
+                panic!("Internal ContentSpan events should not reach user handlers")
+            }
         };
         self.events.push(event_desc);
         Ok(())

@@ -101,93 +101,25 @@ impl<'input, 'scratch> PushContentBuilder<'input, 'scratch> {
     }
 
     /// Queue a reset of unescaped content for the next operation
-    fn queue_unescaped_reset(&mut self) {
+    pub fn queue_unescaped_reset(&mut self) {
         self.unescaped_reset_queued = true;
     }
 
-    /// Handle byte accumulation with selective logic based on current state
-    pub fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
-        // Check if we're currently processing any type of escape sequence
-        if self.in_unicode_escape {
-            // During Unicode escape processing, try to feed hex digits directly to the collector
-            if crate::escape_processor::EscapeProcessor::validate_hex_digit(byte).is_ok() {
-                let is_complete = self.unicode_escape_collector.add_hex_digit(byte)?;
-                if is_complete {
-                    // Process the complete escape sequence immediately
-                    let mut utf8_buffer = [0u8; 4];
-                    let (utf8_bytes_opt, _surrogate_state_changed) = self
-                        .unicode_escape_collector
-                        .process_to_utf8(&mut utf8_buffer)?;
+    /// Get the current chunk length
+    pub fn current_chunk_len(&self) -> usize {
+        self.current_chunk.len()
+    }
 
-                    if let Some(utf8_bytes) = utf8_bytes_opt {
-                        // Write the UTF-8 bytes directly to the scratch buffer
-                        for &utf8_byte in utf8_bytes {
-                            self.stream_buffer
-                                .append_unescaped_byte(utf8_byte)
-                                .map_err(ParseError::from)?;
-                        }
-                    }
-                    // Reset collector and exit Unicode escape mode
-                    self.unicode_escape_collector.reset();
-                    self.in_unicode_escape = false;
-                }
-                return Ok(());
-            } else {
-                // Non-hex digit during Unicode escape - this shouldn't happen in valid JSON
-                self.in_unicode_escape = false;
-            }
-        } else if self.in_simple_escape {
-            // This is a Unicode escape - do NOT accumulate the 'u', let the escape processor handle it
-            self.in_simple_escape = false;
-            return Ok(()); // Skip accumulation for 'u' in Unicode escapes
-        }
-
-        // Regular byte accumulation logic for non-hex digits or when not in Unicode escape
-        let should_accumulate = match self.parser_state {
-            State::String(_) | State::Key(_) => {
-                // We're in string/key context - accumulate if using unescaped buffer
-                // BUT: skip accumulation of escape characters when in Unicode escape mode
-                // OR when we encounter a backslash (which will be handled by escape processor)
-                if self.in_unicode_escape || self.in_simple_escape {
-                    // Don't accumulate escape characters - they're handled by escape processors
-                    false
-                } else if byte == b'\\' {
-                    // Don't accumulate backslashes - they trigger escape processing
-                    false
-                } else if byte == b'"' {
-                    // Don't accumulate closing quotes - they mark end of string
-                    false
-                } else {
-                    self.has_unescaped_content()
-                }
-            }
-            State::Number(_) => {
-                // We're in number context - accumulate if using unescaped buffer (for numbers spanning chunks)
-                self.has_unescaped_content()
-            }
-            _ => false, // Not in string/key/number context - don't accumulate
-        };
-
-        if should_accumulate {
-            self.append_unescaped_byte(byte)?;
-        }
-
-        Ok(())
+    /// Get the current position offset
+    pub fn position_offset(&self) -> usize {
+        self.position_offset
     }
 }
 
 impl ContentExtractor for PushContentBuilder<'_, '_> {
-    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        if self.chunk_cursor < self.current_chunk.len() {
-            let byte = self.current_chunk[self.chunk_cursor];
-            self.chunk_cursor += 1;
-            self.current_position = self.position_offset + self.chunk_cursor - 1;
-            Ok(Some(byte))
-        } else {
-            Ok(None)
-        }
+    fn get_next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        DataSource::next_byte(self)
     }
-
     fn parser_state_mut(&mut self) -> &mut State {
         &mut self.parser_state
     }
@@ -210,11 +142,12 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
     }
 
     fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        // Queue reset if using unescaped content (same as the old manual path)
+        // Queue reset if using unescaped content - the scratch buffer now contains complete content
         if self.has_unescaped_content() {
             self.queue_unescaped_reset();
         }
 
+        // Use get_content_piece which will automatically choose scratch buffer or direct slice
         // PushParser: current_position points AT the closing quote, but get_content_piece expects
         // position AFTER the closing quote, so add 1
         let content_piece =
@@ -223,12 +156,12 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
     }
 
     fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
-        // Queue reset if using unescaped content (same as the old manual path)
+        // Queue reset if using unescaped content - the scratch buffer now contains complete content
         if self.has_unescaped_content() {
             self.queue_unescaped_reset();
         }
 
-        // The entire token was contained in the current chunk - use direct extraction
+        // Use get_content_piece which will automatically choose scratch buffer or direct slice
         let content_piece =
             crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
         content_piece.into_string().map(Event::Key)
@@ -240,11 +173,26 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
         _from_container_end: bool,
         _finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
-        // Queue reset if using unescaped content (same as the old manual path)
+        // Check if content spans chunks (has unescaped content means partial content was copied earlier)
         if self.has_unescaped_content() {
+            // For chunk-spanning content, append the remaining content from current chunk
+            // For numbers, content continues to current_position + 1 (no delimiter to exclude)
+            let current_chunk_content_start = 0;
+            let current_chunk_content_end = self.current_position + 1;
+
+            // Only append if there's remaining content in the current chunk
+            if current_chunk_content_end > current_chunk_content_start {
+                // Append the final portion from the current chunk to complete the content
+                self.copy_content_chunk_to_scratch(
+                    current_chunk_content_start,
+                    current_chunk_content_end,
+                )?;
+            }
+
             self.queue_unescaped_reset();
         }
 
+        // Use get_content_piece which will automatically choose scratch buffer or direct slice
         let content_piece =
             crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
         let number_bytes = content_piece.as_bytes();
@@ -332,8 +280,7 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
     }
 
     fn process_unicode_escape_with_collector(&mut self) -> Result<(), ParseError> {
-        // With the selective accumulation approach, Unicode escape processing should have
-        // already happened during byte accumulation via handle_byte_accumulation().
+        // With ContentSpan events, Unicode escape processing is handled by the event processor.
         // This method is called at the end of a Unicode escape sequence by the event processor.
         // If the collector still has incomplete data, it means we're dealing with chunked input
         // where hex digits span chunk boundaries, OR we have a bug where hex digits aren't
@@ -394,6 +341,17 @@ impl PushContentBuilder<'_, '_> {
 }
 
 impl<'input, 'scratch> DataSource<'input, 'scratch> for PushContentBuilder<'input, 'scratch> {
+    fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
+        if self.chunk_cursor < self.current_chunk.len() {
+            let byte = self.current_chunk[self.chunk_cursor];
+            self.chunk_cursor += 1;
+            self.current_position = self.position_offset + self.chunk_cursor - 1;
+            Ok(Some(byte))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn get_borrowed_slice(
         &'input self,
         start: usize,

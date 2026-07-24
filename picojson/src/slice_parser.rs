@@ -150,7 +150,7 @@ impl<'a, 'b, C: BitStackConfig> SliceParser<'a, 'b, C> {
         self.parser_core.next_event_impl(
             &mut self.content_builder,
             EscapeTiming::OnBegin,
-            |_, _| Ok(()),
+            |_, _| Ok(()), // No byte accumulation needed for SliceParser
         )
     }
 }
