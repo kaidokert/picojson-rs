@@ -255,9 +255,23 @@ impl<'a> StreamBuffer<'a> {
         }
     }
 
-    /// Truncate unescaped content by removing the specified number of bytes from the end
-    pub fn truncate_unescaped_by(&mut self, count: usize) {
-        self.unescaped_len = self.unescaped_len.saturating_sub(count);
+    /// Append a run of bytes to the unescaped buffer in one copy.
+    ///
+    /// Equivalent to calling [`Self::append_unescaped_byte`] for each byte,
+    /// but a single bounds check and `copy_from_slice` — the fast path for
+    /// span-based content capture.
+    pub fn append_unescaped_slice(&mut self, bytes: &[u8]) -> Result<(), StreamBufferError> {
+        let end = self
+            .unescaped_len
+            .checked_add(bytes.len())
+            .ok_or(StreamBufferError::BufferFull)?;
+        let dest = self
+            .buffer
+            .get_mut(self.unescaped_len..end)
+            .ok_or(StreamBufferError::BufferFull)?;
+        dest.copy_from_slice(bytes);
+        self.unescaped_len = end;
+        Ok(())
     }
 
     /// Get a string slice from the buffer (zero-copy)
