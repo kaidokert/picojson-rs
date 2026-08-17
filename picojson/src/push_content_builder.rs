@@ -457,10 +457,13 @@ impl ContentExtractor for PushChunkExtractor<'_, '_, '_> {
     }
 }
 
-impl<'i, 's, 'a, 'chunk, 'scratch> DataSource<'i, 's> for PushChunkExtractor<'a, 'chunk, 'scratch>
-where
-    'chunk: 'i,
-{
+// The trait lifetimes are deliberately independent of the struct's: callers
+// (`get_content_piece` via the extract_* methods) borrow the extractor for a
+// short reborrow `'i`, not for the full `'chunk`/`'scratch`. Tying them
+// together would require a `&'chunk`-long borrow of a view that lives shorter
+// than the chunk. The `'chunk: 'i` / `'scratch: 's` relations the method
+// bodies need are implied bounds of the `&'i self` / `&'s self` receivers.
+impl<'i, 's, 'a, 'chunk, 'scratch> DataSource<'i, 's> for PushChunkExtractor<'a, 'chunk, 'scratch> {
     fn get_borrowed_slice(&'i self, start: usize, end: usize) -> Result<&'i [u8], ParseError> {
         // For now, always try to read from current input chunk regardless of escape mode
         // The issue was that process_unicode_escape_sequence calls this directly to get hex digits
