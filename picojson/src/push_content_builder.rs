@@ -20,8 +20,13 @@ pub trait PushParserHandler<'input, 'scratch, E> {
     fn handle_event(&mut self, event: Event<'input, 'scratch>) -> Result<(), E>;
 }
 
-/// Content extractor for PushParser.
-pub struct PushContentBuilder<'input, 'scratch> {
+/// Persistent content-extraction state for PushParser.
+///
+/// Holds everything that must survive across `write()` calls. The input chunk
+/// itself deliberately does *not* live here: it is passed to
+/// [`PushChunkExtractor`] per call, so callers may feed chunks from a reused
+/// buffer (each chunk's borrow ends when `write()` returns).
+pub struct PushContentBuilder<'scratch> {
     /// StreamBuffer for single-buffer input and escape processing
     stream_buffer: StreamBuffer<'scratch>,
     /// Parser state tracking
@@ -38,8 +43,6 @@ pub struct PushContentBuilder<'input, 'scratch> {
     token_start_pos: usize,
     /// Whether we're using the unescaped buffer for current content
     using_unescaped_buffer: bool,
-    /// The current chunk of data being processed
-    current_chunk: &'input [u8],
     /// The cursor for the current chunk
     chunk_cursor: usize,
     /// Whether we're currently collecting Unicode escape hex digits
@@ -48,7 +51,7 @@ pub struct PushContentBuilder<'input, 'scratch> {
     in_simple_escape: bool,
 }
 
-impl<'input, 'scratch> PushContentBuilder<'input, 'scratch> {
+impl<'scratch> PushContentBuilder<'scratch> {
     /// Create a new PushContentBuilder
     pub fn new(buffer: &'scratch mut [u8]) -> Self {
         Self {
@@ -60,23 +63,15 @@ impl<'input, 'scratch> PushContentBuilder<'input, 'scratch> {
             current_position: 0,
             token_start_pos: 0,
             using_unescaped_buffer: false,
-            current_chunk: &[],
             chunk_cursor: 0,
             in_unicode_escape: false,
             in_simple_escape: false,
         }
     }
 
-    /// Set the current chunk of data to be processed
-    pub fn set_chunk(&mut self, chunk: &'input [u8]) {
-        self.current_chunk = chunk;
-        self.chunk_cursor = 0;
-    }
-
-    /// Reset input processing state
-    pub fn reset_input(&mut self) {
-        self.current_chunk = &[];
-        self.chunk_cursor = 0;
+    /// Current parser state (used by `PushParser::finish` after the last chunk).
+    pub(crate) fn parser_state(&self) -> &State {
+        &self.parser_state
     }
 
     /// Update position offset by adding to it
@@ -103,6 +98,12 @@ impl<'input, 'scratch> PushContentBuilder<'input, 'scratch> {
     /// Queue a reset of unescaped content for the next operation
     fn queue_unescaped_reset(&mut self) {
         self.unescaped_reset_queued = true;
+    }
+
+    /// Whether the scratch buffer currently holds (or is designated to hold)
+    /// the content of the token in progress.
+    fn has_unescaped_content(&self) -> bool {
+        self.stream_buffer.has_unescaped_content() || self.using_unescaped_buffer
     }
 
     /// Handle byte accumulation with selective logic based on current state
@@ -176,12 +177,115 @@ impl<'input, 'scratch> PushContentBuilder<'input, 'scratch> {
     }
 }
 
-impl ContentExtractor for PushContentBuilder<'_, '_> {
+/// Per-call extractor for `PushParser::write`.
+///
+/// Pairs the persistent [`PushContentBuilder`] with the chunk passed to the
+/// current `write()` call. Existing so the chunk's lifetime is scoped to the
+/// call rather than to the parser: any partial token is copied into the
+/// scratch buffer before `write()` returns, so nothing borrowed from the
+/// chunk survives this struct.
+pub(crate) struct PushChunkExtractor<'a, 'chunk, 'scratch> {
+    builder: &'a mut PushContentBuilder<'scratch>,
+    chunk: &'chunk [u8],
+}
+
+impl<'a, 'chunk, 'scratch> PushChunkExtractor<'a, 'chunk, 'scratch> {
+    /// Bind `builder` to the chunk being processed by this `write()` call.
+    pub(crate) fn new(builder: &'a mut PushContentBuilder<'scratch>, chunk: &'chunk [u8]) -> Self {
+        builder.chunk_cursor = 0;
+        Self { builder, chunk }
+    }
+
+    /// See [`PushContentBuilder::handle_byte_accumulation`].
+    pub(crate) fn handle_byte_accumulation(&mut self, byte: u8) -> Result<(), ParseError> {
+        self.builder.handle_byte_accumulation(byte)
+    }
+
+    /// See [`PushContentBuilder::apply_unescaped_reset_if_queued`].
+    pub(crate) fn apply_unescaped_reset_if_queued(&mut self) {
+        self.builder.apply_unescaped_reset_if_queued();
+    }
+
+    /// Whether the parser is mid-token, and of which kind: `(in_token, in_number)`.
+    pub(crate) fn token_progress(&self) -> (bool, bool) {
+        let state = &self.builder.parser_state;
+        (
+            matches!(state, State::String(_) | State::Key(_) | State::Number(_)),
+            matches!(state, State::Number(_)),
+        )
+    }
+
+    /// Whether the scratch buffer holds content for the token in progress.
+    pub(crate) fn has_unescaped_content(&self) -> bool {
+        self.builder.has_unescaped_content()
+    }
+
+    /// Whether the scratch buffer is empty right now.
+    pub(crate) fn unescaped_is_empty(&self) -> bool {
+        self.builder
+            .stream_buffer
+            .get_unescaped_slice()
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
+    }
+
+    /// Copy content from current chunk to scratch buffer based on current parser state
+    fn copy_content_chunk_to_scratch(
+        &mut self,
+        content_start: usize,
+        content_end: usize,
+    ) -> Result<(), ParseError> {
+        if content_end > content_start {
+            // Convert absolute positions to relative positions within the current data chunk
+            let slice_start = content_start.saturating_sub(self.builder.position_offset);
+            let slice_end = content_end.saturating_sub(self.builder.position_offset);
+
+            // Explicit bounds checking with error return, similar to get_borrowed_slice
+            if slice_end > self.chunk.len() || slice_start > slice_end {
+                return Err(ParseError::Unexpected(
+                    crate::shared::UnexpectedState::InvalidSliceBounds,
+                ));
+            }
+
+            let partial_slice = &self.chunk[slice_start..slice_end];
+            for &byte in partial_slice {
+                self.builder.stream_buffer.append_unescaped_byte(byte)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Copy partial content from current chunk to scratch buffer when chunk boundary reached
+    pub(crate) fn copy_partial_content_to_scratch(&mut self) -> Result<(), ParseError> {
+        // Determine the start of the current token content based on parser state
+        let content_start = match self.builder.parser_state {
+            State::String(start_pos) | State::Key(start_pos) => {
+                // For strings and keys, content starts after the opening quote
+                start_pos + 1
+            }
+            State::Number(start_pos) => {
+                // For numbers, start_pos points to the character before the first digit
+                // so we need to add 1 to get to the actual number content
+                start_pos + 1
+            }
+            _ => {
+                return Ok(());
+            }
+        };
+
+        // The end is the current position (where we are in the chunk)
+        // Copy the slice of partial content from the current chunk using the common method
+        self.copy_content_chunk_to_scratch(content_start, self.builder.current_position + 1)
+    }
+}
+
+impl ContentExtractor for PushChunkExtractor<'_, '_, '_> {
     fn next_byte(&mut self) -> Result<Option<u8>, ParseError> {
-        if self.chunk_cursor < self.current_chunk.len() {
-            let byte = self.current_chunk[self.chunk_cursor];
-            self.chunk_cursor += 1;
-            self.current_position = self.position_offset + self.chunk_cursor - 1;
+        if self.builder.chunk_cursor < self.chunk.len() {
+            let byte = self.chunk[self.builder.chunk_cursor];
+            self.builder.chunk_cursor += 1;
+            self.builder.current_position =
+                self.builder.position_offset + self.builder.chunk_cursor - 1;
             Ok(Some(byte))
         } else {
             Ok(None)
@@ -189,48 +293,54 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
     }
 
     fn parser_state_mut(&mut self) -> &mut State {
-        &mut self.parser_state
+        &mut self.builder.parser_state
     }
 
     fn parser_state(&self) -> &State {
-        &self.parser_state
+        &self.builder.parser_state
     }
 
     fn unicode_escape_collector_mut(&mut self) -> &mut UnicodeEscapeCollector {
-        &mut self.unicode_escape_collector
+        &mut self.builder.unicode_escape_collector
     }
 
     fn current_position(&self) -> usize {
-        self.current_position
+        self.builder.current_position
     }
 
     fn begin_string_content(&mut self, pos: usize) {
-        self.token_start_pos = pos;
-        self.stream_buffer.clear_unescaped();
+        self.builder.token_start_pos = pos;
+        self.builder.stream_buffer.clear_unescaped();
     }
 
     fn extract_string_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         // Queue reset if using unescaped content (same as the old manual path)
-        if self.has_unescaped_content() {
-            self.queue_unescaped_reset();
+        if self.builder.has_unescaped_content() {
+            self.builder.queue_unescaped_reset();
         }
 
         // PushParser: current_position points AT the closing quote, but get_content_piece expects
         // position AFTER the closing quote, so add 1
-        let content_piece =
-            crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
+        let content_piece = crate::shared::get_content_piece(
+            self,
+            start_pos + 1,
+            self.builder.current_position + 1,
+        )?;
         content_piece.into_string().map(Event::String)
     }
 
     fn extract_key_content(&mut self, start_pos: usize) -> Result<Event<'_, '_>, ParseError> {
         // Queue reset if using unescaped content (same as the old manual path)
-        if self.has_unescaped_content() {
-            self.queue_unescaped_reset();
+        if self.builder.has_unescaped_content() {
+            self.builder.queue_unescaped_reset();
         }
 
         // The entire token was contained in the current chunk - use direct extraction
-        let content_piece =
-            crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
+        let content_piece = crate::shared::get_content_piece(
+            self,
+            start_pos + 1,
+            self.builder.current_position + 1,
+        )?;
         content_piece.into_string().map(Event::Key)
     }
 
@@ -241,12 +351,15 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
         _finished: bool,
     ) -> Result<Event<'_, '_>, ParseError> {
         // Queue reset if using unescaped content (same as the old manual path)
-        if self.has_unescaped_content() {
-            self.queue_unescaped_reset();
+        if self.builder.has_unescaped_content() {
+            self.builder.queue_unescaped_reset();
         }
 
-        let content_piece =
-            crate::shared::get_content_piece(self, start_pos + 1, self.current_position + 1)?;
+        let content_piece = crate::shared::get_content_piece(
+            self,
+            start_pos + 1,
+            self.builder.current_position + 1,
+        )?;
         let number_bytes = content_piece.as_bytes();
         let json_number = JsonNumber::from_slice(number_bytes)?;
         Ok(Event::Number(json_number))
@@ -254,39 +367,39 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
 
     fn begin_escape_sequence(&mut self) -> Result<(), ParseError> {
         // Implement copy-on-escape: copy the clean part before the escape to unescaped buffer
-        if !self.has_unescaped_content() {
-            if let State::String(start_pos) | State::Key(start_pos) = self.parser_state {
+        if !self.builder.has_unescaped_content() {
+            if let State::String(start_pos) | State::Key(start_pos) = self.builder.parser_state {
                 // start_pos points to the opening quote, so content starts at start_pos + 1
                 // Current position is where the escape character (\) is located
                 // We want to copy content up to (but not including) the escape character
                 // Copy the clean part to the unescaped buffer
-                self.copy_content_chunk_to_scratch(start_pos + 1, self.current_position)?;
+                self.copy_content_chunk_to_scratch(start_pos + 1, self.builder.current_position)?;
 
                 // Mark that we're now using the unescaped buffer
-                self.using_unescaped_buffer = true;
+                self.builder.using_unescaped_buffer = true;
             }
         }
 
         // Set a general escape flag to skip the next byte (which will be the escape character)
         // This will be overridden if begin_unicode_escape is called
-        self.in_simple_escape = true;
-        self.in_unicode_escape = false;
+        self.builder.in_simple_escape = true;
+        self.builder.in_unicode_escape = false;
         Ok(())
     }
 
     fn begin_unicode_escape(&mut self) -> Result<(), ParseError> {
         // Start of unicode escape sequence - reset collector for new sequence and enter escape mode
         // Note: we preserve pending high surrogate state for surrogate pair processing
-        self.unicode_escape_collector.reset();
-        self.in_unicode_escape = true;
-        self.in_simple_escape = false; // Override the simple escape flag set by begin_escape_sequence
+        self.builder.unicode_escape_collector.reset();
+        self.builder.in_unicode_escape = true;
+        self.builder.in_simple_escape = false; // Override the simple escape flag set by begin_escape_sequence
 
         // CRITICAL: The tokenizer processes \u and the first hex digit before emitting Begin(UnicodeEscape)
         // Since we no longer accumulate the 'u' character, we only need to handle the first hex digit
         // that was accumulated before this event arrived
-        if self.has_unescaped_content() {
+        if self.builder.has_unescaped_content() {
             // Get current buffer content and check if it ends with a hex digit (the first one)
-            if let Ok(current_content) = self.stream_buffer.get_unescaped_slice() {
+            if let Ok(current_content) = self.builder.stream_buffer.get_unescaped_slice() {
                 if !current_content.is_empty() {
                     let hex_pos = current_content.len() - 1;
 
@@ -298,10 +411,11 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
                         let first_hex_digit = current_content[hex_pos];
 
                         // Remove the last hex digit by truncating the buffer
-                        self.stream_buffer.truncate_unescaped_by(1);
+                        self.builder.stream_buffer.truncate_unescaped_by(1);
 
                         // Now feed the first hex digit to the Unicode collector
                         let is_complete = self
+                            .builder
                             .unicode_escape_collector
                             .add_hex_digit(first_hex_digit)?;
                         if is_complete {
@@ -317,10 +431,11 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
 
     fn handle_simple_escape_char(&mut self, escape_char: u8) -> Result<(), ParseError> {
         // Now we know this is definitely a simple escape, not Unicode
-        self.in_simple_escape = false; // Reset flag since we're processing it now
+        self.builder.in_simple_escape = false; // Reset flag since we're processing it now
 
-        if self.has_unescaped_content() {
-            self.stream_buffer
+        if self.builder.has_unescaped_content() {
+            self.builder
+                .stream_buffer
                 .append_unescaped_byte(escape_char)
                 .map_err(ParseError::from)
         } else {
@@ -342,89 +457,38 @@ impl ContentExtractor for PushContentBuilder<'_, '_> {
     }
 }
 
-impl PushContentBuilder<'_, '_> {
-    /// Copy content from current chunk to scratch buffer based on current parser state
-    fn copy_content_chunk_to_scratch(
-        &mut self,
-        content_start: usize,
-        content_end: usize,
-    ) -> Result<(), ParseError> {
-        if content_end > content_start {
-            // Convert absolute positions to relative positions within the current data chunk
-            let slice_start = content_start.saturating_sub(self.position_offset);
-            let slice_end = content_end.saturating_sub(self.position_offset);
-
-            // Explicit bounds checking with error return, similar to get_borrowed_slice
-            if slice_end > self.current_chunk.len() || slice_start > slice_end {
-                return Err(ParseError::Unexpected(
-                    crate::shared::UnexpectedState::InvalidSliceBounds,
-                ));
-            }
-
-            let partial_slice = &self.current_chunk[slice_start..slice_end];
-            for &byte in partial_slice {
-                self.stream_buffer.append_unescaped_byte(byte)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Copy partial content from current chunk to scratch buffer when chunk boundary reached
-    pub fn copy_partial_content_to_scratch(&mut self) -> Result<(), ParseError> {
-        // Determine the start of the current token content based on parser state
-        let content_start = match self.parser_state {
-            State::String(start_pos) | State::Key(start_pos) => {
-                // For strings and keys, content starts after the opening quote
-                start_pos + 1
-            }
-            State::Number(start_pos) => {
-                // For numbers, start_pos points to the character before the first digit
-                // so we need to add 1 to get to the actual number content
-                start_pos + 1
-            }
-            _ => {
-                return Ok(());
-            }
-        };
-
-        // The end is the current position (where we are in the chunk)
-        // Copy the slice of partial content from the current chunk using the common method
-        self.copy_content_chunk_to_scratch(content_start, self.current_position + 1)
-    }
-}
-
-impl<'input, 'scratch> DataSource<'input, 'scratch> for PushContentBuilder<'input, 'scratch> {
-    fn get_borrowed_slice(
-        &'input self,
-        start: usize,
-        end: usize,
-    ) -> Result<&'input [u8], ParseError> {
+impl<'i, 's, 'a, 'chunk, 'scratch> DataSource<'i, 's> for PushChunkExtractor<'a, 'chunk, 'scratch>
+where
+    'chunk: 'i,
+{
+    fn get_borrowed_slice(&'i self, start: usize, end: usize) -> Result<&'i [u8], ParseError> {
         // For now, always try to read from current input chunk regardless of escape mode
         // The issue was that process_unicode_escape_sequence calls this directly to get hex digits
         // But for PushParser, hex digits might not be in the current chunk due to chunked processing
 
         // Convert absolute positions to relative positions within the current data chunk
-        let slice_start = start.saturating_sub(self.position_offset);
-        let slice_end = end.saturating_sub(self.position_offset);
+        let slice_start = start.saturating_sub(self.builder.position_offset);
+        let slice_end = end.saturating_sub(self.builder.position_offset);
 
         // Check if the requested range is within the current chunk
-        if slice_end > self.current_chunk.len() || slice_start > slice_end {
+        if slice_end > self.chunk.len() || slice_start > slice_end {
             return Err(ParseError::Unexpected(
                 crate::shared::UnexpectedState::InvalidSliceBounds,
             ));
         }
 
-        let result = &self.current_chunk[slice_start..slice_end];
+        let result = &self.chunk[slice_start..slice_end];
         Ok(result)
     }
 
-    fn get_unescaped_slice(&'scratch self) -> Result<&'scratch [u8], ParseError> {
-        self.stream_buffer
+    fn get_unescaped_slice(&'s self) -> Result<&'s [u8], ParseError> {
+        self.builder
+            .stream_buffer
             .get_unescaped_slice()
             .map_err(ParseError::from)
     }
 
     fn has_unescaped_content(&self) -> bool {
-        self.stream_buffer.has_unescaped_content() || self.using_unescaped_buffer
+        self.builder.has_unescaped_content()
     }
 }
