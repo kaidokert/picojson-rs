@@ -4,9 +4,9 @@
 //!
 //! Clean implementation based on handler_design pattern with proper HRTB lifetime management.
 
-use crate::event_processor::{ContentExtractor, EscapeTiming, ParserCore};
-use crate::push_content_builder::{PushContentBuilder, PushParserHandler};
-use crate::shared::{DataSource, State};
+use crate::event_processor::{EscapeTiming, ParserCore};
+use crate::push_content_builder::{PushChunkExtractor, PushContentBuilder, PushParserHandler};
+use crate::shared::State;
 use crate::stream_buffer::StreamBufferError;
 use crate::{ujson, BitStackConfig, Event, ParseError};
 
@@ -15,24 +15,30 @@ use crate::{ujson, BitStackConfig, Event, ParseError};
 /// Generic over BitStack storage type for configurable nesting depth. Parsing
 /// events are returned to the handler.
 ///
+/// Input chunks are borrowed only for the duration of each [`write`] call —
+/// any partial token is copied into the scratch buffer before `write`
+/// returns — so chunks may be fed from a reused receive buffer.
+///
+/// [`write`]: PushParser::write
+///
 /// # Generic Parameters
 ///
 /// * `'scratch` - Lifetime for the scratch buffer used for temporary storage
 /// * `H` - The event handler type that implements [`PushParserHandler`]
 /// * `C` - BitStack configuration type that implements [`BitStackConfig`]
-pub struct PushParser<'input, 'scratch, H, C>
+pub struct PushParser<'scratch, H, C>
 where
     C: BitStackConfig,
 {
     /// Content extractor that handles content extraction and event emission
-    extractor: PushContentBuilder<'input, 'scratch>,
+    extractor: PushContentBuilder<'scratch>,
     /// The handler that receives events
     handler: H,
     /// Core parser logic shared with other parsers
     core: ParserCore<C::Bucket, C::Counter>,
 }
 
-impl<'input, 'scratch, H, C> PushParser<'input, 'scratch, H, C>
+impl<'scratch, H, C> PushParser<'scratch, H, C>
 where
     C: BitStackConfig,
 {
@@ -46,7 +52,11 @@ where
     }
 
     /// Processes a chunk of input data.
-    pub fn write<E>(&mut self, data: &'input [u8]) -> Result<(), PushParseError<E>>
+    ///
+    /// `data` is only borrowed for the duration of the call: any token still
+    /// in progress when the chunk ends is copied into the scratch buffer, so
+    /// the caller is free to overwrite the chunk's storage afterwards.
+    pub fn write<E>(&mut self, data: &[u8]) -> Result<(), PushParseError<E>>
     where
         H: for<'a, 'b> PushParserHandler<'a, 'b, E>,
         E: From<ParseError>,
@@ -54,13 +64,13 @@ where
         // Apply any queued buffer resets
         self.extractor.apply_unescaped_reset_if_queued();
 
-        // Set the input slice for the extractor to iterate over
-        self.extractor.set_chunk(data);
+        // Pair the persistent state with this call's chunk
+        let mut extractor = PushChunkExtractor::new(&mut self.extractor, data);
 
         // Use ParserCore to process all bytes in the chunk
         loop {
             match self.core.next_event_impl_with_flags(
-                &mut self.extractor,
+                &mut extractor,
                 EscapeTiming::OnEnd, // PushParser uses OnEnd timing like StreamParser
                 |extractor, byte| {
                     // Selective accumulation: let PushContentBuilder decide based on its state
@@ -81,7 +91,7 @@ where
 
                     // Apply any queued buffer resets after the event has been processed
                     // This ensures that buffer content from previous tokens doesn't leak into subsequent ones
-                    self.extractor.apply_unescaped_reset_if_queued();
+                    extractor.apply_unescaped_reset_if_queued();
                 }
                 Err(ParseError::EndOfData) => {
                     // No more events available from current chunk
@@ -94,33 +104,21 @@ where
         }
 
         // Check for chunk boundary condition - if still processing a token when chunk ends
-        let extractor_state = self.extractor.parser_state();
+        let (in_token, in_number) = extractor.token_progress();
 
-        if matches!(
-            extractor_state,
-            State::String(_) | State::Key(_) | State::Number(_)
-        ) {
+        if in_token {
             // If we haven't already started using the scratch buffer (e.g., due to escapes)
-            if !self.extractor.has_unescaped_content() {
+            if !extractor.has_unescaped_content() {
                 // Copy the partial content from this chunk to scratch buffer before it's lost
-                self.extractor.copy_partial_content_to_scratch()?;
-            } else {
+                extractor.copy_partial_content_to_scratch()?;
+            } else if in_number && extractor.unescaped_is_empty() {
                 // Special case: For Numbers, check if the scratch buffer is actually empty
                 // This handles the byte-by-byte case where the flag is stale from previous Key processing
-                if matches!(extractor_state, State::Number(_)) {
-                    let buffer_slice = self.extractor.get_unescaped_slice().unwrap_or(&[]);
-                    let buffer_empty = buffer_slice.is_empty();
-
-                    if buffer_empty {
-                        self.extractor.copy_partial_content_to_scratch()?;
-                    }
-                }
+                extractor.copy_partial_content_to_scratch()?;
             }
         }
 
-        // Reset input slice
-        self.extractor.reset_input();
-
+        // The chunk's borrow ends with `extractor`; nothing extracted from it survives.
         // Update position offset for next call
         self.extractor.add_position_offset(data.len());
 

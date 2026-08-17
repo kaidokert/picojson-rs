@@ -129,14 +129,13 @@ impl<'a> ChunkedWriter<'a> {
         }
     }
 
-    pub fn run<'input, H, E>(
+    pub fn run<H, E>(
         &mut self,
-        mut parser: PushParser<'input, '_, H, DefaultConfig>,
+        mut parser: PushParser<'_, H, DefaultConfig>,
     ) -> Result<H, PushParseError<E>>
     where
         H: for<'i, 's> PushParserHandler<'i, 's, E>,
         E: From<ParseError>,
-        'a: 'input,
     {
         while self.pos < self.data.len() {
             let chunk_size = if self.chunk_pattern.is_empty() {
@@ -148,7 +147,7 @@ impl<'a> ChunkedWriter<'a> {
             };
 
             let end_pos = (self.pos + chunk_size).min(self.data.len());
-            let chunk: &'input [u8] = &self.data[self.pos..end_pos];
+            let chunk: &[u8] = &self.data[self.pos..end_pos];
 
             parser.write(chunk)?;
             self.pos = end_pos;
