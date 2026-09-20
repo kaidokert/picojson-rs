@@ -9,12 +9,12 @@
 //! boundaries — see `push_content_builder.rs` — so clean content bytes are
 //! never visited individually by parser code.
 
-use crate::event_processor::{ContentExtractor, EventResult, ParserCore, process_simple_events};
+use crate::event_processor::{process_simple_events, ContentExtractor, EventResult, ParserCore};
 use crate::push_content_builder::{PushChunkExtractor, PushContentBuilder, PushParserHandler};
-use crate::shared::{ContentRange, State};
+use crate::shared::State;
 use crate::stream_buffer::StreamBufferError;
 use crate::ujson::EventToken;
-use crate::{BitStackConfig, Event, ParseError, ujson};
+use crate::{ujson, BitStackConfig, Event, ParseError};
 
 /// A SAX-style JSON push parser.
 ///
@@ -202,10 +202,11 @@ where
         ujson::Event::Begin(
             EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject,
         ) => {
-            // The event position is the number's first byte; State stores
-            // one before it (ContentRange convention shared by all parsers).
+            // The event position is the number's first byte. Store it as is:
+            // ContentRange::number_start_from_current assumes a position one
+            // past the byte and would clamp at document position 0.
             let pos = view.current_position();
-            *view.parser_state_mut() = State::Number(ContentRange::number_start_from_current(pos));
+            *view.parser_state_mut() = State::Number(pos);
             view.begin_number_span(pos);
         }
         ujson::Event::Begin(EventToken::True | EventToken::False | EventToken::Null) => {}

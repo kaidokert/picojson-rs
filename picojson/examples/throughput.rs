@@ -29,9 +29,14 @@ impl<'a, 'b> PushParserHandler<'a, 'b, ParseError> for Nop {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let path = args.next().expect("usage: throughput <file.json> [iters] [chunk]");
+    let path = args
+        .next()
+        .expect("usage: throughput <file.json> [iters] [chunk]");
     let iters: u32 = args.next().and_then(|s| s.parse().ok()).unwrap_or(10);
-    let chunk: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(usize::MAX);
+    let chunk: usize = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(usize::MAX);
 
     let data = std::fs::read(&path).expect("read input file");
     let mut scratch = vec![0u8; 64 * 1024];
@@ -54,7 +59,11 @@ fn main() {
         "{} bytes x {} iters ({} chunks): {:.3}s -> {:.1} MB/s ({} events)",
         data.len(),
         iters,
-        if chunk == usize::MAX { "whole".to_string() } else { chunk.to_string() },
+        if chunk == usize::MAX {
+            "whole".to_string()
+        } else {
+            chunk.to_string()
+        },
         elapsed.as_secs_f64(),
         mb / elapsed.as_secs_f64(),
         total_events

@@ -713,14 +713,17 @@ impl<T: BitBucket, D: DepthCounter> Tokenizer<T, D> {
                             callback(Event::End(EventToken::Number), pos);
                             self.maybe_exit_level()
                         } else if ch == b']' {
+                            // A top-level number can be followed by a stray close;
+                            // reject it before emitting so a callback that dispatches
+                            // immediately never sees an unbalanced container end.
+                            self.context.exit_array(current_position)?;
                             callback(Event::End(EventToken::NumberAndArray), pos);
                             callback(Event::ArrayEnd, pos);
-                            self.context.exit_array(current_position)?;
                             self.maybe_exit_level()
                         } else if ch == b'}' {
+                            self.context.exit_object(current_position)?;
                             callback(Event::End(EventToken::NumberAndObject), pos);
                             callback(Event::ObjectEnd, pos);
-                            self.context.exit_object(current_position)?;
                             self.maybe_exit_level()
                         } else {
                             return Error::new(ErrKind::InvalidNumber, ch, current_position);
@@ -2093,11 +2096,16 @@ mod conformance {
         check!(
             b"1]",
             Error::new(ErrKind::UnopenedArray, b']', Position::new(1, 1, 2)),
-            &[
-                (Event::Begin(EventToken::Number), 0),
-                (Event::End(EventToken::NumberAndArray), 1),
-                (Event::ArrayEnd, 1)
-            ]
+            &[(Event::Begin(EventToken::Number), 0)]
+        );
+    }
+
+    #[test]
+    fn test_conformance_unopened_object() {
+        check!(
+            b"1}",
+            Error::new(ErrKind::UnopenedObject, b'}', Position::new(1, 1, 2)),
+            &[(Event::Begin(EventToken::Number), 0)]
         );
     }
 

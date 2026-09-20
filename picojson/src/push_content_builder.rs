@@ -319,11 +319,9 @@ impl ContentExtractor for PushChunkExtractor<'_, '_, '_> {
             self.builder.queue_unescaped_reset();
         }
 
-        let content_piece = crate::shared::get_content_piece(
-            self,
-            start_pos + 1,
-            self.builder.current_position + 1,
-        )?;
+        // `start_pos` is the number's first byte (see `drive_event`).
+        let content_piece =
+            crate::shared::get_content_piece(self, start_pos, self.builder.current_position + 1)?;
         let number_bytes = content_piece.as_bytes();
         let json_number = JsonNumber::from_slice(number_bytes)?;
         Ok(Event::Number(json_number))
