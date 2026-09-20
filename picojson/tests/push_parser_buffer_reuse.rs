@@ -5,9 +5,7 @@
 //! call may only borrow the chunk for the duration of the call: any partial
 //! token is copied to scratch before it returns.
 
-use picojson::{
-    DefaultConfig, Event, ParseError, PushParseError, PushParser, PushParserHandler,
-};
+use picojson::{DefaultConfig, Event, ParseError, PushParseError, PushParser, PushParserHandler};
 
 #[derive(Debug, PartialEq)]
 enum OwnedEvent {
@@ -52,10 +50,8 @@ fn parse_via_reused_buffer(
     chunk_size: usize,
 ) -> Result<Vec<OwnedEvent>, PushParseError<ParseError>> {
     let mut scratch = [0u8; 256];
-    let mut parser = PushParser::<Collector, DefaultConfig>::new(
-        Collector { events: Vec::new() },
-        &mut scratch,
-    );
+    let mut parser =
+        PushParser::<Collector, DefaultConfig>::new(Collector { events: Vec::new() }, &mut scratch);
 
     // The receive buffer: written over on every iteration, like a socket read.
     let mut recv = [0u8; 32];
@@ -74,8 +70,17 @@ fn parse_via_reused_buffer(
 /// Tokens deliberately straddle reuse boundaries: strings, `\u` escapes
 /// (including a surrogate pair), multi-byte UTF-8, and numbers all get split
 /// when fed in small chunks.
-const JSON: &str =
-    r#"{"name": "café 😀", "temp": -12.5e2, "list": [1, true, null], "end": "ok"}"#;
+#[cfg(feature = "float")]
+const JSON: &str = r#"{"name": "café 😀", "temp": -12.5e2, "list": [1, true, null], "end": "ok"}"#;
+#[cfg(feature = "float")]
+const TEMP: &str = "-12.5e2";
+
+// Without `float`, -12.5e2 is an error under float-error and float-truncate,
+// so use a multi-digit integer that fits every int width.
+#[cfg(not(feature = "float"))]
+const JSON: &str = r#"{"name": "café 😀", "temp": -125, "list": [1, true, null], "end": "ok"}"#;
+#[cfg(not(feature = "float"))]
+const TEMP: &str = "-125";
 
 fn expected() -> Vec<OwnedEvent> {
     vec![
@@ -83,7 +88,7 @@ fn expected() -> Vec<OwnedEvent> {
         OwnedEvent::Key("name".into()),
         OwnedEvent::String("caf\u{e9} \u{1F600}".into()),
         OwnedEvent::Key("temp".into()),
-        OwnedEvent::Number("-12.5e2".into()),
+        OwnedEvent::Number(TEMP.into()),
         OwnedEvent::Key("list".into()),
         OwnedEvent::StartArray,
         OwnedEvent::Number("1".into()),
