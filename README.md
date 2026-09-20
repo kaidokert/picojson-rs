@@ -99,3 +99,5 @@ For battle-tested code please use [serde-json-core](https://crates.io/crates/ser
 ## License
 
 Apache 2.0; see [`LICENSE`](LICENSE) for details.
+
+<!-- ci probe -->
