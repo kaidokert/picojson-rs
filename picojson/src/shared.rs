@@ -46,12 +46,21 @@ pub enum UnexpectedState {
     InvalidSliceBounds,
 }
 
-/// Internal parser state tracking
+/// Internal parser state tracking.
+///
+/// Positions are in the coordinate system of the parser's content builder:
+/// input offsets for SliceParser and PushParser, buffer offsets for
+/// StreamParser (rebased when the buffer is compacted).
 #[derive(Debug, PartialEq)]
 pub enum State {
     None,
+    /// SliceParser and StreamParser store the first content byte (their
+    /// position is already past the opening quote). PushParser stores the
+    /// opening quote and adds one on extraction.
     Key(usize),
+    /// Same convention as [`State::Key`].
     String(usize),
+    /// The number's first byte (a digit or `-`), in every parser.
     Number(usize),
 }
 
@@ -97,13 +106,12 @@ pub trait PullParser {
 pub(crate) struct ContentRange;
 
 impl ContentRange {
-    /// Calculate number content start from current position
+    /// Position of a number's first byte for [`State::Number`].
     ///
-    /// # Arguments
-    /// * `current_pos` - Current parser position (typically after first digit was processed)
-    ///
-    /// # Returns
-    /// Position that includes the first digit of the number
+    /// Only for parsers whose position is one past the byte that produced
+    /// the number-begin event (SliceParser, StreamParser). PushParser's event
+    /// position is the first byte itself and stores it directly; passing it
+    /// here would back up one byte too far and clamp at document position 0.
     pub fn number_start_from_current(current_pos: usize) -> usize {
         current_pos.saturating_sub(1) // Back up to include first digit
     }
