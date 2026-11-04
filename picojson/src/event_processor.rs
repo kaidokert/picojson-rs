@@ -359,6 +359,7 @@ pub trait ContentExtractor {
             ujson::Event::Begin(
                 EventToken::Number | EventToken::NumberAndArray | EventToken::NumberAndObject,
             ) => {
+                // Byte-wise drives have already advanced past the first byte.
                 let pos = self.current_position();
                 let number_start = ContentRange::number_start_from_current(pos);
                 *self.parser_state_mut() = State::Number(number_start);
